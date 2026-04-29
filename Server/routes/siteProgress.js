@@ -19,7 +19,13 @@ const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 // POST /site-progress  — upload multiple photos + form data
 router.post('/', upload.array('photos', 5), async (req, res) => {
   // photoUrls can come from body or req.files
-  const { projectId, taskId, quantityInstalled, notes, userId, glassCount, shift, workDate } = req.body;
+  const {
+    projectId, taskId, quantityInstalled, notes, userId,
+    glassCount, shift, workDate,
+    // ── AI detection fields (from CV Service) ──────────────
+    ai_detected_count, verified_panel_count,
+    avg_confidence, detection_mode,
+  } = req.body;
   let photoUrls = []; 
 
   try {
@@ -57,10 +63,15 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
     const taskRes = await pool.query('SELECT milestone_id FROM tasks WHERE id = $1', [taskId]);
     const milestoneId = taskRes.rows.length > 0 ? taskRes.rows[0].milestone_id : null;
 
-    // 2. Insert into task_progress_logs
+    // 2. Insert into task_progress_logs (including AI detection fields)
     const result = await pool.query(
-      `INSERT INTO task_progress_logs (task_id, milestone_id, created_by, quantity_accomplished, evidence_image_path, remarks, shift, work_date, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()) RETURNING *`,
+      `INSERT INTO task_progress_logs (
+        task_id, milestone_id, created_by, quantity_accomplished,
+        evidence_image_path, remarks, shift, work_date,
+        ai_detected_count, verified_panel_count, avg_confidence, detection_mode,
+        created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+      RETURNING *`,
       [
         parseInt(taskId),
         milestoneId,
@@ -70,6 +81,10 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
         notes,
         shift || 'Morning',
         workDate || new Date(),
+        ai_detected_count != null ? parseInt(ai_detected_count) : null,
+        verified_panel_count != null ? parseInt(verified_panel_count) : null,
+        avg_confidence != null ? parseFloat(avg_confidence) : null,
+        detection_mode || null,
       ]
     );
     const progress = result.rows[0];
@@ -113,7 +128,11 @@ router.get('/', async (req, res) => {
         tpl.evidence_image_path as photo_url,
         tpl.quantity_accomplished as glass_count,
         tpl.created_at,
-        tpl.shift
+        tpl.shift,
+        tpl.ai_detected_count,
+        tpl.verified_panel_count,
+        tpl.avg_confidence,
+        tpl.detection_mode
        FROM task_progress_logs tpl
        JOIN tasks t ON tpl.task_id = t.id
        JOIN projects p ON t.project_id = p.id
@@ -142,7 +161,11 @@ router.get('/project/:name', async (req, res) => {
         tpl.evidence_image_path as photo_url,
         tpl.quantity_accomplished as glass_count,
         tpl.created_at,
-        tpl.shift
+        tpl.shift,
+        tpl.ai_detected_count,
+        tpl.verified_panel_count,
+        tpl.avg_confidence,
+        tpl.detection_mode
        FROM task_progress_logs tpl
        JOIN tasks t ON tpl.task_id = t.id
        JOIN projects p ON t.project_id = p.id

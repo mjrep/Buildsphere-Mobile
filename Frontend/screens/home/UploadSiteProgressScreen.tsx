@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
-import { hybridGlassAudit } from '../../lib/generative-ai';
+import { hybridGlassAudit, CVDetection, CVAuditResult } from '../../lib/generative-ai';
 import * as FileSystem from 'expo-file-system/legacy';
 
 interface Props {
@@ -41,9 +41,18 @@ interface SelectedPhoto {
 const PRIMARY = '#7370FF';
 
 // Step 1: Pick photo + basic info
-// Step 2: Full photo preview
-// Step 3: Form details
+// Step 2: Full photo preview + AI analysis
+// Step 3: Form details + human verification
 // Step 4: Success
+
+// Analysis status states for user feedback
+type AnalysisStatus =
+  | 'idle'              // No analysis started
+  | 'uploading'         // Sending image to CV service
+  | 'analyzing'         // CV service processing
+  | 'complete'          // Analysis finished successfully
+  | 'no_panels'         // Analysis complete but 0 panels found
+  | 'failed';           // Analysis failed — manual entry needed
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -65,6 +74,15 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [glassCount, setGlassCount] = useState<number>(0);
 
+  // ── New: CV Service detection state ──────────────────────────────
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle');
+  const [detectionMode, setDetectionMode] = useState<string>('box');
+  const [avgConfidence, setAvgConfidence] = useState<number>(0);
+  const [aiDetectedCount, setAiDetectedCount] = useState<number>(0);
+  const [verifiedPanelCount, setVerifiedPanelCount] = useState<number>(0);
+  const [aiSummary, setAiSummary] = useState<string>('');
+  const [detections, setDetections] = useState<CVDetection[]>([]);
+
 
   const reset = () => {
     setStep(1);
@@ -74,10 +92,17 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setShift('Morning');
     setWorkDate(new Date());
     setQuantityInstalled('');
-
     setNotes('');
     setGlassCount(0);
     setSaving(false);
+    // Reset CV detection state
+    setAnalysisStatus('idle');
+    setDetectionMode('box');
+    setAvgConfidence(0);
+    setAiDetectedCount(0);
+    setVerifiedPanelCount(0);
+    setAiSummary('');
+    setDetections([]);
   };
 
   React.useEffect(() => {
@@ -161,53 +186,87 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   };
 
   const handleCountGlass = async () => {
-    console.log('DEBUG: handleCountGlass triggered (Hybrid Mode)');
+    console.log('DEBUG: handleCountGlass triggered (CV Service)');
     if (selectedPhotos.length === 0) {
       console.log('DEBUG: no photos, returning');
       return;
     }
 
     setAnalyzing(true);
+    setAnalysisStatus('uploading');
     try {
-      // For now, let's analyze the FIRST photo in the array
-      // (Or we could loop through all of them later)
       const currentPhoto = selectedPhotos[0];
       const filename = currentPhoto.uri.split('/').pop() || 'photo.jpg';
       const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
       const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
 
-      console.log(`DEBUG: Hybrid Analysis starting. Mime: ${mimeType}`);
+      console.log(`DEBUG: CV Analysis starting. Mime: ${mimeType}`);
+      setAnalysisStatus('analyzing');
 
-      // NEW HYBRID FLOW: Local CV Service
-      const { count, summary, annotatedImage } = await hybridGlassAudit(currentPhoto.base64!, mimeType, currentPhoto.uri);
-      
-      console.log(`DEBUG: Hybrid Success! Count: ${count}`);
-      
-      setGlassCount(count);
+      const result: CVAuditResult = await hybridGlassAudit(
+        currentPhoto.base64!, mimeType, currentPhoto.uri
+      );
 
-      if (annotatedImage) {
-        // Update the first photo with the annotated version from the AI
+      console.log(`DEBUG: CV Success! Count: ${result.count}, Mode: ${result.detectionMode}`);
+
+      // ── Populate all detection state ──────────────────────────────
+      setAiDetectedCount(result.count);
+      setVerifiedPanelCount(result.count);  // default verified = AI count
+      setGlassCount(result.count);
+      setDetectionMode(result.detectionMode);
+      setAvgConfidence(result.avgConfidence);
+      setDetections(result.detections);
+      setAiSummary(result.summary);
+
+      if (result.annotatedImage) {
+        // Replace the first photo with the CV-annotated version
         setSelectedPhotos(prev => {
           const updated = [...prev];
-          updated[0] = { ...updated[0], uri: annotatedImage };
+          updated[0] = { ...updated[0], uri: result.annotatedImage! };
           return updated;
         });
       }
 
-      // Append result to notes
+      // Append AI summary to notes
       const newNotes = notes
-        ? `${notes}\n\nSite Audit Summary: ${summary}`
-        : `Site Audit Summary: ${summary}`;
+        ? `${notes}\n\n${result.summary}`
+        : result.summary;
       setNotes(newNotes);
 
-      Alert.alert('Analysis Complete', `Precision Count: ${count} panels.\n\nSummary: ${summary}`);
-      setStep(3); // Go to form to see notes
+      if (result.count === 0) {
+        setAnalysisStatus('no_panels');
+        Alert.alert(
+          'No Panels Detected',
+          'AI could not detect any glass panels. You can enter the count manually.',
+        );
+      } else {
+        setAnalysisStatus('complete');
+
+        // Detection mode label for user
+        const modeLabel =
+          result.detectionMode === 'segmentation' ? 'Segmentation Mode' :
+          result.detectionMode === 'gemini-fallback' ? 'Fallback Detection' :
+          'Box Detection Mode';
+
+        Alert.alert(
+          'Analysis Complete',
+          `Detected: ${result.count} panels\n` +
+          `Mode: ${modeLabel}\n` +
+          `Avg Confidence: ${(result.avgConfidence * 100).toFixed(1)}%\n\n` +
+          `${result.summary}`
+        );
+      }
+
+      setStep(3); // Go to form for human verification
     } catch (error: any) {
-      console.error('HYBRID_ANALYSIS_ERROR:', error);
+      console.error('CV_ANALYSIS_ERROR:', error);
+      setAnalysisStatus('failed');
       Alert.alert(
-        'AI Error',
-        `Failed to perform hybrid audit.\n\nDetail: ${error.message || 'Unknown error'}`
+        'AI Analysis Failed',
+        'Could not analyze the image. Please enter the glass panel count manually.\n\n' +
+        `Detail: ${error.message || 'Unknown error'}`
       );
+      setStep(3); // Go to form for manual entry
     } finally {
       setAnalyzing(false);
     }
@@ -223,7 +282,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       const formData = new FormData();
       formData.append('projectId', projectId.toString());
       formData.append('taskId', taskId.toString());
-      formData.append('glassCount', glassCount.toString());
+      formData.append('glassCount', verifiedPanelCount.toString());
       formData.append('shift', shift);
       
       // Use local date string (YYYY-MM-DD) to avoid UTC timezone shifts
@@ -234,9 +293,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       
       formData.append('workDate', formattedDate);
       formData.append('notes', notes);
-
       formData.append('userId', user.id.toString());
 
+      // ── New CV detection fields ─────────────────────────────────
+      formData.append('ai_detected_count', aiDetectedCount.toString());
+      formData.append('verified_panel_count', verifiedPanelCount.toString());
+      formData.append('avg_confidence', avgConfidence.toFixed(4));
+      formData.append('detection_mode', detectionMode);
 
       if (selectedPhotos.length > 0) {
         selectedPhotos.forEach((photo, index) => {
@@ -412,21 +475,21 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 
                 <View className="flex-row items-center justify-between bg-white rounded-xl border border-[#E0E0E0] p-3">
                   <TouchableOpacity 
-                    onPress={() => setGlassCount(Math.max(0, glassCount - 1))}
+                    onPress={() => setVerifiedPanelCount(Math.max(0, verifiedPanelCount - 1))}
                     className="h-10 w-10 items-center justify-center rounded-full bg-gray-100">
                       <Ionicons name="remove" size={24} color={PRIMARY} />
                   </TouchableOpacity>
                   
                   <TextInput
-                    value={String(glassCount)}
-                    onChangeText={(v) => setGlassCount(parseInt(v) || 0)}
+                    value={String(verifiedPanelCount)}
+                    onChangeText={(v) => setVerifiedPanelCount(parseInt(v) || 0)}
                     keyboardType="numeric"
                     className="text-[24px] font-bold text-[#7370FF] text-center"
                     style={{ minWidth: 60 }}
                   />
                   
                   <TouchableOpacity 
-                    onPress={() => setGlassCount(glassCount + 1)}
+                    onPress={() => setVerifiedPanelCount(verifiedPanelCount + 1)}
                     className="h-10 w-10 items-center justify-center rounded-full bg-[#7370FF]">
                       <Ionicons name="add" size={24} color="white" />
                   </TouchableOpacity>
@@ -517,6 +580,36 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
             {/* Footer Buttons */}
             <View className="bg-white border-t border-[#F0F0F0] px-5 pb-10 pt-4">
+              {/* Analysis status banner */}
+              {analysisStatus === 'complete' && (
+                <View className="mb-3 flex-row items-center rounded-xl bg-[#E8F5E9] px-4 py-3">
+                  <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                  <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#2E7D32]">
+                    {aiDetectedCount} panels detected • {
+                      detectionMode === 'segmentation' ? 'Segmentation Mode' :
+                      detectionMode === 'gemini-fallback' ? 'Fallback Detection' :
+                      'Box Detection Mode'
+                    }
+                  </Text>
+                </View>
+              )}
+              {analysisStatus === 'no_panels' && (
+                <View className="mb-3 flex-row items-center rounded-xl bg-[#FFF3E0] px-4 py-3">
+                  <Ionicons name="alert-circle" size={20} color="#F57C00" />
+                  <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#E65100]">
+                    No glass panels detected — enter count manually
+                  </Text>
+                </View>
+              )}
+              {analysisStatus === 'failed' && (
+                <View className="mb-3 flex-row items-center rounded-xl bg-[#FFEBEE] px-4 py-3">
+                  <Ionicons name="close-circle" size={20} color="#E53935" />
+                  <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#C62828]">
+                    AI analysis failed — enter count manually
+                  </Text>
+                </View>
+              )}
+
               <TouchableOpacity
                 onPress={() => setStep(3)}
                 className="h-14 items-center justify-center rounded-[16px]"
@@ -529,7 +622,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 disabled={analyzing}
                 className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2 border-[#D3D0FF] bg-[#F8F7FF]">
                 {analyzing ? (
-                  <ActivityIndicator color={PRIMARY} />
+                  <View className="flex-row items-center">
+                    <ActivityIndicator color={PRIMARY} />
+                    <Text className="ml-3 text-[14px] font-semibold text-[#7370FF]">
+                      {analysisStatus === 'uploading' ? 'Uploading image...' : 'Analyzing glass panels...'}
+                    </Text>
+                  </View>
                 ) : (
                   <>
                     <Ionicons name="sparkles" size={20} color={PRIMARY} />
@@ -625,39 +723,112 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 multiline
               />
 
-              {/* Glass Count Display (Compact) */}
+              {/* ── AI Detection Results + Human Verification ───────── */}
               <View className="mt-6 mb-4 rounded-2xl border border-[#D3D0FF] bg-[#F8F7FF] p-4">
+
+                {/* Header */}
                 <View className="flex-row items-center justify-between mb-3">
                   <View className="flex-row items-center">
                     <View className="mr-3 h-8 w-8 items-center justify-center rounded-full bg-[#EAE8FF]">
-                      <Ionicons name="apps" size={16} color={PRIMARY} />
+                      <Ionicons name="analytics" size={16} color={PRIMARY} />
                     </View>
                     <Text className="text-[13px] font-semibold text-[#1E1E1E]">
-                      Glass Panels Count
+                      AI Detection Results
+                    </Text>
+                  </View>
+                  {/* Detection Mode Badge */}
+                  <View className="rounded-full px-3 py-1" style={{
+                    backgroundColor:
+                      detectionMode === 'segmentation' ? '#E3F2FD' :
+                      detectionMode === 'gemini-fallback' ? '#FFF3E0' :
+                      '#E8F5E9'
+                  }}>
+                    <Text className="text-[10px] font-bold" style={{
+                      color:
+                        detectionMode === 'segmentation' ? '#1565C0' :
+                        detectionMode === 'gemini-fallback' ? '#E65100' :
+                        '#2E7D32'
+                    }}>
+                      {detectionMode === 'segmentation' ? '⬡ SEGMENTATION' :
+                       detectionMode === 'gemini-fallback' ? '⚠ FALLBACK' :
+                       '▢ BOX DETECTION'}
                     </Text>
                   </View>
                 </View>
-                
-                <View className="flex-row items-center justify-between bg-white rounded-xl border border-[#E0E0E0] p-2 px-4">
-                  <TouchableOpacity 
-                    onPress={() => setGlassCount(Math.max(0, glassCount - 1))}
-                    className="h-8 w-8 items-center justify-center rounded-full bg-gray-100">
-                      <Ionicons name="remove" size={20} color={PRIMARY} />
-                  </TouchableOpacity>
-                  
-                  <TextInput
-                    value={String(glassCount)}
-                    onChangeText={(v) => setGlassCount(parseInt(v) || 0)}
-                    keyboardType="numeric"
-                    className="text-[20px] font-bold text-[#7370FF] text-center"
-                    style={{ minWidth: 50 }}
-                  />
-                  
-                  <TouchableOpacity 
-                    onPress={() => setGlassCount(glassCount + 1)}
-                    className="h-8 w-8 items-center justify-center rounded-full bg-[#7370FF]">
-                      <Ionicons name="add" size={20} color="white" />
-                  </TouchableOpacity>
+
+                {/* Gemini fallback warning */}
+                {detectionMode === 'gemini-fallback' && (
+                  <View className="mb-3 flex-row items-center rounded-lg bg-[#FFF8E1] px-3 py-2">
+                    <Ionicons name="warning" size={14} color="#F57C00" />
+                    <Text className="ml-2 flex-1 text-[11px] text-[#E65100]">
+                      Fallback Detection Used — please verify manually
+                    </Text>
+                  </View>
+                )}
+
+                {/* AI analysis failed — manual mode */}
+                {analysisStatus === 'failed' && (
+                  <View className="mb-3 flex-row items-center rounded-lg bg-[#FFEBEE] px-3 py-2">
+                    <Ionicons name="alert-circle" size={14} color="#E53935" />
+                    <Text className="ml-2 flex-1 text-[11px] text-[#C62828]">
+                      AI analysis failed — enter count manually
+                    </Text>
+                  </View>
+                )}
+
+                {/* Stats Row: AI Count + Confidence */}
+                {analysisStatus !== 'failed' && analysisStatus !== 'idle' && (
+                  <View className="mb-3 flex-row">
+                    <View className="flex-1 items-center rounded-xl bg-white py-2 mr-2 border border-[#E0E0E0]">
+                      <Text className="text-[10px] text-gray-400">AI Detected</Text>
+                      <Text className="text-[18px] font-bold text-[#7370FF]">{aiDetectedCount}</Text>
+                      <Text className="text-[9px] text-gray-400">panels</Text>
+                    </View>
+                    <View className="flex-1 items-center rounded-xl bg-white py-2 border border-[#E0E0E0]">
+                      <Text className="text-[10px] text-gray-400">Avg Confidence</Text>
+                      <Text className="text-[18px] font-bold text-[#4CAF50]">{(avgConfidence * 100).toFixed(1)}%</Text>
+                      <Text className="text-[9px] text-gray-400">accuracy</Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* AI Summary */}
+                {aiSummary ? (
+                  <View className="mb-3 rounded-xl bg-white px-3 py-2 border border-[#E0E0E0]">
+                    <Text className="text-[10px] font-semibold text-gray-400 mb-1">AI Summary</Text>
+                    <Text className="text-[12px] text-[#333] leading-4">{aiSummary}</Text>
+                  </View>
+                ) : null}
+
+                {/* ── Verified Panel Count (Editable) ───────────── */}
+                <View className="mt-1">
+                  <Text className="text-[11px] font-semibold text-[#2D2D2D] mb-2">
+                    Verified Panel Count
+                  </Text>
+                  <View className="flex-row items-center justify-between bg-white rounded-xl border border-[#E0E0E0] p-2 px-4">
+                    <TouchableOpacity 
+                      onPress={() => setVerifiedPanelCount(Math.max(0, verifiedPanelCount - 1))}
+                      className="h-8 w-8 items-center justify-center rounded-full bg-gray-100">
+                        <Ionicons name="remove" size={20} color={PRIMARY} />
+                    </TouchableOpacity>
+                    
+                    <TextInput
+                      value={String(verifiedPanelCount)}
+                      onChangeText={(v) => setVerifiedPanelCount(parseInt(v) || 0)}
+                      keyboardType="numeric"
+                      className="text-[20px] font-bold text-[#7370FF] text-center"
+                      style={{ minWidth: 50 }}
+                    />
+                    
+                    <TouchableOpacity 
+                      onPress={() => setVerifiedPanelCount(verifiedPanelCount + 1)}
+                      className="h-8 w-8 items-center justify-center rounded-full bg-[#7370FF]">
+                        <Ionicons name="add" size={20} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text className="mt-1.5 text-center text-[10px] text-gray-400">
+                    Adjust if the AI count is incorrect
+                  </Text>
                 </View>
               </View>
 

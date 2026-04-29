@@ -69,20 +69,36 @@ export const countGlassPanels = async (base64Image: string, mimeType: string) =>
   }
 };
 
-export const hybridGlassAudit = async (base64Image: string, mimeType: string, photoUri?: string) => {
+// ── CV Service Detection Types ──────────────────────────────────────
+export interface CVDetection {
+  bounding_box: number[];          // [x1, y1, x2, y2] in pixels
+  confidence_score: number;        // 0.0 – 1.0
+  label: string;                   // e.g. "full_glass_panel"
+  polygon: number[][] | null;      // [[x,y], ...] from YOLOv8-seg, null for box mode
+}
+
+export interface CVAuditResult {
+  count: number;                   // total_valid_panels
+  summary: string;                 // AI-generated audit summary
+  annotatedImage: string | null;   // base64 annotated JPEG
+  detections: CVDetection[];       // per-panel detection list
+  detectionMode: 'box' | 'segmentation' | 'gemini-fallback';
+  avgConfidence: number;           // average confidence across detections
+}
+
+export const hybridGlassAudit = async (
+  base64Image: string,
+  mimeType: string,
+  photoUri?: string
+): Promise<CVAuditResult> => {
   console.log('DEBUG: Hybrid AI Audit Commencing (Local YOLO + Gemini)');
   
   // Use a stable tunnel URL for mobile-to-PC connection
-  const API_URL = "https://buildsphere-ai-audit.loca.lt/detect-panels";
+  const CV_API_URL = "https://buildsphere-ai-audit.loca.lt/detect-panels";
 
   try {
-    let count = 0;
-    let summary = '';
-    let annotatedImage = null;
-    let rawDetections = null;
-
     if (!photoUri) {
-        throw new Error('Photo URI is required for local CV Service.');
+      throw new Error('Photo URI is required for local CV Service.');
     }
 
     console.log('DEBUG: Calling Local CV Service...');
@@ -99,7 +115,7 @@ export const hybridGlassAudit = async (base64Image: string, mimeType: string, ph
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds
 
-    const cvResponse = await fetch(API_URL, {
+    const cvResponse = await fetch(CV_API_URL, {
       method: "POST",
       headers: {
         'Accept': 'application/json',
@@ -112,29 +128,41 @@ export const hybridGlassAudit = async (base64Image: string, mimeType: string, ph
     clearTimeout(timeoutId);
 
     if (!cvResponse.ok) {
-        const errText = await cvResponse.text();
-        console.error('CV_API_ERROR:', cvResponse.status, errText);
-        throw new Error(`CV Service Error (${cvResponse.status}): ${errText.substring(0, 100)}`);
+      const errText = await cvResponse.text();
+      console.error('CV_API_ERROR:', cvResponse.status, errText);
+      throw new Error(`CV Service Error (${cvResponse.status}): ${errText.substring(0, 100)}`);
     }
 
     const cvData = await cvResponse.json();
-    count = cvData.total_valid_panels || 0;
-    summary = cvData.summary_text || `Site Audit Complete. CV API detected ${count} valid panels.`;
-    annotatedImage = cvData.annotated_image_base64;
-    rawDetections = cvData.detections;
-    
-    console.log(`DEBUG: CV Service returned ${count} panels and summary.`);
+
+    const count: number = cvData.total_valid_panels || 0;
+    const detections: CVDetection[] = cvData.detections || [];
+    const detectionMode = cvData.detection_mode || 'box';
+    const summary: string = cvData.summary_text
+      || `Site Audit Complete. CV API detected ${count} valid panels.`;
+    const annotatedImage: string | null = cvData.annotated_image_base64 || null;
+
+    // Compute average confidence from detections
+    const avgConfidence = detections.length > 0
+      ? detections.reduce((sum, d) => sum + d.confidence_score, 0) / detections.length
+      : 0;
+
+    console.log(
+      `DEBUG: CV Service returned ${count} panels, ` +
+      `mode=${detectionMode}, avgConf=${avgConfidence.toFixed(3)}`
+    );
 
     return {
       count,
       summary,
       annotatedImage,
-      rawDetections
+      detections,
+      detectionMode,
+      avgConfidence,
     };
 
   } catch (error: any) {
     console.error('HYBRID_AUDIT_ERROR:', error);
-    // Return a more descriptive error for the UI
     throw new Error(`Hybrid Audit Failed: ${error.message || 'Unknown Error'}`);
   }
 };

@@ -16,7 +16,7 @@ venv/
 env/
 
 # YOLO model weights (large binary files)
-models/*.pt
+*.pt
 models/*.onnx
 !models/.gitkeep
 

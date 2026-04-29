@@ -29,10 +29,17 @@ def parse_args():
         description="Train YOLOv8 for glass panel detection"
     )
     parser.add_argument(
+        "--task",
+        type=str,
+        choices=["detect", "segment"],
+        default="detect",
+        help="Training task: 'detect' for bounding boxes or 'segment' for polygons.",
+    )
+    parser.add_argument(
         "--model",
         type=str,
-        default="yolov8m.pt",
-        help="Base model to fine-tune (default: yolov8m.pt)",
+        default="",
+        help="Base model to fine-tune (defaults to yolov8m.pt or yolov8m-seg.pt based on task)",
     )
     parser.add_argument(
         "--data",
@@ -100,6 +107,11 @@ def main():
     print(f"  Resume       : {args.resume}")
     print("=" * 65)
 
+    # ── Set base model if not provided ────────────────────────────
+    base_model = args.model
+    if not base_model:
+        base_model = "yolov8m.pt" if args.task == "detect" else "yolov8m-seg.pt"
+
     # ── Validate dataset config exists ────────────────────────────
     data_path = Path(args.data)
     if not data_path.exists():
@@ -109,8 +121,8 @@ def main():
         sys.exit(1)
 
     # ── Load the base model ───────────────────────────────────────
-    print(f"\n📦 Loading base model: {args.model}")
-    model = YOLO(args.model)
+    print(f"\n📦 Loading base model: {base_model}")
+    model = YOLO(base_model)
 
     # ── Configure training run name ───────────────────────────────
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -194,7 +206,8 @@ def main():
 
     # ── Copy best weights to models/ directory ────────────────────
     best_weights = Path(f"runs/train/{run_name}/weights/best.pt")
-    target_path = Path(__file__).parent.parent / "models" / "best.pt"
+    target_filename = "best_detect.pt" if args.task == "detect" else "best_seg.pt"
+    target_path = Path(__file__).parent.parent / "models" / target_filename
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     if best_weights.exists():
@@ -232,7 +245,7 @@ def main():
 
     # ── Print next steps ──────────────────────────────────────────
     print("\n📋 Next Steps:")
-    print("   1. Update MODEL_PATH in .env to point to 'models/best.pt'")
+    print(f"   1. Update MODEL_PATH in .env to point to 'models/{target_filename}'")
     print("   2. Set USE_PRETRAINED_COCO=false in .env")
     print("   3. Restart the CV service: uvicorn app.main:app --reload")
     print("   4. Test with: curl -X POST http://localhost:8000/detect-panels -F 'file=@test.jpg'\n")

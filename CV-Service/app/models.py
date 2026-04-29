@@ -26,6 +26,16 @@ class Detection(BaseModel):
         default="glass_panel",
         description="Class label for the detection",
     )
+    # ── Segmentation support (YOLOv8-seg) ─────────────────────────────
+    # Only populated when a segmentation model returns masks.
+    # Format: [[x1, y1], [x2, y2], ...] — polygon vertices in pixel coords.
+    polygon: list[list[float]] | None = Field(
+        default=None,
+        description=(
+            "Polygon vertices [[x, y], ...] from YOLOv8-seg mask. "
+            "None when using a standard detection model."
+        ),
+    )
 
 
 class DetectionResponse(BaseModel):
@@ -77,6 +87,16 @@ class DetectionResponse(BaseModel):
     nms_iou_threshold: float = Field(
         ...,
         description="NMS IoU threshold used for suppressing overlapping boxes",
+    )
+    # ── Detection mode indicator ──────────────────────────────────────
+    # "box" = standard YOLOv8 detection, "segmentation" = YOLOv8-seg,
+    # "gemini-fallback" = Gemini Vision emergency fallback.
+    detection_mode: str = Field(
+        default="box",
+        description=(
+            "Detection method used: 'box' (YOLOv8), "
+            "'segmentation' (YOLOv8-seg), or 'gemini-fallback'."
+        ),
     )
 
 
