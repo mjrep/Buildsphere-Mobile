@@ -5,9 +5,9 @@ Wraps the Ultralytics YOLO model with glass-panel-specific
 preprocessing, inference, and post-processing logic.
 
 Detection modes (auto-selected at runtime):
-  • box detection     — standard YOLOv8: counts panels from result.boxes
-  • segmentation      — YOLOv8-seg: counts panels from result.masks.xy polygons
-  • Gemini fallback   — emergency only: Gemini Vision boxes when YOLO returns 0
+  • YOLO (Primary)      — YOLOv8/seg: Primary detector and counter for glass panels.
+  • Gemini (Auditor)    — Gemini AI: Only generates professional audit summaries.
+  • Gemini Fallback     — Emergency only: Runs only if YOLO returns zero detections.
 """
 
 import time
@@ -24,8 +24,8 @@ from app.models import Detection, DetectionResponse
 # ── False-positive filter thresholds ─────────────────────────────────
 # Glass is transparent/reflective → high colour variance across the crop.
 # Solid walls / columns are uniform → low variance.
-# Relaxed to 30 to catch glass panels that might be uniform in colour (e.g. tinted or clear sky).
-_MIN_COLOR_VARIANCE: float = 30.0
+# Increased to 45 to be more aggressive against textured wood/walls.
+_MIN_COLOR_VARIANCE: float = 45.0
 # Minimum fraction of the image dimension a panel must cover to be real.
 _MIN_REL_SIZE: float = 0.005   # 0.5 % of image width or height
 
@@ -93,10 +93,9 @@ class GlassPanelDetector:
         """
         Run glass panel detection on a PIL Image.
 
-        Supports two YOLO model types:
-        - **YOLOv8 detection** (current): counts panels from ``result.boxes``.
-        - **YOLOv8-seg segmentation** (future): counts panels from
-          ``result.masks.xy`` polygons, with bounding boxes still available.
+        - **YOLO Primary Detection**: Automatically switches between standard
+          bounding boxes and segmentation masks based on the model loaded.
+        - **Counting**: Derived directly from YOLO results.
 
         If the loaded model does not produce masks, the method automatically
         falls back to bounding-box-only counting.
@@ -203,9 +202,14 @@ class GlassPanelDetector:
                         "polygon_np": polygon_xy,
                     })
 
+                # Apply Secondary NMS safety check
+                before_nms = len(raw_detections)
+                raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
+                if len(raw_detections) < before_nms:
+                    logger.info(f"🛡️ NMS suppressed {before_nms - len(raw_detections)} overlapping masks")
+
                 # Sort by confidence (highest first)
                 raw_detections.sort(key=lambda d: d["conf"], reverse=True)
-
                 # Process, annotate, and build Detection objects
                 for det in raw_detections:
                     xyxy = det["xyxy"]
@@ -214,6 +218,17 @@ class GlassPanelDetector:
                     polygon_np = det["polygon_np"]
 
                     x_min, y_min, x_max, y_max = map(int, xyxy)
+
+                    # ── Wall / column false-positive filter ───────
+                    if self._is_wall_or_column(rgb_arr, x_min, y_min, x_max, y_max,
+                                               original_width, original_height):
+                        logger.info(
+                            f"Rejected seg-detection at [{x_min},{y_min},{x_max},{y_max}] "
+                            f"(conf={confidence:.2f}) — low colour variance (wall/column)"
+                        )
+                        continue
+
+                    # Build Detection with polygon data
 
                     class_name = "full_glass_panel"
                     is_class_b = False
@@ -300,21 +315,26 @@ class GlassPanelDetector:
                             continue
 
                         # ── Wall / column false-positive filter ───────
-                        # (currently disabled — uncomment to re-enable)
-                        # x1, y1, x2, y2 = map(int, xyxy)
-                        # if self._is_wall_or_column(rgb_arr, x1, y1, x2, y2,
-                        #                            original_width, original_height):
-                        #     logger.info(
-                        #         f"Rejected detection at [{x1},{y1},{x2},{y2}] "
-                        #         f"(conf={confidence:.2f}) — low colour variance (wall/column)"
-                        #     )
-                        #     continue
+                        x1, y1, x2, y2 = map(int, xyxy)
+                        if self._is_wall_or_column(rgb_arr, x1, y1, x2, y2,
+                                                   original_width, original_height):
+                            logger.info(
+                                f"Rejected detection at [{x1},{y1},{x2},{y2}] "
+                                f"(conf={confidence:.2f}) — low colour variance (wall/column)"
+                            )
+                            continue
 
                         raw_detections.append({
                             "xyxy": xyxy,
                             "conf": confidence,
                             "class_name": class_name,
                         })
+
+                    # Apply Secondary NMS safety check
+                    before_nms = len(raw_detections)
+                    raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
+                    if len(raw_detections) < before_nms:
+                        logger.info(f"🛡️ NMS suppressed {before_nms - len(raw_detections)} overlapping boxes")
 
                     # Sort by confidence (highest first)
                     raw_detections.sort(
@@ -486,6 +506,62 @@ class GlassPanelDetector:
 
         return variance < _MIN_COLOR_VARIANCE
 
+    # ── NMS Helper Methods ──────────────────────────────────────────
+    @staticmethod
+    def _perform_nms(detections: list[dict], iou_threshold: float) -> list[dict]:
+        """
+        Perform Non-Maximum Suppression on a list of detections.
+        Each detection is a dict with "xyxy" and "conf".
+        """
+        if not detections:
+            return []
+
+        # Sort by confidence
+        sorted_dets = sorted(detections, key=lambda d: d["conf"], reverse=True)
+        keep = []
+        
+        while sorted_dets:
+            best_det = sorted_dets.pop(0)
+            keep.append(best_det)
+            
+            remaining = []
+            for det in sorted_dets:
+                iou = GlassPanelDetector._compute_iou(best_det["xyxy"], det["xyxy"])
+                if iou < iou_threshold:
+                    remaining.append(det)
+            sorted_dets = remaining
+            
+        return keep
+
+    @staticmethod
+    def _compute_iou(box1: list | np.ndarray, box2: list | np.ndarray) -> float:
+        """
+        Compute Intersection over Union (IoU) between two bounding boxes.
+        Format: [x1, y1, x2, y2]
+        """
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+
+        # Intersection
+        x_i1 = max(x1_1, x1_2)
+        y_i1 = max(y1_1, y1_2)
+        x_i2 = min(x2_1, x2_2)
+        y_i2 = min(y2_1, y2_2)
+
+        inter_w = max(0, x_i2 - x_i1)
+        inter_h = max(0, y_i2 - y_i1)
+        inter_area = inter_w * inter_h
+
+        # Union
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        union_area = area1 + area2 - inter_area
+
+        if union_area == 0:
+            return 0.0
+
+        return inter_area / union_area
+
     def draw_fallback_boxes(self, image: Image.Image, gemini_boxes: list[list[int]], inference_ms: float) -> DetectionResponse:
         """
         EMERGENCY FALLBACK ONLY — Gemini Vision bounding-box fallback.
@@ -519,6 +595,12 @@ class GlassPanelDetector:
                 "conf": 0.99,
                 "class_name": "glass_panel"
             })
+
+        # Apply NMS to Gemini boxes to prevent overlapping labels
+        before_nms = len(raw_detections)
+        raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
+        if len(raw_detections) < before_nms:
+            logger.info(f"🛡️ NMS suppressed {before_nms - len(raw_detections)} overlapping Gemini detections")
 
         for det in raw_detections:
             xyxy = det["xyxy"]

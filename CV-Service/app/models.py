@@ -98,6 +98,12 @@ class DetectionResponse(BaseModel):
             "'segmentation' (YOLOv8-seg), or 'gemini-fallback'."
         ),
     )
+    avg_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Average confidence score across all valid detections",
+    )
 
 
 class HealthResponse(BaseModel):

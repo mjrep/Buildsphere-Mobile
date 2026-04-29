@@ -24,7 +24,6 @@ import AddTaskScreen from './AddTaskScreen';
 import TaskDetailScreen from './TaskDetailScreen';
 import InventoryScreen from './InventoryScreen';
 import EditProjectScreen from './EditProjectScreen';
-import { LinearGradient } from 'expo-linear-gradient';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
 import { getPermissions } from '../../constants/roles';
@@ -125,7 +124,7 @@ export default function HomeScreen({
 
   const updateProjectColor = async (projectId: number, color: string) => {
     console.log(`Updating project ${projectId} to color:`, color);
-
+    
     // Optimistic Update: Change locally immediately
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, color } : p));
 
@@ -135,7 +134,7 @@ export default function HomeScreen({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ color }),
       });
-
+      
       if (res.ok) {
         setProjectActionModal(null);
         setShowColorPicker(false);
@@ -161,24 +160,15 @@ export default function HomeScreen({
   const [unreadCount, setUnreadCount] = useState(0);
 
   const fetchNotificationCount = () => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-
-    fetch(`${API_URL}/notifications?userId=${user.id}`, { signal: controller.signal })
+    fetch(`${API_URL}/notifications?userId=${user.id}`)
       .then((res) => res.json())
       .then((data) => {
-        clearTimeout(timeoutId);
         if (Array.isArray(data)) {
           const unread = data.filter((n: any) => !n.is_read).length;
           setUnreadCount(unread);
         }
       })
-      .catch((err) => {
-        clearTimeout(timeoutId);
-        // Silently ignore aborted requests (timeout) — not a real error
-        if (err?.name === 'AbortError') return;
-        console.error('Notif Count Fetch Error:', err);
-      });
+      .catch((err) => console.error('Notif Count Fetch Error:', err));
   };
 
   useEffect(() => {
@@ -283,52 +273,27 @@ export default function HomeScreen({
                 refreshControl={
                   <RefreshControl refreshing={loadingProjects} onRefresh={fetchProjects} color="#7370FF" />
                 }>
-                <LinearGradient
-                  colors={['#7370FF', '#9E9CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  className="mb-8 p-6 rounded-[35px] shadow-xl shadow-[#7370FF50]"
-                >
-                  <View className="flex-row items-center justify-between mb-4">
-                    <View>
-                      <Text className="text-white text-[32px] font-bold">
-                        Home
-                      </Text>
-                    </View>
-                    <View className="bg-white/20 px-3 py-1.5 rounded-full backdrop-blur-md">
-                      <Text className="text-[10px] font-bold text-white uppercase tracking-wider">
-                        {user.role}
-                      </Text>
-                    </View>
+                <View className="flex-row items-center justify-between">
+                  <Text className="mb-1 text-[22px] font-bold text-[#6C63FF]">Home</Text>
+                  <View className="bg-purple-100 px-3 py-1 rounded-full">
+                    <Text className="text-[10px] font-bold text-[#6C63FF] uppercase">{user.role}</Text>
                   </View>
-                  <View className="h-[1px] bg-white/20 mb-4" />
-                  <Text className="text-white/90 text-[13px] leading-5">
-                    BuildSphere Site Management Portal
-                  </Text>
-                </LinearGradient>
+                </View>
+                <Text className="mb-4 text-[13px] text-[#A3A3A3]">
+                  Welcome back, {user.firstName}! 👋
+                </Text>
 
                 {/* Dashboard Summary Card — Hidden for Accounting audit view */}
                 {user.role.toLowerCase() !== 'accounting' && (
-                  <View className="mb-8 flex-row items-center justify-between rounded-[25px] bg-[#FFFFFF] p-6 shadow-sm border border-gray-50">
-                    <View className="flex-row items-center">
-                      <View className="h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF5E6]">
-                        <Ionicons name="briefcase" size={22} color="#FFA500" />
-                      </View>
-                      <View className="ml-4">
-                        <Text className="text-[13px] font-medium text-[#A3A3A3]">Ongoing Projects</Text>
-                        <Text className="text-2xl font-bold text-[#1E1E1E]">{projects.length}</Text>
-                      </View>
+                  <View className="mb-6 flex-row items-center justify-between rounded-[20px] border border-gray-100 bg-white p-5 shadow-sm">
+                    <View>
+                      <Text className="text-base font-semibold text-[#1E1E1E]">Ongoing Projects</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color="#E0E0E0" />
+                    <Text className="text-3xl font-bold text-[#FFA500]">{projects.length}</Text>
                   </View>
                 )}
 
-                <View className="flex-row items-center justify-between mb-6">
-                  <Text className="text-[18px] font-bold text-[#1E1E1E]">Active Projects</Text>
-                  <TouchableOpacity>
-                    <Text className="text-[13px] font-semibold text-[#7370FF]">View All</Text>
-                  </TouchableOpacity>
-                </View>
+                <Text className="mb-4 text-lg font-bold text-[#1E1E1E]">Projects</Text>
                 {loadingProjects ? (
                   <ActivityIndicator color="#7370FF" />
                 ) : projects.length === 0 ? (
@@ -597,47 +562,47 @@ export default function HomeScreen({
                 {projectActionModal?.name}
               </Text>
 
-              <TouchableOpacity
-                onPress={() => {
-                  setProjectActionModal(null);
-                  setShowEditProject(true);
-                }}
-                className="flex-row items-center py-4 border-b border-gray-50">
-                <Ionicons name="create-outline" size={22} color="#7370FF" />
-                <Text className="ml-4 text-[16px] text-[#2D2D2D]">Edit Project</Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                setProjectActionModal(null);
+                setShowEditProject(true);
+              }}
+              className="flex-row items-center py-4 border-b border-gray-50">
+              <Ionicons name="create-outline" size={22} color="#7370FF" />
+              <Text className="ml-4 text-[16px] text-[#2D2D2D]">Edit Project</Text>
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={() => setShowColorPicker(!showColorPicker)}
-                className="flex-row items-center py-4 border-b border-gray-50">
-                <Ionicons name="color-palette-outline" size={22} color="#7370FF" />
-                <Text className="ml-4 text-[16px] text-[#2D2D2D]">Change Theme Color</Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setShowColorPicker(!showColorPicker)}
+              className="flex-row items-center py-4 border-b border-gray-50">
+              <Ionicons name="color-palette-outline" size={22} color="#7370FF" />
+              <Text className="ml-4 text-[16px] text-[#2D2D2D]">Change Theme Color</Text>
+            </TouchableOpacity>
 
-              {showColorPicker && (
-                <View className="flex-row flex-wrap justify-center py-4 border-b border-gray-50">
-                  {PRESET_COLORS.map((c) => (
-                    <TouchableOpacity
-                      key={c}
-                      onPress={() => updateProjectColor(projectActionModal!.id, c)}
-                      style={{ backgroundColor: c }}
-                      className={`m-2 h-12 w-12 items-center justify-center rounded-full border-2 ${projectActionModal?.color === c ? 'border-gray-900' : 'border-transparent'}`}
-                    >
-                      {projectActionModal?.color === c && (
-                        <Ionicons name="checkmark" size={20} color="white" />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+            {showColorPicker && (
+              <View className="flex-row flex-wrap justify-center py-4 border-b border-gray-50">
+                {PRESET_COLORS.map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => updateProjectColor(projectActionModal!.id, c)}
+                    style={{ backgroundColor: c }}
+                    className={`m-2 h-12 w-12 items-center justify-center rounded-full border-2 ${projectActionModal?.color === c ? 'border-gray-900' : 'border-transparent'}`}
+                  >
+                    {projectActionModal?.color === c && (
+                      <Ionicons name="checkmark" size={20} color="white" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
-              <TouchableOpacity
-                onPress={() => deleteProject(projectActionModal!.id)}
-                className="flex-row items-center py-4">
-                <Ionicons name="trash-outline" size={22} color="#FF6B6B" />
-                <Text className="ml-4 text-[16px] text-[#FF6B6B] font-semibold">Delete Project</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              onPress={() => deleteProject(projectActionModal!.id)}
+              className="flex-row items-center py-4">
+              <Ionicons name="trash-outline" size={22} color="#FF6B6B" />
+              <Text className="ml-4 text-[16px] text-[#FF6B6B] font-semibold">Delete Project</Text>
+            </TouchableOpacity>
+          </View>
           </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>

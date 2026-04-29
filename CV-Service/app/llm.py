@@ -20,14 +20,17 @@ if settings.GEMINI_API_KEY:
 def generate_audit_summary(total_valid_panels: int, avg_confidence: float) -> str:
     """
     Generate a professional site audit summary using Gemini.
+    Gemini acts as the 'Auditor' — explaining the results to the user.
     """
     if not settings.GEMINI_API_KEY:
-        return f"Site Audit Complete. YOLO API detected {total_valid_panels} glass panels. (AI Summary temporarily unavailable)."
+        return (
+            f"Site Audit Complete. BuildSphere YOLO detected {total_valid_panels} "
+            f"verified glass panels with an average confidence of {avg_confidence:.1%}."
+        )
 
     models_to_try = [
-        'models/gemini-2.5-flash-lite',
-        'models/gemini-flash-latest', 
-        'models/gemini-pro-latest'
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
     ]
     
     model = None
@@ -35,36 +38,39 @@ def generate_audit_summary(total_valid_panels: int, avg_confidence: float) -> st
     
     for model_name in models_to_try:
         try:
-            m = genai.GenerativeModel(model_name)
-            # Quick test for quota
-            m.generate_content("test")
-            model = m
+            model = genai.GenerativeModel(model_name)
+            # No test generation here to save quota; we'll catch errors in the real call
             break
         except Exception as e:
             last_error = e
             continue
 
     if not model:
-        error_msg = str(last_error).lower()
+        return f"Site Audit: {total_valid_panels} glass panels verified ({avg_confidence:.1%} confidence)."
+
+    try:
+        prompt = (
+            f"You are a BuildSphere Senior Construction Auditor.\n"
+            f"Context: A Computer Vision scan (YOLO) has just completed.\n"
+            f"Result: {total_valid_panels} glass panels were detected with {avg_confidence:.1%} average confidence.\n"
+            "\n"
+            "Task: Write a concise, 1-sentence professional audit summary for the site manager. "
+            "Focus on the verification of the count. If confidence is low (below 60%), mention that "
+            "manual verification is recommended."
+        )
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        error_msg = str(e).lower()
         if "429" in error_msg or "quota" in error_msg:
             return f"Site Audit: {total_valid_panels} panels verified."
         return f"Site Audit: {total_valid_panels} panels detected."
 
-    try:
-        prompt = (
-            f"Based on the image, {total_valid_panels} fully visible glass panels were counted. "
-            "Some areas of the photo were obstructed or not fully visible and were excluded from the count. "
-            "Write a concise, 1-sentence professional summary reflecting this."
-        )
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except:
-        return f"Site Audit: {total_valid_panels} panels."
-
 
 def vision_box_fallback(image_bytes: bytes) -> list[list[int]]:
     """
-    Fallback: Use Gemini Vision to detect bounding boxes of panels if YOLO fails.
+    EMERGENCY FALLBACK ONLY.
+    Uses Gemini Vision to detect bounding boxes of panels ONLY if YOLO returns 0 detections.
     Returns a list of boxes in [ymin, xmin, ymax, xmax] format (0-1000 scale).
     """
     if not settings.GEMINI_API_KEY:
@@ -72,9 +78,8 @@ def vision_box_fallback(image_bytes: bytes) -> list[list[int]]:
         
     try:
         models_to_try = [
-            'models/gemini-flash-latest', 
-            'models/gemini-2.5-flash-lite', 
-            'models/gemini-pro-latest'
+            'gemini-1.5-flash', 
+            'gemini-1.5-pro'
         ]
         model = None
         for m_name in models_to_try:
@@ -95,14 +100,24 @@ def vision_box_fallback(image_bytes: bytes) -> list[list[int]]:
             return []
             
         prompt = (
-            "You are a high-precision object detection system for construction audits.\n"
-            "OBJECTIVE: Detect every individual glass panel in the image.\n"
+            "You are a Senior Construction Auditor specialized in High-Precision Glass Panel Detection.\n"
+            "\n"
+            "CRITICAL MISSION: You must provide an EXACT count of INSTALLED glass panels. Mistakes lead to multi-million dollar errors.\n"
+            "\n"
+            "DETECTION RULES (BE EXTREMELY CAREFUL):\n"
+            "1. ONLY count physical glass panes that are transparent or reflective.\n"
+            "2. LOOK FOR the 'glint', 'reflection', or 'transparency' that characterizes glass.\n"
+            "3. DO NOT count brown wood panels, plywood slabs, or orange-tinted protective boards.\n"
+            "4. DO NOT count grey concrete walls, columns, or textured plaster.\n"
+            "5. DO NOT count floors, ceilings, or scaffolding components.\n"
+            "6. For glass facades, count the INDIVIDUAL PANES separated by frames (mullions).\n"
+            "\n"
             "Return ONLY a JSON array of bounding boxes in this exact format:\n"
             "[\n"
             "  [ymin, xmin, ymax, xmax],\n"
             "  ...\n"
             "]\n"
-            "The coordinates must be integers normalized between 0 and 1000."
+            "Coordinates must be integers normalized between 0 and 1000."
         )
         
         response = model.generate_content([

@@ -25,16 +25,16 @@ export default function ProjectCard({
 
   return (
     <View
-      className="mb-8 overflow-hidden rounded-[35px] bg-white pb-5"
+      className="mb-6 overflow-hidden rounded-[30px] bg-white pb-4"
       style={{
-        shadowColor: '#7370FF',
-        shadowOpacity: 0.1,
-        shadowRadius: 15,
-        shadowOffset: { width: 0, height: 10 },
-        elevation: 6,
+        shadowColor: '#000',
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 5 },
+        elevation: 5,
       }}>
       {/* Banner */}
-      <View style={{ backgroundColor: bannerColor, height: 200 }}>
+      <View style={{ backgroundColor: bannerColor, height: 180 }}>
         {image && (
           <Image
             source={image}
@@ -44,58 +44,54 @@ export default function ProjectCard({
         )}
         {/* 3-dot menu */}
         <TouchableOpacity 
-          className="absolute right-4 top-4 h-9 w-9 items-center justify-center rounded-full bg-black/20 backdrop-blur-md" 
+          className="absolute right-3 top-3 h-7 w-7 items-center justify-center rounded-full bg-black/10" 
           onPress={onAction}
         >
-          <Ionicons name="ellipsis-vertical" size={18} color="white" />
+          <Ionicons name="ellipsis-vertical" size={15} color={image ? 'white' : '#666'} />
         </TouchableOpacity>
       </View>
 
       {/* Card Content */}
-      <View className="px-6 pt-5">
-        <View className="flex-row items-center mb-5">
+      <View className="px-5 pt-4">
+        <View className="flex-row items-center mb-3">
           {/* Icon Circle */}
           <View 
-            style={{ backgroundColor: `${bannerColor}15` }}
-            className="mr-4 h-12 w-12 items-center justify-center rounded-2xl"
+            style={{ backgroundColor: `${bannerColor}26` }} // 26 is ~15% opacity in hex
+            className="mr-3 h-10 w-10 items-center justify-center rounded-full"
           >
-            <FontAwesome5 name="building" size={22} color={bannerColor} />
+            <FontAwesome5 name="building" size={20} color={bannerColor} />
           </View>
 
           <View className="flex-1">
-            <View className="flex-row items-center justify-between mb-1">
-              <Text className="flex-1 text-[16px] font-bold text-[#1E1E1E]" numberOfLines={1}>
+            <View className="flex-row items-center justify-between">
+              <Text className="flex-1 text-[14px] font-bold text-[#1E1E1E]">
                 {name}
               </Text>
 
               {daysLeft !== undefined && (
-                <View className="ml-2 flex-row items-center rounded-full bg-[#7370FF10] px-3 py-1">
-                  <Ionicons name="time-outline" size={10} color="#7370FF" />
-                  <Text className="ml-1 text-[10px] font-bold text-[#7370FF]">
-                    {daysLeft}d left
+                <View className="ml-2 flex-row items-center rounded-md bg-[#EAE8FF] px-1.5 py-0.5">
+                  <Ionicons name="time-outline" size={7} color="#6C63FF" />
+                  <Text className="ml-1 text-[10px] font-bold text-[#6C63FF]">
+                    {daysLeft} Days Left
                   </Text>
                 </View>
               )}
             </View>
-            <View className="flex-row items-center">
-              <Ionicons name="location-outline" size={12} color="#A3A3A3" />
-              <Text className="ml-1 text-[11px] text-[#A3A3A3] font-medium" numberOfLines={1}>{location}</Text>
-            </View>
+            <Text className="mt-2 text-[11px] text-[#A3A3A3]">{location}</Text>
           </View>
         </View>
 
         {/* Progress Section */}
         <View className="mt-2">
-          <View className="flex-row justify-between items-center mb-2">
-            <Text className="text-[12px] font-semibold text-[#1E1E1E]">Project Progress</Text>
-            <Text className="text-[12px] font-bold text-[#7370FF]">{progress}%</Text>
-          </View>
-          <View className="h-[8px] overflow-hidden rounded-full bg-[#F5F5F7]">
+          <View className="h-[6px] overflow-hidden rounded-full bg-[#F0F0F0]">
             <View
               style={{ width: `${progress}%` }}
-              className="h-full rounded-full bg-[#7370FF]"
+              className={`h-full rounded-full ${progress > 0 ? 'bg-[#5DBF50]' : 'bg-[#F0F0F0]'}`}
             />
           </View>
+          <Text className="mt-1 text-right text-[12px] text-[#A3A3A3]">
+            {progress}%
+          </Text>
         </View>
       </View>
     </View>

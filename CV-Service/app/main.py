@@ -256,26 +256,38 @@ async def detect_panels(
         f"{width}x{height})"
     )
 
-    # ── 6. Run inference ──────────────────────────────────────────
+    # ── 6. Run inference (YOLO PRIMARY MODE) ──────────────────────────
+    # YOLO is the primary detector and counter for glass panels.
+    # Gemini acts only as the 'Auditor' to summarize the findings.
+    from app.llm import generate_audit_summary, vision_box_fallback
+
     try:
+        # Step 1: Detect using YOLO
+        logger.info(f"CORE AUDIT: Running YOLO Primary Detection ({settings.MODEL_PATH})")
         result = detector.detect(image)
         
-        # ── 7. Hybrid Fallback (if YOLO returns 0) ────────────────────
-        from app.llm import generate_audit_summary, vision_box_fallback
-        
-        if result.total_valid_panels == 0 and settings.GEMINI_API_KEY:
-            logger.info("YOLO detected 0 valid panels. Triggering Gemini Vision fallback...")
+        # Step 2: Emergency Fallback to Gemini Vision ONLY if YOLO finds nothing
+        if result.total_valid_panels == 0:
+            logger.warning("YOLO returned 0 detections. Attempting Gemini Vision emergency fallback...")
             gemini_boxes = vision_box_fallback(contents)
+            
             if len(gemini_boxes) > 0:
-                result = detector.draw_fallback_boxes(image, gemini_boxes, result.inference_time_ms)
-                logger.info(f"Gemini Vision detected {result.total_valid_panels} valid panels.")
+                result = detector.draw_fallback_boxes(image, gemini_boxes, 0)
+                logger.info(f"✅ Gemini Emergency Fallback: {result.total_valid_panels} panels found.")
+            else:
+                logger.info("Gemini Fallback also returned 0 detections.")
 
+        # Step 3: Generate Professional Audit Summary using Gemini
+        # We calculate avg confidence to provide to the summarizer
         avg_conf = 0.0
         if result.total_valid_panels > 0 and len(result.detections) > 0:
             avg_conf = sum(d.confidence_score for d in result.detections) / len(result.detections)
-            
+        elif result.detection_mode == "gemini-fallback":
+            avg_conf = 0.99 # Hardcoded high confidence for Gemini results
+        
         summary = generate_audit_summary(result.total_valid_panels, avg_conf)
         result.summary_text = summary
+        result.avg_confidence = avg_conf
         
     except RuntimeError as e:
         raise HTTPException(

@@ -93,8 +93,8 @@ export const hybridGlassAudit = async (
 ): Promise<CVAuditResult> => {
   console.log('DEBUG: Hybrid AI Audit Commencing (Local YOLO + Gemini)');
   
-  // Use a stable tunnel URL for mobile-to-PC connection
-  const CV_API_URL = "https://buildsphere-ai-audit.loca.lt/detect-panels";
+  // Use the local IP address for a stable connection (bypassing flaky LocalTunnel)
+  const CV_API_URL = "http://192.168.0.69:8000/detect-panels";
 
   try {
     if (!photoUri) {
@@ -142,10 +142,12 @@ export const hybridGlassAudit = async (
       || `Site Audit Complete. CV API detected ${count} valid panels.`;
     const annotatedImage: string | null = cvData.annotated_image_base64 || null;
 
-    // Compute average confidence from detections
-    const avgConfidence = detections.length > 0
-      ? detections.reduce((sum, d) => sum + d.confidence_score, 0) / detections.length
-      : 0;
+    // Use avg_confidence from backend, or compute manually from detections
+    const avgConfidence = cvData.avg_confidence !== undefined
+      ? cvData.avg_confidence
+      : (detections.length > 0
+          ? detections.reduce((sum, d) => sum + d.confidence_score, 0) / detections.length
+          : 0);
 
     console.log(
       `DEBUG: CV Service returned ${count} panels, ` +
