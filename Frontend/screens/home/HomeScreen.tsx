@@ -29,6 +29,8 @@ import { supabase } from '../../lib/supabase';
 import ChangeProjectColorModal from '../../components/ChangeProjectColorModal';
 import { UserInfo } from '../../App';
 import { getPermissions } from '../../constants/roles';
+import { useAppTheme } from '../../contexts/ThemeContext';
+import { floatingNavShadow, softCardShadow } from '../../constants/theme';
 
 interface HomeScreenProps {
   onLogout: () => void;
@@ -75,6 +77,7 @@ export default function HomeScreen({
   const [showEditProject, setShowEditProject] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [showChangeColor, setShowChangeColor] = useState(false);
+  const { theme } = useAppTheme();
 
   // RBAC: Filtered FAB Actions 
   const perms = useMemo(() => getPermissions(user.role), [user.role]);
@@ -273,7 +276,7 @@ export default function HomeScreen({
   const showFab = activeTab !== 'more' && FAB_ACTIONS.length > 0;
 
   return (
-    <View className="flex-1 bg-[#F5F5F7]">
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <SafeAreaView className="flex-1">
         {activeTab === 'home' ? (
           <View className="flex-1">
@@ -295,47 +298,50 @@ export default function HomeScreen({
                   <RefreshControl
                     refreshing={loadingProjects}
                     onRefresh={fetchProjects}
-                    colors={['#7370FF']}
-                    tintColor="#7370FF"
+                    colors={[theme.primary]}
+                    tintColor={theme.primary}
                   />
                 }>
                 <View className="flex-row items-center justify-between">
-                  <Text className="mb-1 text-[22px] font-bold text-[#6C63FF]">Home</Text>
-                  <View className="bg-purple-100 px-3 py-1 rounded-full">
-                    <Text className="text-[10px] font-bold text-[#6C63FF] uppercase">{user.role}</Text>
+                  <Text className="mb-1 text-[22px] font-bold" style={{ color: theme.primary }}>Home</Text>
+                  <View className="px-3 py-1 rounded-full" style={{ backgroundColor: theme.primaryLight }}>
+                    <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }}>{user.role}</Text>
                   </View>
                 </View>
-                <Text className="mb-4 text-[13px] text-[#A3A3A3]">
+                <Text className="mb-4 text-[13px]" style={{ color: theme.textMuted }}>
                   Welcome back, {user.firstName}! 👋
                 </Text>
 
                 {/* Dashboard Summary Card — Hidden for Accounting audit view */}
                 {user.role.toLowerCase() !== 'accounting' && (
-                  <View className="mb-6 flex-row items-center justify-between rounded-[20px] border border-gray-100 bg-white p-5 shadow-sm">
+                  <View
+                    className="mb-6 flex-row items-center justify-between rounded-[20px] border p-5"
+                    style={{ backgroundColor: theme.surface, borderColor: theme.border, ...softCardShadow }}>
                     <View>
-                      <Text className="text-base font-semibold text-[#1E1E1E]">Ongoing Projects</Text>
+                      <Text className="text-base font-semibold" style={{ color: theme.text }}>Ongoing Projects</Text>
                     </View>
-                    <Text className="text-3xl font-bold text-[#FFA500]">{projects.length}</Text>
+                    <Text className="text-3xl font-bold" style={{ color: theme.warning }}>{projects.length}</Text>
                   </View>
                 )}
 
-                <Text className="mb-4 text-lg font-bold text-[#1E1E1E]">Projects</Text>
+                <Text className="mb-4 text-lg font-bold" style={{ color: theme.text }}>Projects</Text>
                 {loadingProjects ? (
-                  <ActivityIndicator color="#7370FF" />
+                  <ActivityIndicator color={theme.primary} />
                 ) : projectsError ? (
-                  <View className="mt-6 items-center rounded-2xl border border-[#F2E5E5] bg-[#FFF5F5] p-5">
-                    <Ionicons name="alert-circle-outline" size={28} color="#FF6B6B" />
-                    <Text className="mt-2 text-center text-[13px] text-[#8A5050]">{projectsError}</Text>
+                  <View className="mt-6 items-center rounded-2xl border p-5" style={{ backgroundColor: theme.elevated, borderColor: theme.danger }}>
+                    <Ionicons name="alert-circle-outline" size={28} color={theme.danger} />
+                    <Text className="mt-2 text-center text-[13px]" style={{ color: theme.textSecondary }}>{projectsError}</Text>
                     <TouchableOpacity
                       onPress={fetchProjects}
-                      className="mt-3 rounded-xl bg-[#7370FF] px-4 py-2">
+                      className="mt-3 rounded-xl px-4 py-2"
+                      style={{ backgroundColor: theme.primary }}>
                       <Text className="text-[12px] font-semibold text-white">Retry</Text>
                     </TouchableOpacity>
                   </View>
                 ) : projects.length === 0 ? (
                   <View className="mt-8 items-center">
-                    <Ionicons name="layers-outline" size={36} color="#C5C5C5" />
-                    <Text className="mt-2 text-center text-[#A3A3A3]">No projects found.</Text>
+                    <Ionicons name="layers-outline" size={36} color={theme.textMuted} />
+                    <Text className="mt-2 text-center" style={{ color: theme.textMuted }}>No projects found.</Text>
                   </View>
                 ) : (
                   projects.map((p: any) => (
@@ -416,18 +422,19 @@ export default function HomeScreen({
                       }
                     }
                   }}
-                  className="flex-row items-center rounded-[14px] bg-white px-4 py-3"
+                  className="flex-row items-center rounded-[14px] px-4 py-3"
                   style={{
-                    shadowColor: '#7370FF',
+                    backgroundColor: theme.elevated,
+                    shadowColor: theme.primary,
                     shadowOpacity: 0.15,
                     shadowRadius: 8,
                     elevation: 4,
                   }}>
-                  <Text className="mr-3 text-[14px] font-medium text-[#1E1E1E]">
+                  <Text className="mr-3 text-[14px] font-medium" style={{ color: theme.text }}>
                     {action.label}
                   </Text>
-                  <View className="h-7 w-7 items-center justify-center rounded-full bg-[#EAE8FF]">
-                    <Ionicons name={action.icon as any} size={15} color="#7370FF" />
+                  <View className="h-7 w-7 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
+                    <Ionicons name={action.icon as any} size={15} color={theme.primary} />
                   </View>
                 </TouchableOpacity>
               </Animated.View>
@@ -439,9 +446,10 @@ export default function HomeScreen({
         {showFab && (
           <TouchableOpacity
             onPress={toggleFab}
-            className="absolute bottom-[110px] right-5 h-14 w-14 items-center justify-center rounded-full bg-[#7370FF]"
+            className="absolute bottom-[110px] right-5 h-14 w-14 items-center justify-center rounded-full"
             style={{
-              shadowColor: '#7370FF',
+              backgroundColor: theme.primary,
+              shadowColor: theme.primary,
               shadowOpacity: 0.5,
               shadowRadius: 12,
               shadowOffset: { width: 0, height: 9 },
@@ -464,33 +472,40 @@ export default function HomeScreen({
         )}
 
         {/* BOTTOM NAVIGATION */}
-        <View className="absolute bottom-8 left-5 right-5 h-[70px] flex-row items-center justify-between rounded-[30px] bg-white px-6 shadow-xl shadow-gray-200">
+        <View
+          className="absolute bottom-8 left-5 right-5 h-[70px] flex-row items-center justify-between rounded-[30px] px-6"
+          style={{ backgroundColor: theme.tabBar, ...floatingNavShadow }}>
           {perms.canViewDashboard && (
             <TouchableOpacity
-              className={`items-center rounded-full p-2 px-4 ${activeTab === 'home' ? 'bg-[#EAE8FF]' : ''}`}
+              className="items-center rounded-full p-2 px-4"
+              style={{ backgroundColor: activeTab === 'home' ? theme.primaryLight : 'transparent' }}
               onPress={() => setActiveTab('home')}>
-              <Ionicons name="home" size={24} color={activeTab === 'home' ? '#6C63FF' : '#9A9A9A'} />
+              <Ionicons name="home" size={24} color={activeTab === 'home' ? theme.primary : theme.textMuted} />
               <Text
-                className={`mt-1 text-[10px] ${activeTab === 'home' ? 'font-bold text-[#6C63FF]' : 'text-[#9A9A9A]'}`}>
+                className={`mt-1 text-[10px] ${activeTab === 'home' ? 'font-bold' : ''}`}
+                style={{ color: activeTab === 'home' ? theme.primary : theme.textMuted }}>
                 Home
               </Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            className={`items-center rounded-full p-2 px-4 ${activeTab === 'mywork' ? 'bg-[#EAE8FF]' : ''}`}
+            className="items-center rounded-full p-2 px-4"
+            style={{ backgroundColor: activeTab === 'mywork' ? theme.primaryLight : 'transparent' }}
             onPress={() => setActiveTab('mywork')}>
             <Ionicons
               name="briefcase-outline"
               size={24}
-              color={activeTab === 'mywork' ? '#6C63FF' : '#9A9A9A'}
+              color={activeTab === 'mywork' ? theme.primary : theme.textMuted}
             />
             <Text
-              className={`mt-1 text-[10px] ${activeTab === 'mywork' ? 'font-bold text-[#6C63FF]' : 'text-[#9A9A9A]'}`}>
-              My Work
+              className={`mt-1 text-[10px] ${activeTab === 'mywork' ? 'font-bold' : ''}`}
+              style={{ color: activeTab === 'mywork' ? theme.primary : theme.textMuted }}>
+              Task
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            className={`items-center rounded-full p-2 px-4 ${activeTab === 'notifications' ? 'bg-[#EAE8FF]' : ''}`}
+            className="items-center rounded-full p-2 px-4"
+            style={{ backgroundColor: activeTab === 'notifications' ? theme.primaryLight : 'transparent' }}
             onPress={() => {
               setActiveTab('notifications');
               // Batch mark all as read on the server and reset local badge
@@ -504,7 +519,7 @@ export default function HomeScreen({
               <Ionicons
                 name="notifications-outline"
                 size={24}
-                color={activeTab === 'notifications' ? '#6C63FF' : '#9A9A9A'}
+                color={activeTab === 'notifications' ? theme.primary : theme.textMuted}
               />
               {unreadCount > 0 && (
                 <View className="absolute -right-1 -top-1 h-4 w-4 items-center justify-center rounded-full bg-[#FF6B6B]">
@@ -515,20 +530,23 @@ export default function HomeScreen({
               )}
             </View>
             <Text
-              className={`mt-1 text-[10px] ${activeTab === 'notifications' ? 'font-bold text-[#6C63FF]' : 'text-[#9A9A9A]'}`}>
+              className={`mt-1 text-[10px] ${activeTab === 'notifications' ? 'font-bold' : ''}`}
+              style={{ color: activeTab === 'notifications' ? theme.primary : theme.textMuted }}>
               Notification
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            className={`items-center rounded-full p-2 px-4 ${activeTab === 'more' ? 'bg-[#EAE8FF]' : ''}`}
+            className="items-center rounded-full p-2 px-4"
+            style={{ backgroundColor: activeTab === 'more' ? theme.primaryLight : 'transparent' }}
             onPress={() => setActiveTab('more')}>
             <Ionicons
               name="ellipsis-horizontal"
               size={24}
-              color={activeTab === 'more' ? '#6C63FF' : '#9A9A9A'}
+              color={activeTab === 'more' ? theme.primary : theme.textMuted}
             />
             <Text
-              className={`mt-1 text-[10px] ${activeTab === 'more' ? 'font-bold text-[#6C63FF]' : 'text-[#9A9A9A]'}`}>
+              className={`mt-1 text-[10px] ${activeTab === 'more' ? 'font-bold' : ''}`}
+              style={{ color: activeTab === 'more' ? theme.primary : theme.textMuted }}>
               More
             </Text>
           </TouchableOpacity>
@@ -600,9 +618,9 @@ export default function HomeScreen({
           onPress={() => setShowActionSheet(false)}
           className="flex-1 justify-end bg-black/40">
           <TouchableWithoutFeedback>
-            <View className="rounded-t-[30px] bg-white p-6 pb-12">
-              <View className="mb-6 h-1 w-10 self-center rounded-full bg-gray-300" />
-              <Text className="mb-4 text-center text-lg font-bold text-[#1E1E1E]">
+            <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+              <View className="mb-6 h-1 w-10 self-center rounded-full" style={{ backgroundColor: theme.border }} />
+              <Text className="mb-4 text-center text-lg font-bold" style={{ color: theme.text }}>
                 {projectActionModal?.name}
               </Text>
 
@@ -611,9 +629,10 @@ export default function HomeScreen({
                 setShowActionSheet(false);
                 setShowEditProject(true);
               }}
-              className="flex-row items-center py-4 border-b border-gray-50">
-              <Ionicons name="create-outline" size={22} color="#7370FF" />
-              <Text className="ml-4 text-[16px] text-[#2D2D2D]">Edit Project</Text>
+              className="flex-row items-center py-4 border-b"
+              style={{ borderColor: theme.border }}>
+              <Ionicons name="create-outline" size={22} color={theme.primary} />
+              <Text className="ml-4 text-[16px]" style={{ color: theme.text }}>Edit Project</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -622,8 +641,8 @@ export default function HomeScreen({
                 setShowChangeColor(true);
               }}
               className="flex-row items-center py-4">
-              <Ionicons name="color-palette-outline" size={22} color="#7370FF" />
-              <Text className="ml-4 text-[16px] text-[#2D2D2D]">Change Project Color</Text>
+              <Ionicons name="color-palette-outline" size={22} color={theme.primary} />
+              <Text className="ml-4 text-[16px]" style={{ color: theme.text }}>Change Project Color</Text>
             </TouchableOpacity>
           </View>
           </TouchableWithoutFeedback>

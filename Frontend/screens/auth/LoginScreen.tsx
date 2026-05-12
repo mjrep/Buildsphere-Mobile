@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface LoginScreenProps {
   onLogin: (user: UserInfo, token: string) => void;
@@ -26,6 +27,7 @@ export default function LoginScreen({
   onLogin,
   onForgotPassword,
 }: LoginScreenProps) {
+  const { theme, isDark } = useAppTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -59,20 +61,20 @@ export default function LoginScreen({
   };
 
   const inputBoxStyle = {
-    shadowColor: PRIMARY,
+    shadowColor: theme.primary,
     shadowOpacity: 0.18,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
     borderWidth: 1,
-    borderColor: '#E7E7EE',
+    borderColor: theme.border,
   } as const;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#ffffff' }}>
+    <View style={{ flex: 1, backgroundColor: theme.background }}>
       {/* BACKGROUND GRADIENT */}
       <LinearGradient
-        colors={['#D8D5FF', 'rgba(255,255,255,0)']}
+        colors={isDark ? ['#313338', 'rgba(30,31,34,0)'] : ['#D8D5FF', 'rgba(255,255,255,0)']}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={{ position: 'absolute', left: 0, right: 0, top: 0, height: '60%' }}
@@ -97,38 +99,41 @@ export default function LoginScreen({
             style={{ width: 56, height: 56 }}
             resizeMode="contain"
           />
-          <Text className="mt-5 text-[22px] font-bold text-[#1E1E1E]">Log In to BuildSphere</Text>
+          <Text className="mt-5 text-[22px] font-bold" style={{ color: theme.text }}>Log In to BuildSphere</Text>
 
           <View className="mt-10 w-full">
-            <Text className="mb-2 text-[12px] font-semibold text-[#2D2D2D]">Email</Text>
-            <View className="rounded-xl bg-white" style={inputBoxStyle}>
+            <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Email</Text>
+            <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
               <TextInput
                 value={email}
                 onChangeText={setEmail}
                 placeholder="Enter your email"
-                placeholderTextColor="#B9B9B9"
+                placeholderTextColor={theme.textMuted}
                 autoCapitalize="none"
                 keyboardType="email-address"
                 className="h-[52px] px-4"
+                style={{ color: theme.text }}
               />
             </View>
 
-            <Text className="mb-2 mt-6 text-[12px] font-semibold text-[#2D2D2D]">Password</Text>
-            <View className="rounded-xl bg-white" style={inputBoxStyle}>
+            <Text className="mb-2 mt-6 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Password</Text>
+            <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
               <TextInput
                 value={password}
                 onChangeText={setPassword}
                 placeholder="Enter your password"
-                placeholderTextColor="#B9B9B9"
+                placeholderTextColor={theme.textMuted}
                 secureTextEntry
                 className="h-[52px] px-4"
+                style={{ color: theme.text }}
               />
             </View>
 
             <TouchableOpacity
               onPress={handleLogin}
               disabled={loading}
-              className="mt-10 h-[52px] items-center justify-center rounded-xl bg-[#7370FF] shadow-lg">
+              className="mt-10 h-[52px] items-center justify-center rounded-xl shadow-lg"
+              style={{ backgroundColor: theme.primary }}>
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
@@ -137,7 +142,7 @@ export default function LoginScreen({
             </TouchableOpacity>
 
             <TouchableOpacity onPress={onForgotPassword} className="mt-6 self-center">
-              <Text className="text-[12px] text-[#B8B8B8]">Forgot Password?</Text>
+              <Text className="text-[12px]" style={{ color: theme.textMuted }}>Forgot Password?</Text>
             </TouchableOpacity>
           </View>
         </View>

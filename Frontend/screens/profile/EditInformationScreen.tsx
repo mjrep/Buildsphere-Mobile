@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface EditInformationScreenProps {
   user: UserInfo;
@@ -27,6 +28,7 @@ interface EditInformationScreenProps {
 const PRIMARY = '#7370FF';
 
 export default function EditInformationScreen({ user, onBack, onSaved }: EditInformationScreenProps) {
+  const { theme } = useAppTheme();
 
   // Profile State
   const [firstName, setFirstName] = useState(user.firstName || '');
@@ -160,36 +162,36 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
 
   const inputStyle = {
     borderWidth: 1,
-    borderColor: '#E7E7EE',
+    borderColor: theme.border,
     borderRadius: 12,
     paddingHorizontal: 14,
     height: 52,
-    backgroundColor: 'white',
+    backgroundColor: theme.input,
     fontSize: 15,
-    color: '#1E1E1E',
+    color: theme.text,
   } as const;
 
   const displayImageUri = localImageUri || (user.profilePictureUrl ? (user.profilePictureUrl.startsWith('http') ? user.profilePictureUrl : `${API_URL}${user.profilePictureUrl}`) : null);
   const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
 
   return (
-    <View className="flex-1 bg-white">
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
       {/* Header */}
-      <View className="relative flex-row items-center justify-between px-5 pb-3 pt-8 border-b border-[#F5F5F7]">
+      <View className="relative flex-row items-center justify-between px-5 pb-3 pt-8 border-b" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
         <TouchableOpacity onPress={handleBackPress} className="z-10 -ml-2 -mt-1">
-          <Ionicons name="caret-back-outline" size={24} color="black" />
+          <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
         
         <View className="absolute left-0 right-0 pt-8 pb-3 items-center justify-center">
-          <Text className="text-[17px] font-bold text-[#1E1E1E]">Edit Information</Text>
+          <Text className="text-[17px] font-bold" style={{ color: theme.text }}>Edit Information</Text>
         </View>
 
         <TouchableOpacity onPress={handleSave} disabled={saving || uploading} className="z-10">
-          <View className={`px-4 py-1.5 rounded-full ${saving || uploading ? 'bg-gray-100' : 'bg-[#F4F3FF]'}`}>
+          <View className="px-4 py-1.5 rounded-full" style={{ backgroundColor: saving || uploading ? theme.input : theme.primaryLight }}>
             {saving || uploading ? (
               <ActivityIndicator size="small" color={PRIMARY} />
             ) : (
-              <Text className="text-[14px] font-bold text-[#7370FF]">Save</Text>
+              <Text className="text-[14px] font-bold" style={{ color: theme.primary }}>Save</Text>
             )}
           </View>
         </TouchableOpacity>
@@ -214,17 +216,17 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                       <Text className="text-[36px] font-bold text-white">{initials}</Text>
                     </View>
                   )}
-                  <View className="absolute right-0 bottom-0 h-8 w-8 items-center justify-center rounded-full bg-[#7370FF] border-2 border-white">
+                  <View className="absolute right-0 bottom-0 h-8 w-8 items-center justify-center rounded-full border-2" style={{ backgroundColor: theme.primary, borderColor: theme.surface }}>
                     <Ionicons name="camera" size={16} color="white" />
                   </View>
                 </TouchableOpacity>
               </View>
 
               {/* Identity Card */}
-              <View className="bg-white rounded-[24px] p-6 border border-[#F5F5F7] mb-6" style={{ shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 10, elevation: 1 }}>
+              <View className="rounded-[24px] p-6 border mb-6" style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.02, shadowRadius: 10, elevation: 1 }}>
                 <View className="flex-row items-center mb-6">
-                  <Ionicons name="person-outline" size={16} color="#A3A3A3" />
-                  <Text className="ml-2 text-[14px] font-bold text-[#1E1E1E] uppercase tracking-wider">Identity</Text>
+                  <Ionicons name="person-outline" size={16} color={theme.textMuted} />
+                  <Text className="ml-2 text-[14px] font-bold uppercase tracking-wider" style={{ color: theme.text }}>Identity</Text>
                 </View>
 
                 {[
@@ -234,24 +236,24 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                   { label: 'Suffix', value: suffix, setter: setSuffix, placeholder: 'Jr, Sr, etc.' },
                 ].map((field, idx) => (
                   <View key={idx} className="mb-5">
-                    <Text className="mb-2 text-[11px] font-bold text-[#A3A3A3] uppercase tracking-widest">{field.label}</Text>
+                    <Text className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>{field.label}</Text>
                     <TextInput
                       value={field.value}
                       onChangeText={field.setter}
                       style={inputStyle}
                       placeholder={field.placeholder}
-                      placeholderTextColor="#D0D0D0"
+                      placeholderTextColor={theme.textMuted}
                     />
                   </View>
                 ))}
 
-                <Text className="mb-2 text-[11px] font-bold text-[#A3A3A3] uppercase tracking-widest">Birthdate</Text>
+                <Text className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>Birthdate</Text>
                 <TouchableOpacity
                   activeOpacity={0.7}
                   onPress={() => setShowDatePicker(true)}
                   style={[inputStyle, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 }]}
                 >
-                  <Text className="text-[15px] text-[#1E1E1E]">
+                  <Text className="text-[15px]" style={{ color: theme.text }}>
                     {birthdate ? birthdate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Select birthdate'}
                   </Text>
                   <Ionicons name="calendar-outline" size={20} color={PRIMARY} />
@@ -259,10 +261,10 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
               </View>
 
               {/* Contact & Work Card */}
-              <View className="bg-white rounded-[24px] p-6 border border-[#F5F5F7] mb-6" style={{ shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 10, elevation: 1 }}>
+              <View className="rounded-[24px] p-6 border mb-6" style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.02, shadowRadius: 10, elevation: 1 }}>
                 <View className="flex-row items-center mb-6">
-                  <Ionicons name="briefcase-outline" size={16} color="#A3A3A3" />
-                  <Text className="ml-2 text-[14px] font-bold text-[#1E1E1E] uppercase tracking-wider">Work & Contact</Text>
+                  <Ionicons name="briefcase-outline" size={16} color={theme.textMuted} />
+                  <Text className="ml-2 text-[14px] font-bold uppercase tracking-wider" style={{ color: theme.text }}>Work & Contact</Text>
                 </View>
 
                 {[
@@ -272,13 +274,13 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                   { label: 'Address', value: address, setter: setAddress, placeholder: 'Enter address' },
                 ].map((field, idx) => (
                   <View key={idx} className="mb-5">
-                    <Text className="mb-2 text-[11px] font-bold text-[#A3A3A3] uppercase tracking-widest">{field.label}</Text>
+                    <Text className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>{field.label}</Text>
                     <TextInput
                       value={field.value}
                       onChangeText={field.setter}
                       style={inputStyle}
                       placeholder={field.placeholder}
-                      placeholderTextColor="#D0D0D0"
+                      placeholderTextColor={theme.textMuted}
                       keyboardType={(field.keyboardType as any) || 'default'}
                     />
                   </View>
@@ -294,11 +296,12 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
                 <TouchableOpacity
                   activeOpacity={1}
                   onPress={() => setShowDatePicker(false)}
-                  className="flex-1 bg-black/50 items-center justify-center px-6"
+                  className="flex-1 items-center justify-center px-6"
+                  style={{ backgroundColor: theme.overlay }}
                 >
-                  <View className="w-full bg-white rounded-[28px] p-6 overflow-hidden">
-                    <View className="flex-row items-center justify-between mb-4 pb-4 border-b border-[#F5F5F7]">
-                      <Text className="text-[16px] font-bold text-[#1E1E1E]">Select Birthdate</Text>
+                  <View className="w-full rounded-[28px] p-6 overflow-hidden" style={{ backgroundColor: theme.elevated }}>
+                    <View className="flex-row items-center justify-between mb-4 pb-4 border-b" style={{ borderColor: theme.border }}>
+                      <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Select Birthdate</Text>
                       <TouchableOpacity onPress={() => setShowDatePicker(false)}>
                         <Text className="text-[14px] font-bold text-[#7370FF]">Done</Text>
                       </TouchableOpacity>

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { UserInfo } from '../../App';
 import EditInformationScreen from './EditInformationScreen';
 import { API_URL } from '../../lib/api';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface MoreScreenProps {
   user: UserInfo;
@@ -15,6 +16,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
   const [screen, setScreen] = useState<'more' | 'editInfo'>('more');
   const [profile, setProfile] = useState<UserInfo>(user);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const { theme, mode, setMode } = useAppTheme();
 
   useEffect(() => {
     setProfile(user);
@@ -79,7 +81,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
   }
 
   return (
-    <View className="flex-1 bg-white">
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <ScrollView className="flex-1 px-6 pt-14" contentContainerStyle={{ paddingBottom: 150 }}>
         {/* Avatar + Name */}
         <View className="mb-10 mt-6 items-center">
@@ -111,9 +113,9 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
           )}
 
           {loadingProfile && <ActivityIndicator className="mt-2" color="#7370FF" />}
-          <Text className="mt-4 text-[20px] font-bold text-[#1E1E1E]">{fullName || 'Unnamed User'}</Text>
-          <Text className="mt-1 text-[13px] text-[#A3A3A3]">{profile.email}</Text>
-          <Text className="mt-1 text-[12px] uppercase text-[#7D7D7D]">{profile.role || 'staff'}</Text>
+          <Text className="mt-4 text-[20px] font-bold" style={{ color: theme.text }}>{fullName || 'Unnamed User'}</Text>
+          <Text className="mt-1 text-[13px]" style={{ color: theme.textMuted }}>{profile.email}</Text>
+          <Text className="mt-1 text-[12px] uppercase" style={{ color: theme.textSecondary }}>{profile.role || 'staff'}</Text>
 
           <TouchableOpacity onPress={() => setScreen('editInfo')} className="mt-2">
             <Text className="text-[13px] font-semibold text-[#7370FF]">Edit Profile</Text>
@@ -121,21 +123,22 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
         </View>
 
         <View 
-          className="mb-8 rounded-[24px] border border-[#F0F0F0] bg-white p-6"
-          style={{ shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 15, elevation: 2 }}
+          className="mb-8 rounded-[24px] border p-6"
+          style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.04, shadowRadius: 15, elevation: 2 }}
         >
           <View className="mb-6 flex-row items-center justify-between">
             <View>
-              <Text className="text-[16px] font-extrabold text-[#1E1E1E] uppercase tracking-tight">Profile Info</Text>
+              <Text className="text-[16px] font-extrabold uppercase tracking-tight" style={{ color: theme.text }}>Profile Info</Text>
               <View className="mt-1 flex-row items-center">
                 <View className={`h-1.5 w-1.5 rounded-full mr-1.5 ${profile.accountStatus === 'active' ? 'bg-[#4CAF50]' : 'bg-[#FF9800]'}`} />
-                <Text className="text-[10px] font-bold text-[#A3A3A3] uppercase">{profile.accountStatus || 'active'}</Text>
+                <Text className="text-[10px] font-bold uppercase" style={{ color: theme.textMuted }}>{profile.accountStatus || 'active'}</Text>
               </View>
             </View>
             
             <TouchableOpacity 
               onPress={() => setScreen('editInfo')}
-              className="flex-row items-center bg-[#F3F0FF] px-3 py-2 rounded-xl"
+              className="flex-row items-center px-3 py-2 rounded-xl"
+              style={{ backgroundColor: theme.primaryLight }}
             >
               <Ionicons name="settings-outline" size={16} color="#7370FF" />
               <Text className="ml-1.5 text-[11px] font-bold text-[#7370FF]">Manage</Text>
@@ -156,30 +159,46 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
                   <View className="mr-2 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: `${item.color}15` }}>
                     <Ionicons name={item.icon as any} size={18} color={item.color} />
                   </View>
-                  <Text className="text-[11px] font-medium text-[#A3A3A3]">{item.label}</Text>
+                  <Text className="text-[11px] font-medium" style={{ color: theme.textMuted }}>{item.label}</Text>
                 </View>
-                <Text className="ml-10 text-[13px] font-bold text-[#444]" numberOfLines={1}>
+                <Text className="ml-10 text-[13px] font-bold" style={{ color: theme.textSecondary }} numberOfLines={1}>
                   {item.value || 'Not set'}
                 </Text>
               </View>
             ))}
           </View>
 
-          <View className="mt-2 flex-row items-center border-t border-[#F9F9F9] pt-4">
-            <View className="mr-3 h-8 w-8 items-center justify-center rounded-full bg-[#F3F0FF]">
+          <View className="mt-2 flex-row items-center border-t pt-4" style={{ borderColor: theme.border }}>
+            <View className="mr-3 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
               <Ionicons name="mail-outline" size={16} color="#7370FF" />
             </View>
             <View>
-              <Text className="text-[10px] font-bold uppercase tracking-wider text-[#A3A3A3]">Official Email</Text>
-              <Text className="text-[14px] font-semibold text-[#1E1E1E]">{profile.email}</Text>
+              <Text className="text-[10px] font-bold uppercase tracking-wider" style={{ color: theme.textMuted }}>Official Email</Text>
+              <Text className="text-[14px] font-semibold" style={{ color: theme.text }}>{profile.email}</Text>
             </View>
           </View>
         </View>
 
         {/* Menu Items */}
         <View
-          className="overflow-hidden rounded-2xl border border-[#F0F0F0] bg-white"
-          style={{ shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}>
+          className="mb-8 overflow-hidden rounded-2xl border"
+          style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}>
+          <View className="border-b px-5 py-4" style={{ borderColor: theme.border }}>
+            <Text className="mb-3 text-[13px] font-bold uppercase" style={{ color: theme.textMuted }}>Appearance</Text>
+            <View className="flex-row rounded-2xl p-1" style={{ backgroundColor: theme.input }}>
+              {(['light', 'dark'] as const).map((item) => (
+                <TouchableOpacity
+                  key={item}
+                  onPress={() => setMode(item)}
+                  className="flex-1 rounded-xl py-2"
+                  style={{ backgroundColor: mode === item ? theme.primary : 'transparent' }}>
+                  <Text className="text-center text-[13px] font-bold" style={{ color: mode === item ? '#FFFFFF' : theme.textSecondary }}>
+                    {item === 'light' ? 'Light' : 'Dark'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
           
           <TouchableOpacity
             onPress={async () => {
@@ -198,11 +217,11 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
                 Alert.alert('Error', 'Network error.');
               }
             }}
-            className="flex-row items-center border-b border-[#F5F5F5] px-5 py-4">
+            className="flex-row items-center border-b px-5 py-4" style={{ borderColor: theme.border }}>
             <View className="mr-3 h-8 w-8 items-center justify-center rounded-full bg-[#E8F5E9]">
               <Ionicons name="flask-outline" size={18} color="#4CAF50" />
             </View>
-            <Text className="text-[15px] font-medium text-[#1E1E1E]">Send Test Notification</Text>
+            <Text className="text-[15px] font-medium" style={{ color: theme.text }}>Send Test Notification</Text>
           </TouchableOpacity>
 
           <TouchableOpacity 

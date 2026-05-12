@@ -16,6 +16,7 @@ import SiteUpdatesScreen from './SiteUpdatesScreen';
 import ProjectTasksView from './ProjectTasksView';
 import TaskDetailScreen from './TaskDetailScreen';
 import { type UserRole } from '../../constants/roles';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 const { width } = Dimensions.get('window');
 
@@ -74,6 +75,7 @@ function daysLeft(end?: string) {
 }
 
 export default function ProjectDetailScreen({ projectId, userId, onBack, userRole }: Props) {
+  const { theme } = useAppTheme();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -130,17 +132,17 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
 
   if (loading) {
     return (
-      <View className="flex-1 items-center justify-center bg-white">
-        <ActivityIndicator color="#7370FF" size="large" />
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: theme.background }}>
+        <ActivityIndicator color={theme.primary} size="large" />
       </View>
     );
   }
   if (error || !project) {
     return (
-      <View className="flex-1 items-center justify-center bg-white px-8">
-        <Ionicons name="alert-circle-outline" size={34} color="#FF6B6B" />
-        <Text className="mt-2 text-center text-[#A06565]">{error || 'Project not found.'}</Text>
-        <TouchableOpacity onPress={loadProject} className="mt-4 rounded-xl bg-[#7370FF] px-4 py-2">
+      <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: theme.background }}>
+        <Ionicons name="alert-circle-outline" size={34} color={theme.danger} />
+        <Text className="mt-2 text-center" style={{ color: theme.textSecondary }}>{error || 'Project not found.'}</Text>
+        <TouchableOpacity onPress={loadProject} className="mt-4 rounded-xl px-4 py-2" style={{ backgroundColor: theme.primary }}>
           <Text className="font-semibold text-white">Retry</Text>
         </TouchableOpacity>
       </View>
@@ -152,24 +154,24 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
   const progress = project.progress || 0;
 
   return (
-    <View className="flex-1 bg-white">
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <ScrollView
         className="flex-1 px-5"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}>
         <View className="flex-row items-center px-5 pb-4 pt-12">
           <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 -mt-1">
-            <Ionicons name="caret-back-outline" size={24} color="black" />
+            <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
-          <Text className="flex-1 text-[24px] font-bold text-[#7370FF]">{project.name}</Text>
+          <Text className="flex-1 text-[24px] font-bold" style={{ color: theme.primary }}>{project.name}</Text>
         </View>
 
         {/* Main Info Card */}
         <View
-          className="mb-5 rounded-[24px] border border-[#F0F0F0] bg-white p-6"
-          style={{ shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
+          className="mb-5 rounded-[24px] border p-6"
+          style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
           <View className="mb-3 flex-row items-center justify-between">
-            <Text className="flex-1 text-[20px] font-bold text-[#1E1E1E]">{project.name}</Text>
+            <Text className="flex-1 text-[20px] font-bold" style={{ color: theme.text }}>{project.name}</Text>
             <View className="rounded-full px-5 py-2" style={{ backgroundColor: badge.bg }}>
               <Text className="text-[11px] font-bold uppercase tracking-wider text-white">
                 {badge.label}
@@ -178,22 +180,22 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
           </View>
 
           <View className="mb-6 flex-row items-center">
-            <View className="flex-row items-center rounded-lg border border-[#DEDCFF] bg-[#EAE8FF] px-3 py-1.5">
-              <Ionicons name="time-outline" size={14} color="#7370FF" />
-              <Text className="ml-1.5 text-[12px] font-bold text-[#7370FF]">{days} days left</Text>
+            <View className="flex-row items-center rounded-lg border px-3 py-1.5" style={{ backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
+              <Ionicons name="time-outline" size={14} color={theme.primary} />
+              <Text className="ml-1.5 text-[12px] font-bold" style={{ color: theme.primary }}>{days} days left</Text>
             </View>
           </View>
 
           <View className="mb-6 flex-row">
             <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium text-[#A3A3A3]">Project Engineer</Text>
-              <Text className="text-[13px] font-bold text-[#1E1E1E]">
+              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Project Engineer</Text>
+              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>
                 {project.engineer || 'Michael Replan'}
               </Text>
             </View>
             <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium text-[#A3A3A3]">Project Start</Text>
-              <Text className="text-[13px] font-bold text-[#1E1E1E]">
+              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Project Start</Text>
+              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>
                 {fmt(project.start_date)}
               </Text>
             </View>
@@ -201,25 +203,25 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
 
           <View className="flex-row">
             <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium text-[#A3A3A3]">Budget</Text>
-              <Text className="text-[13px] font-bold text-[#1E1E1E]">
+              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Budget</Text>
+              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>
                 ₱{project.budget?.toLocaleString()}
               </Text>
             </View>
             <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium text-[#A3A3A3]">Project End</Text>
-              <Text className="text-[13px] font-bold text-[#1E1E1E]">{fmt(project.end_date)}</Text>
+              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Project End</Text>
+              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>{fmt(project.end_date)}</Text>
             </View>
           </View>
         </View>
 
         {/* Progress Card */}
         <View
-          className="mb-4 rounded-[24px] border border-[#F0F0F0] bg-white p-6"
-          style={{ shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
+          className="mb-4 rounded-[24px] border p-6"
+          style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
           <View className="mb-4 flex-row items-center justify-between">
-            <Text className="text-[18px] font-bold text-[#1E1E1E]">Project Progress</Text>
-            <Text className="text-[11px] text-[#A3A3A3]">as of 01/31/26</Text>
+            <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Project Progress</Text>
+            <Text className="text-[11px]" style={{ color: theme.textMuted }}>as of 01/31/26</Text>
           </View>
 
           <View className="mb-6 flex-row items-center">
@@ -233,7 +235,7 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
             </View>
           </View>
 
-          <View className="h-[2px] w-full rounded-full bg-[#E0E0E0]">
+          <View className="h-[2px] w-full rounded-full" style={{ backgroundColor: theme.border }}>
             <View
               style={{ width: `${progress}%`, backgroundColor: '#5DBF50' }}
               className="h-full rounded-full"
@@ -255,10 +257,10 @@ export default function ProjectDetailScreen({ projectId, userId, onBack, userRol
                 else if (item.key === 'inventory') setActiveSection('inventory');
                 else if (item.key === 'tasks') setActiveSection('tasks');
               }}
-              className="mb-4 flex-row items-center justify-between rounded-[20px] border border-[#F5F5F7] bg-white px-6 py-5"
-              style={{ shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 5, elevation: 1 }}>
-              <Text className="text-[16px] font-bold text-[#1E1E1E]">{item.label}</Text>
-              <Ionicons name="chevron-forward" size={24} color="#D1D1D6" />
+              className="mb-4 flex-row items-center justify-between rounded-[20px] border px-6 py-5"
+              style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.02, shadowRadius: 5, elevation: 1 }}>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>{item.label}</Text>
+              <Ionicons name="chevron-forward" size={24} color={theme.textMuted} />
             </TouchableOpacity>
           ))}
         </View>

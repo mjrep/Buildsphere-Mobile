@@ -1,18 +1,15 @@
 """
-BuildSphere CV Service — YOLO Glass Panel Detector.
+BuildSphere CV Service - YOLOv8 box-based glass panel detector.
 
-Wraps the Ultralytics YOLO model with glass-panel-specific
-preprocessing, inference, and post-processing logic.
-
-Detection modes (auto-selected at runtime):
-  • YOLO (Primary)      — YOLOv8/seg: Primary detector and counter for glass panels.
-  • Gemini (Auditor)    — Gemini AI: Only generates professional audit summaries.
-  • Gemini Fallback     — Emergency only: Runs only if YOLO returns zero detections.
+YOLOv8 detects and highlights glass panels with bounding boxes only.
+Python post-processing classifies each box as full or partial, counts only
+full panels, and leaves the final verified count to the mobile user.
+Gemini is used only to summarize the structured result.
 """
 
-import time
+import base64
 import logging
-from pathlib import Path
+import time
 
 import numpy as np
 from PIL import Image
@@ -21,27 +18,17 @@ from ultralytics import YOLO
 from app.config import settings
 from app.models import Detection, DetectionResponse
 
-# ── False-positive filter thresholds ─────────────────────────────────
-# Glass is transparent/reflective → high colour variance across the crop.
-# Solid walls / columns are uniform → low variance.
-# Increased to 45 to be more aggressive against textured wood/walls.
+# False-positive filter thresholds.
+# Glass is transparent/reflective, so useful crops usually have color variance.
 _MIN_COLOR_VARIANCE: float = 45.0
-# Minimum fraction of the image dimension a panel must cover to be real.
-_MIN_REL_SIZE: float = 0.005   # 0.5 % of image width or height
+_MIN_REL_SIZE: float = 0.005
+_PARTIAL_MARGIN_PX: int = 10
 
 logger = logging.getLogger(__name__)
 
 
 class GlassPanelDetector:
-    """
-    Encapsulates the YOLO model for glass panel detection.
-
-    Handles:
-    - Model loading (GPU with CPU fallback)
-    - Image preprocessing
-    - Inference with configurable thresholds
-    - Result formatting into the API response schema
-    """
+    """Encapsulates YOLOv8 object detection and box-based panel counting."""
 
     def __init__(self) -> None:
         self.model: YOLO | None = None
@@ -50,40 +37,29 @@ class GlassPanelDetector:
         self._is_loaded: bool = False
 
     def load_model(self) -> None:
-        """
-        Load the YOLO model into memory.
-        Attempts GPU (CUDA) first, falls back to CPU.
-        """
-        logger.info(f"Loading YOLO model: {self.model_path}")
+        """Load the YOLO model into memory, preferring CUDA when available."""
+        logger.info("Loading YOLO model: %s", self.model_path)
 
         try:
             self.model = YOLO(self.model_path)
-
-            # Attempt GPU inference; silently fall back to CPU
             try:
                 import torch
 
                 if torch.cuda.is_available():
                     self.device = "cuda"
-                    logger.info(
-                        f"CUDA available — using GPU: {torch.cuda.get_device_name(0)}"
-                    )
+                    logger.info("CUDA available, using GPU: %s", torch.cuda.get_device_name(0))
                 else:
                     self.device = "cpu"
-                    logger.info("CUDA not available — using CPU")
+                    logger.info("CUDA not available, using CPU")
             except ImportError:
                 self.device = "cpu"
-                logger.info("PyTorch CUDA not installed — using CPU")
+                logger.info("PyTorch CUDA not installed, using CPU")
 
             self._is_loaded = True
-            logger.info(
-                f"✅ Model loaded successfully on {self.device} "
-                f"({self.model_path})"
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Failed to load model: {e}")
-            raise RuntimeError(f"Model loading failed: {e}") from e
+            logger.info("Model loaded successfully on %s (%s)", self.device, self.model_path)
+        except Exception as exc:
+            logger.error("Failed to load model: %s", exc)
+            raise RuntimeError(f"Model loading failed: {exc}") from exc
 
     @property
     def is_loaded(self) -> bool:
@@ -91,30 +67,18 @@ class GlassPanelDetector:
 
     def detect(self, image: Image.Image) -> DetectionResponse:
         """
-        Run glass panel detection on a PIL Image.
+        Run regular YOLOv8 object detection on a PIL Image.
 
-        - **YOLO Primary Detection**: Automatically switches between standard
-          bounding boxes and segmentation masks based on the model loaded.
-        - **Counting**: Derived directly from YOLO results.
-
-        If the loaded model does not produce masks, the method automatically
-        falls back to bounding-box-only counting.
-
-        Args:
-            image: PIL Image in RGB format.
-
-        Returns:
-            DetectionResponse with bounding boxes, optional polygons,
-            counts, annotated image, and metadata.
+        This intentionally uses bounding boxes only. Boxes near
+        the image boundary are marked partial/cut-off and excluded from the AI
+        count so the user can retake the photo or manually verify the count.
         """
         if not self._is_loaded or self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
 
         original_width, original_height = image.size
 
-        # ── Run YOLO inference ────────────────────────────────────────
         start_time = time.perf_counter()
-
         results = self.model.predict(
             source=image,
             conf=settings.CONFIDENCE_THRESHOLD,
@@ -124,237 +88,158 @@ class GlassPanelDetector:
             device=self.device,
             verbose=False,
         )
-
         inference_ms = (time.perf_counter() - start_time) * 1000
 
-        # ── Prepare image arrays for annotation ───────────────────────
         import cv2
-        import base64
 
-        cv_img = np.array(image.convert('RGB'))
-        cv_img = cv_img[:, :, ::-1].copy()  # RGB → BGR for OpenCV
-        # Keep an RGB copy for colour-variance analysis
-        rgb_arr = np.array(image.convert('RGB'))
+        cv_img = np.array(image.convert("RGB"))
+        cv_img = cv_img[:, :, ::-1].copy()
+        rgb_arr = np.array(image.convert("RGB"))
 
-        # ── Parse results ─────────────────────────────────────────────
         detections: list[Detection] = []
-        valid_panel_count = 0
-        # Track which detection mode was used: "box" or "segmentation"
+        total_valid_panels = 0
+        partial_panels = 0
+        unclear_panels = 0
+        excluded_low_confidence = 0
+        excluded_duplicates = 0
+        excluded_contained = 0
+        excluded_small_boxes = 0
+        excluded_unrealistic_shape = 0
         detection_mode = "box"
 
         if results and len(results) > 0:
-            result = results[0]  # Single image → single result
+            result = results[0]
+            boxes = result.boxes
 
-            # ─────────────────────────────────────────────────────────
-            #  Determine detection mode:
-            #    • If result.masks is NOT None → YOLOv8-seg model
-            #    • Otherwise                   → standard YOLOv8 box model
-            # ─────────────────────────────────────────────────────────
-            has_masks = (
-                hasattr(result, 'masks')
-                and result.masks is not None
-                and len(result.masks) > 0
-            )
-
-            if has_masks:
-                # ═══════════════════════════════════════════════════════
-                #  SEGMENTATION PATH  (YOLOv8-seg)
-                #  Uses polygon masks for counting and annotation.
-                #  Bounding boxes are still extracted alongside masks.
-                # ═══════════════════════════════════════════════════════
-                detection_mode = "segmentation"
-                masks = result.masks
-                boxes = result.boxes
-                logger.info(
-                    f"🔍 YOLOv8-seg: {len(masks)} segmentation masks found"
-                )
-
-                # Build raw detections with both box + polygon data
+            if boxes is not None and len(boxes) > 0:
+                logger.info("YOLOv8 box detector found %s raw boxes", len(boxes))
                 raw_detections = []
-                for i in range(len(masks)):
-                    # Polygon vertices from the mask (pixel coordinates)
-                    polygon_xy = masks.xy[i]  # ndarray of shape (N, 2)
-                    polygon_list = [
-                        [round(float(pt[0]), 1), round(float(pt[1]), 1)]
-                        for pt in polygon_xy
-                    ]
 
-                    # Bounding box (always available alongside masks)
+                for i in range(len(boxes)):
                     xyxy = boxes.xyxy[i].cpu().numpy()
                     confidence = float(boxes.conf[i].cpu().numpy())
                     class_id = int(boxes.cls[i].cpu().numpy())
+
+                    if settings.USE_PRETRAINED_COCO and class_id == 0:
+                        continue
+
+                    x_min, y_min, x_max, y_max = map(int, xyxy)
+
+                    if confidence < settings.CONFIDENCE_THRESHOLD:
+                        excluded_low_confidence += 1
+                        continue
+
+                    shape_rejection = self._box_rejection_reason(
+                        x_min,
+                        y_min,
+                        x_max,
+                        y_max,
+                        original_width,
+                        original_height,
+                    )
+                    if shape_rejection == "small":
+                        excluded_small_boxes += 1
+                        logger.info(
+                            "Rejected detection at [%s,%s,%s,%s] (conf=%.2f): box too small",
+                            x_min,
+                            y_min,
+                            x_max,
+                            y_max,
+                            confidence,
+                        )
+                        continue
+                    if shape_rejection == "shape":
+                        excluded_unrealistic_shape += 1
+                        logger.info(
+                            "Rejected detection at [%s,%s,%s,%s] (conf=%.2f): unrealistic aspect ratio",
+                            x_min,
+                            y_min,
+                            x_max,
+                            y_max,
+                            confidence,
+                        )
+                        continue
+
+                    if self._is_wall_or_column(
+                        rgb_arr,
+                        x_min,
+                        y_min,
+                        x_max,
+                        y_max,
+                        original_width,
+                        original_height,
+                    ):
+                        logger.info(
+                            "Rejected detection at [%s,%s,%s,%s] (conf=%.2f): low color variance or too small",
+                            x_min,
+                            y_min,
+                            x_max,
+                            y_max,
+                            confidence,
+                        )
+                        continue
 
                     class_name = (
                         result.names[class_id]
                         if result.names and class_id in result.names
                         else "glass_panel"
                     )
-
-                    # Skip person class if using pre-trained COCO model
-                    if settings.USE_PRETRAINED_COCO and class_id == 0:
-                        continue
-
-                    raw_detections.append({
-                        "xyxy": xyxy,
-                        "conf": confidence,
-                        "class_name": class_name,
-                        "polygon": polygon_list,
-                        "polygon_np": polygon_xy,
-                    })
-
-                # Apply Secondary NMS safety check
-                before_nms = len(raw_detections)
-                raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
-                if len(raw_detections) < before_nms:
-                    logger.info(f"🛡️ NMS suppressed {before_nms - len(raw_detections)} overlapping masks")
-
-                # Sort by confidence (highest first)
-                raw_detections.sort(key=lambda d: d["conf"], reverse=True)
-                # Process, annotate, and build Detection objects
-                for det in raw_detections:
-                    xyxy = det["xyxy"]
-                    confidence = det["conf"]
-                    polygon_list = det["polygon"]
-                    polygon_np = det["polygon_np"]
-
-                    x_min, y_min, x_max, y_max = map(int, xyxy)
-
-                    # ── Wall / column false-positive filter ───────
-                    if self._is_wall_or_column(rgb_arr, x_min, y_min, x_max, y_max,
-                                               original_width, original_height):
-                        logger.info(
-                            f"Rejected seg-detection at [{x_min},{y_min},{x_max},{y_max}] "
-                            f"(conf={confidence:.2f}) — low colour variance (wall/column)"
-                        )
-                        continue
-
-                    # Build Detection with polygon data
-
-                    class_name = "full_glass_panel"
-                    is_class_b = False
-
-                    # Build Detection with polygon data
-                    detection = Detection(
-                        bounding_box=[
-                            round(float(xyxy[0]), 1),
-                            round(float(xyxy[1]), 1),
-                            round(float(xyxy[2]), 1),
-                            round(float(xyxy[3]), 1),
-                        ],
-                        confidence_score=round(confidence, 4),
-                        label=class_name,
-                        polygon=polygon_list,
-                    )
-                    detections.append(detection)
-
-                    if not is_class_b:
-                        # Fully visible panel — draw filled polygon overlay
-                        valid_panel_count += 1
-                        color = (0, 0, 255)  # BGR: PRO-RED
-
-                        # Draw translucent polygon fill
-                        pts = polygon_np.astype(np.int32).reshape((-1, 1, 2))
-                        overlay = cv_img.copy()
-                        cv2.fillPoly(overlay, [pts], color)
-                        cv2.addWeighted(overlay, 0.3, cv_img, 0.7, 0, cv_img)
-                        # Draw polygon outline
-                        cv2.polylines(cv_img, [pts], isClosed=True, color=color, thickness=2)
-
-                        # Label text
-                        label_text = f"PANEL #{valid_panel_count}"
-                        (tw, th), _ = cv2.getTextSize(
-                            label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
-                        )
-                        cv2.rectangle(
-                            cv_img,
-                            (x_min, y_min - th - 10),
-                            (x_min + tw + 10, y_min),
-                            color, -1,
-                        )
-                        cv2.putText(
-                            cv_img, label_text,
-                            (x_min + 5, y_min - 7),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                            (255, 255, 255), 2,
-                        )
-
-            else:
-                # ═══════════════════════════════════════════════════════
-                #  BOX DETECTION PATH  (standard YOLOv8)
-                #  Current behaviour — counts panels from bounding boxes.
-                #  No polygon data is produced.
-                # ═══════════════════════════════════════════════════════
-                detection_mode = "box"
-
-                if result.boxes is not None and len(result.boxes) > 0:
-                    boxes = result.boxes
-                    logger.info(
-                        f"🔍 YOLO Raw Detections: {len(boxes)} boxes found"
-                    )
-
-                    # Extract all raw detections first to sort them
-                    raw_detections = []
-                    for i in range(len(boxes)):
-                        xyxy = boxes.xyxy[i].cpu().numpy()
-                        confidence = float(boxes.conf[i].cpu().numpy())
-                        class_id = int(boxes.cls[i].cpu().numpy())
-
-                        logger.info(
-                            f"📍 Raw Box {i}: Class={class_id}, "
-                            f"Conf={confidence:.3f}, Path={xyxy}"
-                        )
-
-                        class_name = (
-                            result.names[class_id]
-                            if result.names and class_id in result.names
-                            else "glass_panel"
-                        )
-
-                        if settings.USE_PRETRAINED_COCO and class_id == 0:
-                            # Skip 'person' class in COCO model
-                            continue
-
-                        # ── Wall / column false-positive filter ───────
-                        x1, y1, x2, y2 = map(int, xyxy)
-                        if self._is_wall_or_column(rgb_arr, x1, y1, x2, y2,
-                                                   original_width, original_height):
-                            logger.info(
-                                f"Rejected detection at [{x1},{y1},{x2},{y2}] "
-                                f"(conf={confidence:.2f}) — low colour variance (wall/column)"
-                            )
-                            continue
-
-                        raw_detections.append({
+                    raw_detections.append(
+                        {
                             "xyxy": xyxy,
                             "conf": confidence,
                             "class_name": class_name,
-                        })
-
-                    # Apply Secondary NMS safety check
-                    before_nms = len(raw_detections)
-                    raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
-                    if len(raw_detections) < before_nms:
-                        logger.info(f"🛡️ NMS suppressed {before_nms - len(raw_detections)} overlapping boxes")
-
-                    # Sort by confidence (highest first)
-                    raw_detections.sort(
-                        key=lambda d: d["conf"], reverse=True
+                        }
                     )
 
-                    # Process and draw bounding boxes
-                    for det in raw_detections:
-                        xyxy = det["xyxy"]
-                        confidence = det["conf"]
-                        class_name = det["class_name"]
+                before_nms = len(raw_detections)
+                raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
+                if len(raw_detections) < before_nms:
+                    excluded_duplicates += before_nms - len(raw_detections)
+                    logger.info("NMS suppressed %s overlapping boxes", before_nms - len(raw_detections))
 
-                        x_min, y_min, x_max, y_max = map(int, xyxy)
+                before_containment = len(raw_detections)
+                raw_detections = self._remove_contained_boxes(
+                    raw_detections,
+                    settings.CONTAINMENT_THRESHOLD,
+                )
+                if len(raw_detections) < before_containment:
+                    excluded_contained += before_containment - len(raw_detections)
+                    logger.info(
+                        "Containment filtering removed %s nested boxes",
+                        before_containment - len(raw_detections),
+                    )
 
-                        # Simplified: Every detection is a glass panel
-                        class_name = "full_glass_panel"
-                        is_class_b = False
+                raw_detections.sort(key=lambda det: det["conf"], reverse=True)
 
-                        # Build Detection (no polygon for box mode)
-                        detection = Detection(
+                for det in raw_detections:
+                    xyxy = det["xyxy"]
+                    confidence = det["conf"]
+                    x_min, y_min, x_max, y_max = map(int, xyxy)
+                    is_partial = self._is_partial_box(
+                        x_min,
+                        y_min,
+                        x_max,
+                        y_max,
+                        original_width,
+                        original_height,
+                    )
+
+                    if is_partial:
+                        status = "partial"
+                        counted = False
+                        partial_panels += 1
+                        color = (0, 165, 255)  # BGR orange/yellow warning.
+                        label_text = "Partial - Not Counted"
+                    else:
+                        status = "full"
+                        counted = True
+                        total_valid_panels += 1
+                        color = (0, 0, 255)  # Existing counted color.
+                        label_text = f"Counted #{total_valid_panels}"
+
+                    detections.append(
+                        Detection(
                             bounding_box=[
                                 round(float(xyxy[0]), 1),
                                 round(float(xyxy[1]), 1),
@@ -362,98 +247,74 @@ class GlassPanelDetector:
                                 round(float(xyxy[3]), 1),
                             ],
                             confidence_score=round(confidence, 4),
-                            label=class_name,
-                            polygon=None,  # box detection = no polygon
+                            label="glass_panel",
+                            status=status,
+                            counted=counted,
                         )
-                        detections.append(detection)
+                    )
 
-                        if not is_class_b:
-                            # Class A: Fully visible (GREEN)
-                            valid_panel_count += 1
-                            color = (0, 0, 255)  # BGR for PRO-RED
+                    if counted:
+                        overlay = cv_img.copy()
+                        cv2.rectangle(overlay, (x_min, y_min), (x_max, y_max), color, -1)
+                        cv2.addWeighted(overlay, 0.25, cv_img, 0.75, 0, cv_img)
 
-                            overlay = cv_img.copy()
-                            cv2.rectangle(
-                                overlay,
-                                (x_min, y_min), (x_max, y_max),
-                                color, -1,
-                            )
-                            cv2.addWeighted(
-                                overlay, 0.3, cv_img, 0.7, 0, cv_img
-                            )
-                            cv2.rectangle(
-                                cv_img,
-                                (x_min, y_min), (x_max, y_max),
-                                color, 2,
-                            )
+                    cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
+                    self._draw_label(cv_img, cv2, x_min, y_min, label_text, color)
 
-                            label_text = f"PANEL #{valid_panel_count}"
-                            (tw, th), _ = cv2.getTextSize(
-                                label_text,
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2,
-                            )
-                            cv2.rectangle(
-                                cv_img,
-                                (x_min, y_min - th - 10),
-                                (x_min + tw + 10, y_min),
-                                color, -1,
-                            )
-                            cv2.putText(
-                                cv_img, label_text,
-                                (x_min + 5, y_min - 7),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                                (255, 255, 255), 2,
-                            )
-                        else:
-                            # Class B: Partial/Obscured (ORANGE/YELLOW)
-                            color = (0, 165, 255)  # BGR for Orange
-                            cv2.rectangle(
-                                cv_img,
-                                (x_min, y_min), (x_max, y_max),
-                                color, 2,
-                            )
-
-                            label_text = (
-                                "This part of the photo is not fully visible"
-                            )
-                            (tw, th), _ = cv2.getTextSize(
-                                label_text,
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2,
-                            )
-                            y_text = (
-                                y_min
-                                if y_min > th + 10
-                                else y_min + th + 10
-                            )
-                            cv2.rectangle(
-                                cv_img,
-                                (x_min, y_text - th - 10),
-                                (x_min + tw + 10, y_text),
-                                color, -1,
-                            )
-                            cv2.putText(
-                                cv_img, label_text,
-                                (x_min + 5, y_text - 7),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                                (255, 255, 255), 2,
-                            )
-
-        # ── Encode annotated image to Base64 ──────────────────────────
-        _, buffer = cv2.imencode(
-            '.jpg', cv_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85]
+        avg_confidence = (
+            sum(det.confidence_score for det in detections) / len(detections)
+            if detections
+            else 0.0
         )
-        encoded_image = base64.b64encode(buffer).decode('utf-8')
+        excluded_panels = (
+            partial_panels
+            + unclear_panels
+            + excluded_low_confidence
+            + excluded_duplicates
+            + excluded_contained
+            + excluded_small_boxes
+            + excluded_unrealistic_shape
+        )
+        has_warnings = excluded_panels > 0
+        warning_message = self._warning_message(
+            partial_panels,
+            unclear_panels,
+            excluded_low_confidence,
+            excluded_duplicates,
+            excluded_contained,
+            excluded_small_boxes,
+            excluded_unrealistic_shape,
+        )
+
+        _, buffer = cv2.imencode(".jpg", cv_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        encoded_image = base64.b64encode(buffer).decode("utf-8")
         annotated_image_base64 = f"data:image/jpeg;base64,{encoded_image}"
 
         logger.info(
-            f"Detected {valid_panel_count} valid panels out of "
-            f"{len(detections)} total in {inference_ms:.1f}ms "
-            f"(image: {original_width}x{original_height}, "
-            f"mode: {detection_mode})"
+            "Detected %s valid panels, %s partial panels, %s total detections in %.1fms (%sx%s, mode=%s)",
+            total_valid_panels,
+            partial_panels,
+            len(detections),
+            inference_ms,
+            original_width,
+            original_height,
+            detection_mode,
         )
 
         return DetectionResponse(
-            total_valid_panels=valid_panel_count,
+            total_valid_panels=total_valid_panels,
+            partial_panels=partial_panels,
+            unclear_panels=unclear_panels,
+            excluded_panels=excluded_panels,
+            excluded_low_confidence=excluded_low_confidence,
+            excluded_duplicates=excluded_duplicates,
+            excluded_contained=excluded_contained,
+            excluded_small_boxes=excluded_small_boxes,
+            excluded_unrealistic_shape=excluded_unrealistic_shape,
+            avg_confidence=round(avg_confidence, 4),
+            detection_mode=detection_mode,
+            has_warnings=has_warnings,
+            warning_message=warning_message,
             detections=detections,
             annotated_image_base64=annotated_image_base64,
             image_width=original_width,
@@ -462,87 +323,389 @@ class GlassPanelDetector:
             model_version=self.model_path,
             confidence_threshold=settings.CONFIDENCE_THRESHOLD,
             nms_iou_threshold=settings.NMS_IOU_THRESHOLD,
-            detection_mode=detection_mode,
         )
 
+    def draw_fallback_boxes(
+        self,
+        image: Image.Image,
+        gemini_boxes: list[list[int]],
+        inference_ms: float,
+    ) -> DetectionResponse:
+        """
+        Emergency-only Gemini Vision fallback.
 
-    # ── Helper: wall / column false-positive filter ──────────────────
+        Gemini fallback is used only when YOLO returns no boxes. Python still
+        classifies the fallback boxes and the mobile user still verifies the
+        final count before saving.
+        """
+        import cv2
+
+        original_width, original_height = image.size
+        cv_img = np.array(image.convert("RGB"))
+        cv_img = cv_img[:, :, ::-1].copy()
+
+        raw_detections = []
+        for box in gemini_boxes:
+            if len(box) != 4:
+                continue
+
+            ymin_norm, xmin_norm, ymax_norm, xmax_norm = box
+            raw_detections.append(
+                {
+                    "xyxy": [
+                        int((xmin_norm / 1000.0) * original_width),
+                        int((ymin_norm / 1000.0) * original_height),
+                        int((xmax_norm / 1000.0) * original_width),
+                        int((ymax_norm / 1000.0) * original_height),
+                    ],
+                    "conf": 0.99,
+                    "class_name": "glass_panel",
+                }
+            )
+
+        before_nms = len(raw_detections)
+        raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
+        after_nms = len(raw_detections)
+        if len(raw_detections) < before_nms:
+            # Diagnostic only: fallback boxes are still post-processed by Python.
+            logger.info("NMS suppressed %s overlapping Gemini boxes", before_nms - len(raw_detections))
+
+        before_containment = len(raw_detections)
+        raw_detections = self._remove_contained_boxes(
+            raw_detections,
+            settings.CONTAINMENT_THRESHOLD,
+        )
+
+        detections: list[Detection] = []
+        total_valid_panels = 0
+        partial_panels = 0
+        unclear_panels = 0
+        excluded_low_confidence = 0
+        excluded_duplicates = before_nms - after_nms
+        excluded_contained = before_containment - len(raw_detections)
+        excluded_small_boxes = 0
+        excluded_unrealistic_shape = 0
+
+        for det in raw_detections:
+            x_min, y_min, x_max, y_max = map(int, det["xyxy"])
+            shape_rejection = self._box_rejection_reason(
+                x_min,
+                y_min,
+                x_max,
+                y_max,
+                original_width,
+                original_height,
+            )
+            if shape_rejection == "small":
+                excluded_small_boxes += 1
+                continue
+            if shape_rejection == "shape":
+                excluded_unrealistic_shape += 1
+                continue
+
+            is_partial = self._is_partial_box(
+                x_min,
+                y_min,
+                x_max,
+                y_max,
+                original_width,
+                original_height,
+            )
+
+            if is_partial:
+                status = "partial"
+                counted = False
+                partial_panels += 1
+                color = (0, 165, 255)
+                label_text = "Partial - Not Counted"
+            else:
+                status = "full"
+                counted = True
+                total_valid_panels += 1
+                color = (0, 0, 255)
+                label_text = f"Counted #{total_valid_panels}"
+
+            detections.append(
+                Detection(
+                    bounding_box=[float(x_min), float(y_min), float(x_max), float(y_max)],
+                    confidence_score=det["conf"],
+                    label="glass_panel",
+                    status=status,
+                    counted=counted,
+                )
+            )
+
+            if counted:
+                overlay = cv_img.copy()
+                cv2.rectangle(overlay, (x_min, y_min), (x_max, y_max), color, -1)
+                cv2.addWeighted(overlay, 0.25, cv_img, 0.75, 0, cv_img)
+
+            cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
+            self._draw_label(cv_img, cv2, x_min, y_min, label_text, color)
+
+        avg_confidence = (
+            sum(det.confidence_score for det in detections) / len(detections)
+            if detections
+            else 0.0
+        )
+        excluded_panels = (
+            partial_panels
+            + unclear_panels
+            + excluded_low_confidence
+            + excluded_duplicates
+            + excluded_contained
+            + excluded_small_boxes
+            + excluded_unrealistic_shape
+        )
+        warning_message = self._warning_message(
+            partial_panels,
+            unclear_panels,
+            excluded_low_confidence,
+            excluded_duplicates,
+            excluded_contained,
+            excluded_small_boxes,
+            excluded_unrealistic_shape,
+        )
+
+        _, buffer = cv2.imencode(".jpg", cv_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        encoded_image = base64.b64encode(buffer).decode("utf-8")
+
+        return DetectionResponse(
+            total_valid_panels=total_valid_panels,
+            partial_panels=partial_panels,
+            unclear_panels=unclear_panels,
+            excluded_panels=excluded_panels,
+            excluded_low_confidence=excluded_low_confidence,
+            excluded_duplicates=excluded_duplicates,
+            excluded_contained=excluded_contained,
+            excluded_small_boxes=excluded_small_boxes,
+            excluded_unrealistic_shape=excluded_unrealistic_shape,
+            avg_confidence=round(avg_confidence, 4),
+            detection_mode="gemini-fallback",
+            has_warnings=excluded_panels > 0,
+            warning_message=warning_message,
+            detections=detections,
+            annotated_image_base64=f"data:image/jpeg;base64,{encoded_image}",
+            image_width=original_width,
+            image_height=original_height,
+            inference_time_ms=round(inference_ms, 1),
+            model_version="gemini-vision-fallback",
+            confidence_threshold=0.0,
+            nms_iou_threshold=settings.NMS_IOU_THRESHOLD,
+        )
+
+    @staticmethod
+    def _is_partial_box(
+        x_min: int,
+        y_min: int,
+        x_max: int,
+        y_max: int,
+        image_width: int,
+        image_height: int,
+    ) -> bool:
+        """Return True when a detected panel touches or nearly touches the image edge."""
+        margin = _PARTIAL_MARGIN_PX
+        return (
+            x_min <= margin
+            or y_min <= margin
+            or x_max >= image_width - margin
+            or y_max >= image_height - margin
+        )
+
+    @staticmethod
+    def _warning_message(
+        partial_panels: int,
+        unclear_panels: int,
+        excluded_low_confidence: int,
+        excluded_duplicates: int,
+        excluded_contained: int,
+        excluded_small_boxes: int,
+        excluded_unrealistic_shape: int,
+    ) -> str | None:
+        excluded_filter_count = (
+            excluded_low_confidence
+            + excluded_duplicates
+            + excluded_contained
+            + excluded_small_boxes
+            + excluded_unrealistic_shape
+        )
+        excluded = partial_panels + unclear_panels + excluded_filter_count
+        if excluded == 0:
+            return None
+        if excluded_filter_count and not partial_panels and not unclear_panels:
+            return (
+                "Some detections were excluded because they appeared duplicated, too small, "
+                "uncertain, or unrealistic for a glass panel."
+            )
+        if excluded_filter_count:
+            return (
+                f"{partial_panels} partial or cut-off panels were excluded from the AI count. "
+                "Additional uncertain, duplicate, or small detections were filtered out."
+            )
+        if partial_panels and unclear_panels:
+            return (
+                f"{partial_panels} partial or cut-off glass panels and {unclear_panels} unclear panels "
+                "were excluded from the AI count."
+            )
+        if partial_panels:
+            return (
+                f"{partial_panels} partial or cut-off glass panels were detected near the image edge "
+                "and were excluded from the AI count."
+            )
+        return f"{unclear_panels} unclear panels were excluded from the AI count."
+
+    @staticmethod
+    def _box_rejection_reason(
+        x_min: int,
+        y_min: int,
+        x_max: int,
+        y_max: int,
+        image_width: int,
+        image_height: int,
+    ) -> str | None:
+        """Return why a box should be excluded before counting, or None if plausible."""
+        box_w = max(0, x_max - x_min)
+        box_h = max(0, y_max - y_min)
+        image_area = max(1, image_width * image_height)
+        box_area = box_w * box_h
+
+        if (
+            box_w < image_width * settings.MIN_BOX_WIDTH_RATIO
+            or box_h < image_height * settings.MIN_BOX_HEIGHT_RATIO
+            or box_area < image_area * settings.MIN_BOX_AREA_RATIO
+        ):
+            return "small"
+
+        aspect_ratio = box_w / max(1, box_h)
+        if (
+            aspect_ratio < settings.MIN_BOX_ASPECT_RATIO
+            or aspect_ratio > settings.MAX_BOX_ASPECT_RATIO
+        ):
+            return "shape"
+
+        return None
+
+    @staticmethod
+    def _draw_label(cv_img: np.ndarray, cv2, x_min: int, y_min: int, label_text: str, color: tuple[int, int, int]) -> None:
+        (text_width, text_height), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+        label_y = y_min if y_min > text_height + 12 else y_min + text_height + 12
+        cv2.rectangle(
+            cv_img,
+            (x_min, label_y - text_height - 10),
+            (x_min + text_width + 10, label_y),
+            color,
+            -1,
+        )
+        cv2.putText(
+            cv_img,
+            label_text,
+            (x_min + 5, label_y - 7),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 255),
+            2,
+        )
+
     @staticmethod
     def _is_wall_or_column(
         rgb_arr: np.ndarray,
-        x1: int, y1: int, x2: int, y2: int,
-        img_w: int, img_h: int,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        img_w: int,
+        img_h: int,
     ) -> bool:
-        """
-        Return True if the detected region looks like a wall or column
-        rather than a glass panel.
-
-        Heuristics:
-        1. Colour variance — glass is transparent/reflective (high variance);
-           plain concrete/walls are uniform (low variance).
-        2. Minimum relative size — tiny slivers are not real panels.
-        """
-        # Guard: clamp coordinates
-        x1 = max(0, x1); y1 = max(0, y1)
-        x2 = min(img_w, x2); y2 = min(img_h, y2)
+        """Return True when the detected crop is too small or too visually uniform."""
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(img_w, x2)
+        y2 = min(img_h, y2)
 
         if x2 <= x1 or y2 <= y1:
-            return True  # degenerate box → reject
+            return True
 
-        # Minimum size check
         box_w = x2 - x1
         box_h = y2 - y1
         if box_w < img_w * _MIN_REL_SIZE or box_h < img_h * _MIN_REL_SIZE:
             return True
 
-        # Colour variance check on the cropped region
-        crop = rgb_arr[y1:y2, x1:x2]  # shape (H, W, 3)
+        crop = rgb_arr[y1:y2, x1:x2]
         if crop.size == 0:
             return True
 
-        # Use per-channel std-dev; average across R, G, B
         variance = float(np.mean(np.std(crop.reshape(-1, 3).astype(np.float32), axis=0)))
-        logger.debug(f"  Box [{x1},{y1},{x2},{y2}] colour variance = {variance:.1f}")
-
+        logger.debug("Box [%s,%s,%s,%s] color variance = %.1f", x1, y1, x2, y2, variance)
         return variance < _MIN_COLOR_VARIANCE
 
-    # ── NMS Helper Methods ──────────────────────────────────────────
     @staticmethod
-    def _perform_nms(detections: list[dict], iou_threshold: float) -> list[dict]:
+    def _remove_contained_boxes(detections: list[dict], containment_threshold: float) -> list[dict]:
         """
-        Perform Non-Maximum Suppression on a list of detections.
-        Each detection is a dict with "xyxy" and "conf".
+        Remove smaller boxes that are mostly inside larger boxes.
+
+        This prevents frames, reflections, or subregions inside one physical
+        glass panel from being counted as separate panels.
         """
         if not detections:
             return []
 
-        # Sort by confidence
-        sorted_dets = sorted(detections, key=lambda d: d["conf"], reverse=True)
+        def area(det: dict) -> float:
+            x1, y1, x2, y2 = det["xyxy"]
+            return max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+
+        kept: list[dict] = []
+        for candidate in sorted(detections, key=area, reverse=True):
+            candidate_area = area(candidate)
+            if candidate_area <= 0:
+                continue
+
+            is_contained = False
+            for existing in kept:
+                smaller_area = min(candidate_area, area(existing))
+                if smaller_area <= 0:
+                    continue
+
+                intersection = GlassPanelDetector._compute_intersection_area(
+                    candidate["xyxy"],
+                    existing["xyxy"],
+                )
+                if intersection / smaller_area >= containment_threshold:
+                    is_contained = True
+                    break
+
+            if not is_contained:
+                kept.append(candidate)
+
+        return kept
+
+    @staticmethod
+    def _perform_nms(detections: list[dict], iou_threshold: float) -> list[dict]:
+        """Perform non-maximum suppression on detections with xyxy boxes."""
+        if not detections:
+            return []
+
+        sorted_dets = sorted(detections, key=lambda det: det["conf"], reverse=True)
         keep = []
-        
+
         while sorted_dets:
             best_det = sorted_dets.pop(0)
             keep.append(best_det)
-            
+
             remaining = []
             for det in sorted_dets:
                 iou = GlassPanelDetector._compute_iou(best_det["xyxy"], det["xyxy"])
                 if iou < iou_threshold:
                     remaining.append(det)
             sorted_dets = remaining
-            
+
         return keep
 
     @staticmethod
-    def _compute_iou(box1: list | np.ndarray, box2: list | np.ndarray) -> float:
-        """
-        Compute Intersection over Union (IoU) between two bounding boxes.
-        Format: [x1, y1, x2, y2]
-        """
+    def _compute_intersection_area(box1: list | np.ndarray, box2: list | np.ndarray) -> float:
+        """Compute intersection area between two [x1, y1, x2, y2] boxes."""
         x1_1, y1_1, x2_1, y2_1 = box1
         x1_2, y1_2, x2_2, y2_2 = box2
 
-        # Intersection
         x_i1 = max(x1_1, x1_2)
         y_i1 = max(y1_1, y1_2)
         x_i2 = min(x2_1, x2_2)
@@ -550,9 +713,21 @@ class GlassPanelDetector:
 
         inter_w = max(0, x_i2 - x_i1)
         inter_h = max(0, y_i2 - y_i1)
-        inter_area = inter_w * inter_h
+        return float(inter_w * inter_h)
 
-        # Union
+    @staticmethod
+    def _compute_iou(box1: list | np.ndarray, box2: list | np.ndarray) -> float:
+        """Compute Intersection over Union for [x1, y1, x2, y2] boxes."""
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+
+        x_i1 = max(x1_1, x1_2)
+        y_i1 = max(y1_1, y1_2)
+        x_i2 = min(x2_1, x2_2)
+        y_i2 = min(y2_1, y2_2)
+
+        inter_area = GlassPanelDetector._compute_intersection_area(box1, box2)
+
         area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
         area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
         union_area = area1 + area2 - inter_area
@@ -562,109 +737,5 @@ class GlassPanelDetector:
 
         return inter_area / union_area
 
-    def draw_fallback_boxes(self, image: Image.Image, gemini_boxes: list[list[int]], inference_ms: float) -> DetectionResponse:
-        """
-        EMERGENCY FALLBACK ONLY — Gemini Vision bounding-box fallback.
 
-        Called only when YOLO returns 0 detections and Gemini Vision
-        provides bounding boxes as a last resort. Not a primary detection path.
-        """
-        import cv2
-        import base64
-        import numpy as np
-
-        original_width, original_height = image.size
-        cv_img = np.array(image.convert('RGB'))
-        cv_img = cv_img[:, :, ::-1].copy()
-
-        detections: list[Detection] = []
-        valid_panel_count = 0
-        raw_detections = []
-
-        for box in gemini_boxes:
-            if len(box) != 4:
-                continue
-            ymin_norm, xmin_norm, ymax_norm, xmax_norm = box
-            y_min = int((ymin_norm / 1000.0) * original_height)
-            x_min = int((xmin_norm / 1000.0) * original_width)
-            y_max = int((ymax_norm / 1000.0) * original_height)
-            x_max = int((xmax_norm / 1000.0) * original_width)
-            
-            raw_detections.append({
-                "xyxy": [x_min, y_min, x_max, y_max],
-                "conf": 0.99,
-                "class_name": "glass_panel"
-            })
-
-        # Apply NMS to Gemini boxes to prevent overlapping labels
-        before_nms = len(raw_detections)
-        raw_detections = self._perform_nms(raw_detections, settings.NMS_IOU_THRESHOLD)
-        if len(raw_detections) < before_nms:
-            logger.info(f"🛡️ NMS suppressed {before_nms - len(raw_detections)} overlapping Gemini detections")
-
-        for det in raw_detections:
-            xyxy = det["xyxy"]
-            confidence = det["conf"]
-            class_name = det["class_name"]
-
-            x_min, y_min, x_max, y_max = map(int, xyxy)
-
-            is_class_b = False
-            margin = 5
-            if (x_min <= margin or y_min <= margin or 
-                x_max >= original_width - margin or y_max >= original_height - margin):
-                is_class_b = True
-                class_name = "partial_or_obscured"
-            else:
-                class_name = "full_glass_panel"
-
-            detection = Detection(
-                bounding_box=[float(x_min), float(y_min), float(x_max), float(y_max)],
-                confidence_score=confidence,
-                label=class_name,
-            )
-            detections.append(detection)
-
-            if not is_class_b:
-                valid_panel_count += 1
-                color = (0, 0, 255) # PRO-RED
-                overlay = cv_img.copy()
-                cv2.rectangle(overlay, (x_min, y_min), (x_max, y_max), color, -1)
-                cv2.addWeighted(overlay, 0.3, cv_img, 0.7, 0, cv_img)
-                cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
-
-                label_text = f"PANEL #{valid_panel_count}"
-                (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                cv2.rectangle(cv_img, (x_min, y_min - th - 10), (x_min + tw + 10, y_min), color, -1)
-                cv2.putText(cv_img, label_text, (x_min + 5, y_min - 7), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            else:
-                color = (0, 0, 255)
-                cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
-
-                label_text = "This part of the photo is not fully visible"
-                (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                y_text = y_min if y_min > th + 10 else y_min + th + 10
-                cv2.rectangle(cv_img, (x_min, y_text - th - 10), (x_min + tw + 10, y_text), color, -1)
-                cv2.putText(cv_img, label_text, (x_min + 5, y_text - 7), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-        _, buffer = cv2.imencode('.jpg', cv_img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-        encoded_image = base64.b64encode(buffer).decode('utf-8')
-        annotated_image_base64 = f"data:image/jpeg;base64,{encoded_image}"
-
-        return DetectionResponse(
-            total_valid_panels=valid_panel_count,
-            detections=detections,
-            annotated_image_base64=annotated_image_base64,
-            image_width=original_width,
-            image_height=original_height,
-            inference_time_ms=round(inference_ms, 1),
-            model_version="gemini-vision-fallback",
-            confidence_threshold=0.0,
-            nms_iou_threshold=0.0,
-            detection_mode="gemini-fallback",  # emergency fallback only
-        )
-
-# ── Singleton instance ────────────────────────────────────────────────
 detector = GlassPanelDetector()

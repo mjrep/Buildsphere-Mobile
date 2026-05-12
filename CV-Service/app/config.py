@@ -7,6 +7,7 @@ file upload validation, and server settings.
 
 import os
 from pathlib import Path
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ─── Resolve project paths ───────────────────────────────────────────
@@ -45,10 +46,18 @@ class Settings(BaseSettings):
     # Confidence threshold — lower than typical (0.5) because glass edges
     # are subtle, transparent, and produce softer activations.
     # Set very low (0.05) to catch all thin panels in your specific photos.
-    CONFIDENCE_THRESHOLD: float = 0.05
+    # Current strict final-count threshold.
+    CONFIDENCE_THRESHOLD: float = 0.45
 
     # Lowered to 0.30 to prevent merging thin panels that are right next to each other.
-    NMS_IOU_THRESHOLD: float = 0.30
+    # Current duplicate suppression threshold.
+    NMS_IOU_THRESHOLD: float = 0.45
+    CONTAINMENT_THRESHOLD: float = 0.80
+    MIN_BOX_WIDTH_RATIO: float = 0.035
+    MIN_BOX_HEIGHT_RATIO: float = 0.060
+    MIN_BOX_AREA_RATIO: float = 0.003
+    MIN_BOX_ASPECT_RATIO: float = 0.18
+    MAX_BOX_ASPECT_RATIO: float = 6.0
 
     # Maximum detections per image.
     # Construction facades can have 100+ panels; 300 gives headroom.
@@ -67,6 +76,19 @@ class Settings(BaseSettings):
 
     # ── AI Integrations ───────────────────────────────────────────────
     GEMINI_API_KEY: str | None = None
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_flag(cls, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production", "prod", "false", "0", "no", "off"}:
+                return False
+            if normalized in {"debug", "development", "dev", "true", "1", "yes", "on"}:
+                return True
+        return value
 
     model_config = SettingsConfigDict(
         env_file=".env",

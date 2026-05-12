@@ -256,9 +256,10 @@ async def detect_panels(
         f"{width}x{height})"
     )
 
-    # ── 6. Run inference (YOLO PRIMARY MODE) ──────────────────────────
-    # YOLO is the primary detector and counter for glass panels.
-    # Gemini acts only as the 'Auditor' to summarize the findings.
+    # 6. Run inference (YOLO PRIMARY MODE).
+    # YOLOv8 highlights glass panels with boxes. Python counts/classifies
+    # full vs partial panels. Gemini summarizes only, and the user verifies
+    # the final count before saving.
     from app.llm import generate_audit_summary, vision_box_fallback
 
     try:
@@ -266,9 +267,10 @@ async def detect_panels(
         logger.info(f"CORE AUDIT: Running YOLO Primary Detection ({settings.MODEL_PATH})")
         result = detector.detect(image)
         
-        # Step 2: Emergency Fallback to Gemini Vision ONLY if YOLO finds nothing
-        if result.total_valid_panels == 0:
-            logger.warning("YOLO returned 0 detections. Attempting Gemini Vision emergency fallback...")
+        # Step 2: Emergency Fallback to Gemini Vision ONLY if YOLO returns no boxes.
+        # If YOLO found partial panels, keep that warning instead of replacing it.
+        if len(result.detections) == 0:
+            logger.warning("YOLO returned no boxes. Attempting Gemini Vision emergency fallback...")
             gemini_boxes = vision_box_fallback(contents)
             
             if len(gemini_boxes) > 0:
@@ -277,17 +279,18 @@ async def detect_panels(
             else:
                 logger.info("Gemini Fallback also returned 0 detections.")
 
-        # Step 3: Generate Professional Audit Summary using Gemini
-        # We calculate avg confidence to provide to the summarizer
-        avg_conf = 0.0
-        if result.total_valid_panels > 0 and len(result.detections) > 0:
-            avg_conf = sum(d.confidence_score for d in result.detections) / len(result.detections)
-        elif result.detection_mode == "gemini-fallback":
-            avg_conf = 0.99 # Hardcoded high confidence for Gemini results
-        
-        summary = generate_audit_summary(result.total_valid_panels, avg_conf)
+        # Step 3: Generate professional audit summary using structured values.
+        avg_conf = result.avg_confidence
+        summary = generate_audit_summary(
+            total_valid_panels=result.total_valid_panels,
+            partial_panels=result.partial_panels,
+            unclear_panels=result.unclear_panels,
+            avg_confidence=avg_conf,
+            detection_mode=result.detection_mode,
+            warning_message=result.warning_message,
+        )
+        result.summary = summary
         result.summary_text = summary
-        result.avg_confidence = avg_conf
         
     except RuntimeError as e:
         raise HTTPException(

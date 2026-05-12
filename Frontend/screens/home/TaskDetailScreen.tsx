@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import {
   View,
@@ -10,12 +10,13 @@ import {
   ActivityIndicator,
   Animated,
   Alert,
+  Platform,
 } from 'react-native';
-import { useRef } from 'react';
 
 import { Ionicons } from '@expo/vector-icons';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { API_URL } from '../../lib/api';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 
 interface TaskDetailScreenProps {
@@ -51,6 +52,7 @@ export default function TaskDetailScreen({
   onAddProgress,
   onAddTask
 }: TaskDetailScreenProps) {
+  const { theme } = useAppTheme();
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -97,20 +99,20 @@ export default function TaskDetailScreen({
     switch (status?.toLowerCase()) {
       case 'pending':
       case 'todo':
-        return { bg: '#FFEBEB', text: '#FF6B6B', label: 'To Do' };
+        return { bg: theme.mode === 'dark' ? '#3d1a1a' : '#FFEBEB', text: '#FF6B6B', label: 'To Do' };
       case 'in-progress':
       case 'in progress':
       case 'in_progress':
-        return { bg: '#EAE8FF', text: '#7370FF', label: 'In Progress' };
+        return { bg: theme.mode === 'dark' ? '#2d2a4a' : '#EAE8FF', text: '#7370FF', label: 'In Progress' };
       case 'to-review':
       case 'in review':
       case 'in-review':
       case 'in_review':
-        return { bg: '#FFF4E5', text: '#FF9800', label: 'In Review' };
+        return { bg: theme.mode === 'dark' ? '#3d2e1a' : '#FFF4E5', text: '#FF9800', label: 'In Review' };
       case 'completed':
-        return { bg: '#E8F5E9', text: '#4CAF50', label: 'Completed' };
+        return { bg: theme.mode === 'dark' ? '#1a3d24' : '#E8F5E9', text: '#4CAF50', label: 'Completed' };
       default:
-        return { bg: '#F5F5F5', text: '#757575', label: status || 'To Do' };
+        return { bg: theme.surface, text: theme.textSecondary, label: status || 'To Do' };
     }
   };
 
@@ -132,13 +134,13 @@ export default function TaskDetailScreen({
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false}>
-      <View className="flex-1 bg-white">
+      <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* Header */}
         <View className="flex-row items-center px-5 pb-4 pt-12">
           <TouchableOpacity onPress={onClose} className="mr-3 -ml-2 -mt-1">
-            <Ionicons name="caret-back-outline" size={24} color="black" />
+            <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
-          <Text className="text-[32px] font-bold text-[#7370FF]">Task Details</Text>
+          <Text className="text-[32px] font-bold" style={{ color: theme.primary }}>Task Details</Text>
         </View>
 
         <ScrollView
@@ -147,10 +149,10 @@ export default function TaskDetailScreen({
           contentContainerStyle={{ paddingBottom: 120 }}>
           {/* Status & Title Card */}
           <View
-            className="mb-8 rounded-[24px] border border-[#F0F0F0] bg-white p-6"
-            style={{ shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 10, elevation: 2 }}>
+            className="mb-8 rounded-[24px] border p-6"
+            style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.04, shadowRadius: 10, elevation: 2 }}>
             <View className="mb-4 flex-row items-center justify-between">
-              <Text className="mr-4 flex-1 text-[20px] font-bold text-[#1E1E1E]">{task.title}</Text>
+              <Text className="mr-4 flex-1 text-[20px] font-bold" style={{ color: theme.text }}>{task.title}</Text>
               <TouchableOpacity
                 onPress={() => setShowStatusModal(true)}
                 className="rounded-full px-5 py-2 flex-row items-center"
@@ -163,7 +165,7 @@ export default function TaskDetailScreen({
                 <Ionicons name="chevron-down" size={12} color={getStatusStyle(currentStatus).text} style={{ marginLeft: 6 }} />
               </TouchableOpacity>
             </View>
-            <Text className="text-[14px] leading-6 text-[#A3A3A3]">
+            <Text className="text-[14px] leading-6" style={{ color: theme.textMuted }}>
               {task.description ||
                 'The task involves technical drawings and layouts required for the initial construction phase. Please ensure all details are accurate and adhere to project standards.'}
             </Text>
@@ -174,19 +176,19 @@ export default function TaskDetailScreen({
             {/* Row 1: Phase, Milestone, Priority */}
             <View className="mb-6 flex-row">
               <View className="flex-1">
-                <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Phase</Text>
-                <Text className="text-[15px] font-bold text-[#1E1E1E]">
+                <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Phase</Text>
+                <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
                   {task.phase || 'Phase 1'}
                 </Text>
               </View>
               <View className="flex-1 items-center">
-                <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Milestone</Text>
-                <Text className="text-[15px] font-bold text-[#1E1E1E]">
+                <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Milestone</Text>
+                <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
                   {task.milestone || 'Milestone 1'}
                 </Text>
               </View>
               <View className="flex-1 items-end">
-                <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Priority</Text>
+                <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Priority</Text>
                 <Text className="text-[15px] font-bold" style={{ color: priorityColor }}>
                   {task.priority || 'High'}
                 </Text>
@@ -196,14 +198,14 @@ export default function TaskDetailScreen({
             {/* Row 2: Dates */}
             <View className="mb-6 flex-row">
               <View className="flex-1">
-                <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Start Date</Text>
-                <Text className="text-[15px] font-bold text-[#1E1E1E]">
+                <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Start Date</Text>
+                <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
                   {task.start_date ? new Date(task.start_date).toLocaleDateString() : '01/31/2026'}
                 </Text>
               </View>
               <View className="flex-1 items-end">
-                <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">End Date</Text>
-                <Text className="text-[15px] font-bold text-[#1E1E1E]">
+                <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>End Date</Text>
+                <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
                   {task.due_date ? new Date(task.due_date).toLocaleDateString() : '02/28/2026'}
                 </Text>
               </View>
@@ -212,8 +214,8 @@ export default function TaskDetailScreen({
             {/* Row 3: Shift/Time of Day — Tappable */}
             <View className="flex-row">
               <TouchableOpacity className="flex-1" onPress={() => setShowShiftModal(true)}>
-                <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Shift</Text>
-                <View className="flex-row items-center rounded-lg bg-[#F8F7FF] px-3 py-2 self-start border border-[#E8E6FF]">
+                <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Shift</Text>
+                <View className="flex-row items-center rounded-lg px-3 py-2 self-start border" style={{ backgroundColor: theme.primaryLight, borderColor: theme.border }}>
                   <Ionicons
                     name={
                       currentShift.toLowerCase() === 'afternoon' ? 'partly-sunny-outline' :
@@ -221,12 +223,12 @@ export default function TaskDetailScreen({
                           'partly-sunny-outline'
                     }
                     size={16}
-                    color={PRIMARY}
+                    color={theme.primary}
                   />
-                  <Text className="ml-1.5 text-[15px] font-bold text-[#1E1E1E]">
+                  <Text className="ml-1.5 text-[15px] font-bold" style={{ color: theme.text }}>
                     {currentShift}
                   </Text>
-                  <Ionicons name="chevron-down" size={14} color="#A3A3A3" style={{ marginLeft: 6 }} />
+                  <Ionicons name="chevron-down" size={14} color={theme.textMuted} style={{ marginLeft: 6 }} />
                 </View>
               </TouchableOpacity>
             </View>
@@ -236,16 +238,16 @@ export default function TaskDetailScreen({
           {/* Progress History Section */}
           <View className="mb-8">
             <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-[14px] font-bold text-[#A3A3A3] uppercase tracking-widest">
+              <Text className="text-[14px] font-bold uppercase tracking-widest" style={{ color: theme.textMuted }}>
                 Progress History ({history.length})
               </Text>
             </View>
 
             {loadingHistory ? (
-              <ActivityIndicator color={PRIMARY} />
+              <ActivityIndicator color={theme.primary} />
             ) : history.filter(item => !currentShift || item.shift === currentShift).length === 0 ? (
-              <View className="items-center justify-center py-6 rounded-2xl bg-gray-50 border border-dashed border-gray-200">
-                <Text className="text-[12px] text-gray-400">No {currentShift} progress recorded yet.</Text>
+              <View className="items-center justify-center py-6 rounded-2xl border border-dashed" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
+                <Text className="text-[12px]" style={{ color: theme.textMuted }}>No {currentShift} progress recorded yet.</Text>
               </View>
             ) : (
               history
@@ -253,8 +255,8 @@ export default function TaskDetailScreen({
                 .map((item, idx, filteredArr) => (
                   <View
                     key={item.id}
-                    className="mb-4 rounded-2xl bg-[#FAFBFF] border border-[#F0F2FF] p-4"
-                    style={{ position: 'relative' }}>
+                    className="mb-4 rounded-2xl border p-4"
+                    style={{ position: 'relative', backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
                     
                     {/* Timeline Line */}
                     {idx < filteredArr.length - 1 && (
@@ -265,7 +267,7 @@ export default function TaskDetailScreen({
                         top: 40,
                         bottom: -20,
                         width: 1,
-                        backgroundColor: '#E0E0E0',
+                        backgroundColor: theme.border,
                         zIndex: -1
                       }}
                     />
@@ -273,35 +275,35 @@ export default function TaskDetailScreen({
 
                   <View className="flex-row items-start">
                     {/* Status Dot */}
-                    <View className={`h-2.5 w-2.5 rounded-full mt-1.5 mr-3 ${idx === 0 ? 'bg-[#7370FF]' : 'bg-[#D1D1D1]'}`} />
+                    <View className="h-2.5 w-2.5 rounded-full mt-1.5 mr-3" style={{ backgroundColor: idx === 0 ? theme.primary : theme.textMuted }} />
 
                     <View className="flex-1">
                       <View className="flex-row items-center justify-between mb-2">
                         <View className="flex-row items-center">
-                          <View className="h-8 w-8 items-center justify-center rounded-full bg-[#7370FF] mr-2">
+                          <View className="h-8 w-8 items-center justify-center rounded-full mr-2" style={{ backgroundColor: theme.primary }}>
                             <Text className="text-[10px] font-bold text-white">
                               {item.first_name?.[0]}{item.last_name?.[0]}
                             </Text>
                           </View>
-                          <Text className="text-[14px] font-bold text-[#1E1E1E]">
+                          <Text className="text-[14px] font-bold" style={{ color: theme.text }}>
                             {item.first_name} {item.last_name}
                           </Text>
-                          <View className="ml-2 bg-[#E8FBF2] px-2 py-0.5 rounded-full">
-                            <Text className="text-[10px] font-bold text-[#27AE60]">
+                          <View className="ml-2 px-2 py-0.5 rounded-full" style={{ backgroundColor: theme.mode === 'dark' ? '#1a3d24' : '#E8FBF2' }}>
+                            <Text className="text-[10px] font-bold" style={{ color: '#27AE60' }}>
                               + {item.quantity_accomplished} units
                             </Text>
                           </View>
                           {item.shift && (
-                            <View className="ml-2 bg-[#F0F2FF] px-2 py-0.5 rounded-full border border-[#D0D7FF]">
-                              <Text className="text-[10px] font-bold text-[#7370FF]">
+                            <View className="ml-2 px-2 py-0.5 rounded-full border" style={{ backgroundColor: theme.primaryLight, borderColor: theme.border }}>
+                              <Text className="text-[10px] font-bold" style={{ color: theme.primary }}>
                                 {item.shift}
                               </Text>
                             </View>
                           )}
                         </View>
                         <View className="flex-row items-center">
-                          <Ionicons name="time-outline" size={14} color="#1E1E1E" />
-                          <Text className="ml-1 text-[10px] font-medium text-[#A3A3A3]">
+                          <Ionicons name="time-outline" size={14} color={theme.text} />
+                          <Text className="ml-1 text-[10px] font-medium" style={{ color: theme.textMuted }}>
                             {item.created_at 
                               ? `${new Date(item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })} @ ${new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
                               : 'Log'}
@@ -312,13 +314,13 @@ export default function TaskDetailScreen({
                               setShowActionMenu(true);
                             }}
                             className="ml-2">
-                            <Ionicons name="ellipsis-vertical" size={14} color="#1E1E1E" />
+                            <Ionicons name="ellipsis-vertical" size={14} color={theme.text} />
                           </TouchableOpacity>
                         </View>
 
                       </View>
 
-                      <Text className="text-[12px] leading-5 text-[#666] mb-3">
+                      <Text className="text-[12px] leading-5 mb-3" style={{ color: theme.textSecondary }}>
                         {item.remarks || "Site update recorded successfully."}
                       </Text>
 
@@ -328,14 +330,16 @@ export default function TaskDetailScreen({
                             setSelectedImage(item.evidence_image_path);
                             setShowImageModal(true);
                           }}
-                          className="flex-row items-center bg-[#F0F2FF] rounded-lg p-1.5 self-start pr-4">
+                          className="flex-row items-center rounded-lg p-1.5 self-start pr-4"
+                          style={{ backgroundColor: theme.primaryLight }}>
                           <Image
                             source={{ uri: item.evidence_image_path }}
-                            className="h-10 w-10 rounded-md bg-gray-200 mr-2"
+                            className="h-10 w-10 rounded-md mr-2"
+                            style={{ backgroundColor: theme.border }}
                             resizeMode="cover"
                           />
-                          <Ionicons name="image-outline" size={14} color={PRIMARY} />
-                          <Text className="ml-1 text-[11px] font-bold text-[#7370FF]">View Photo</Text>
+                          <Ionicons name="image-outline" size={14} color={theme.primary} />
+                          <Text className="ml-1 text-[11px] font-bold" style={{ color: theme.primary }}>View Photo</Text>
                         </TouchableOpacity>
                       )}
 
@@ -351,26 +355,27 @@ export default function TaskDetailScreen({
           {/* RBAC: Audit Inventory Link for Accounting/Engr */}
           {perms.canViewInventory && (
             <View className="mb-8">
-              <Text className="mb-4 text-[18px] font-bold text-[#1E1E1E]">Project Oversight</Text>
+              <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Project Oversight</Text>
               <TouchableOpacity
                 onPress={() => onViewInventory && onViewInventory(task.project_id)}
-                className="h-[60px] w-full flex-row items-center justify-center rounded-[16px] bg-[#7370FF]">
+                className="h-[60px] w-full flex-row items-center justify-center rounded-[16px]"
+                style={{ backgroundColor: theme.primary }}>
                 <Ionicons name="cube-outline" size={24} color="white" />
                 <Text className="ml-3 font-bold text-white">Audit Project Inventory</Text>
               </TouchableOpacity>
-              <Text className="mt-2 text-center text-[12px] italic text-[#A3A3A3]">
+              <Text className="mt-2 text-center text-[12px] italic" style={{ color: theme.textMuted }}>
                 Verification access for project materials & budgets.
               </Text>
             </View>
           )}
 
           {/* Comments Section */}
-          <View className="mb-10 rounded-[24px] border border-[#EDECFF] bg-[#F6F6FF] p-6">
-            <Text className="mb-6 text-[18px] font-bold text-[#1E1E1E]">Comments</Text>
+          <View className="mb-10 rounded-[24px] border p-6" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
+            <Text className="mb-6 text-[18px] font-bold" style={{ color: theme.text }}>Comments</Text>
             {comments.length === 0 ? (
-              <View className="items-center rounded-xl border border-dashed border-[#D7D4FF] bg-white p-4">
-                <Ionicons name="chatbox-ellipses-outline" size={24} color="#B5B3DD" />
-                <Text className="mt-2 text-[12px] text-[#8A88AE]">No comments yet.</Text>
+              <View className="items-center rounded-xl border border-dashed p-4" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                <Ionicons name="chatbox-ellipses-outline" size={24} color={theme.textMuted} />
+                <Text className="mt-2 text-[12px]" style={{ color: theme.textMuted }}>No comments yet.</Text>
               </View>
             ) : (
               comments.map((comment, index) => (
@@ -384,7 +389,7 @@ export default function TaskDetailScreen({
                       {comment.initials}
                     </Text>
                   </View>
-                  <Text className="flex-1 text-[15px] font-medium text-[#1E1E1E]">
+                  <Text className="flex-1 text-[15px] font-medium" style={{ color: theme.text }}>
                     {comment.text}
                   </Text>
                 </View>
@@ -394,34 +399,34 @@ export default function TaskDetailScreen({
         </ScrollView>
 
         {/* Bottom Navigation Mimic */}
-        <View className="h-[90px] flex-row items-center justify-between border-t border-[#F5F5F7] px-10 pb-4">
+        <View className="h-[90px] flex-row items-center justify-between border-t px-10 pb-4" style={{ borderTopColor: theme.border }}>
           {perms.canViewDashboard && (
             <TouchableOpacity
               onPress={() => onNavigate && onNavigate('home')}
               className="items-center">
-              <Ionicons name="home-outline" size={24} color="#9A9A9A" />
-              <Text className="mt-1 text-[10px] text-[#9A9A9A]">Home</Text>
+              <Ionicons name="home-outline" size={24} color={theme.textMuted} />
+              <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>Home</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
             onPress={() => onNavigate && onNavigate('mywork')}
             className="items-center">
-            <View className="mb-1 h-12 w-12 items-center justify-center rounded-2xl bg-[#F0F0F0]">
-              <Ionicons name="briefcase" size={24} color="#7370FF" />
+            <View className="mb-1 h-12 w-12 items-center justify-center rounded-2xl" style={{ backgroundColor: theme.input }}>
+              <Ionicons name="briefcase" size={24} color={theme.primary} />
             </View>
-            <Text className="text-[10px] font-bold text-[#7370FF]">My work</Text>
+            <Text className="text-[10px] font-bold" style={{ color: theme.primary }}>Task</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => onNavigate && onNavigate('notifications')}
             className="items-center">
-            <Ionicons name="notifications-outline" size={24} color="#9A9A9A" />
-            <Text className="mt-1 text-[10px] text-[#9A9A9A]">Notifications</Text>
+            <Ionicons name="notifications-outline" size={24} color={theme.textMuted} />
+            <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>Notifications</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => onNavigate && onNavigate('more')}
             className="items-center">
-            <Ionicons name="ellipsis-horizontal-outline" size={24} color="#9A9A9A" />
-            <Text className="mt-1 text-[10px] text-[#9A9A9A]">More</Text>
+            <Ionicons name="ellipsis-horizontal-outline" size={24} color={theme.textMuted} />
+            <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>More</Text>
           </TouchableOpacity>
         </View>
 
@@ -460,18 +465,19 @@ export default function TaskDetailScreen({
                     if (action.key === 'inventory' && onViewInventory) onViewInventory(task.project_id);
                     if (action.key === 'task' && onAddTask) onAddTask();
                   }}
-                  className="flex-row items-center rounded-[14px] bg-white px-4 py-3"
+                  className="flex-row items-center rounded-[14px] px-4 py-3"
                   style={{
-                    shadowColor: '#7370FF',
+                    backgroundColor: theme.elevated,
+                    shadowColor: theme.shadow,
                     shadowOpacity: 0.15,
                     shadowRadius: 8,
                     elevation: 4,
                   }}>
-                  <Text className="mr-3 text-[14px] font-medium text-[#1E1E1E]">
+                  <Text className="mr-3 text-[14px] font-medium" style={{ color: theme.text }}>
                     {action.label}
                   </Text>
-                  <View className="h-7 w-7 items-center justify-center rounded-full bg-[#EAE8FF]">
-                    <Ionicons name={action.icon as any} size={15} color="#7370FF" />
+                  <View className="h-7 w-7 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
+                    <Ionicons name={action.icon as any} size={15} color={theme.primary} />
                   </View>
                 </TouchableOpacity>
               </Animated.View>
@@ -488,14 +494,14 @@ export default function TaskDetailScreen({
               position: 'absolute',
               right: 20,
               bottom: 110, // Just above the bottom nav mimic
-              backgroundColor: PRIMARY,
+              backgroundColor: theme.primary,
               width: 56,
               height: 56,
               borderRadius: 28,
               justifyContent: 'center',
               alignItems: 'center',
               elevation: 10,
-              shadowColor: PRIMARY,
+              shadowColor: theme.primary,
               shadowOffset: { width: 0, height: 9 },
               shadowOpacity: 0.4,
               shadowRadius: 8,
@@ -540,13 +546,13 @@ export default function TaskDetailScreen({
           activeOpacity={1}
           onPress={() => setShowActionMenu(false)}
           className="flex-1 justify-end bg-black/40">
-          <View className="bg-white rounded-t-[30px] p-6 pb-12">
-            <View className="h-1 w-10 bg-gray-300 self-center rounded-full mb-6" />
-            <Text className="text-center text-[16px] font-bold text-[#1E1E1E] mb-6">Log Options</Text>
+          <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+            <View className="h-1 w-10 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
+            <Text className="text-center text-[16px] font-bold mb-6" style={{ color: theme.text }}>Log Options</Text>
 
-            <TouchableOpacity className="flex-row items-center py-4 border-b border-gray-50">
-              <Ionicons name="create-outline" size={22} color="#7370FF" />
-              <Text className="ml-4 text-[16px] text-[#2D2D2D]">Edit Note</Text>
+            <TouchableOpacity className="flex-row items-center py-4 border-b" style={{ borderBottomColor: theme.border }}>
+              <Ionicons name="create-outline" size={22} color={theme.primary} />
+              <Text className="ml-4 text-[16px]" style={{ color: theme.text }}>Edit Note</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -566,8 +572,8 @@ export default function TaskDetailScreen({
                 setShowActionMenu(false);
               }}
               className="flex-row items-center py-4">
-              <Ionicons name="trash-outline" size={22} color="#FF6B6B" />
-              <Text className="ml-4 text-[16px] text-[#FF6B6B] font-semibold">Delete Entry</Text>
+              <Ionicons name="trash-outline" size={22} color={theme.danger} />
+              <Text className="ml-4 text-[16px] font-semibold" style={{ color: theme.danger }}>Delete Entry</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -579,9 +585,9 @@ export default function TaskDetailScreen({
           activeOpacity={1}
           onPress={() => setShowShiftModal(false)}
           className="flex-1 justify-end bg-black/40">
-          <View className="bg-white rounded-t-[30px] p-6 pb-12">
-            <View className="h-1 w-10 bg-gray-300 self-center rounded-full mb-6" />
-            <Text className="text-center text-[18px] font-bold text-[#1E1E1E] mb-6">Select Shift</Text>
+          <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+            <View className="h-1 w-10 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
+            <Text className="text-center text-[18px] font-bold mb-6" style={{ color: theme.text }}>Select Shift</Text>
 
             {[
               { label: 'Morning', icon: 'partly-sunny-outline' as const, desc: '6:00 AM - 12:00 PM' },
@@ -606,21 +612,20 @@ export default function TaskDetailScreen({
                     Alert.alert('Update Failed', 'Could not update shift. Please try again.');
                   }
                 }}
-                className={`mb-3 flex-row items-center rounded-xl border p-4 ${currentShift === item.label
-                    ? 'border-[#7370FF] bg-[#F5F5FF]'
-                    : 'border-[#F0F0F0] bg-[#FAFAFA]'
-                  }`}>
-                <View className={`mr-3 h-10 w-10 items-center justify-center rounded-full ${currentShift === item.label ? 'bg-[#7370FF]' : 'bg-[#EAE8FF]'
-                  }`}>
-                  <Ionicons name={item.icon} size={20} color={currentShift === item.label ? 'white' : PRIMARY} />
+                className="mb-3 flex-row items-center rounded-xl border p-4"
+                style={{ 
+                  backgroundColor: currentShift === item.label ? theme.primaryLight : theme.input,
+                  borderColor: currentShift === item.label ? theme.primary : theme.border
+                }}>
+                <View className="mr-3 h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: currentShift === item.label ? theme.primary : theme.primaryLight }}>
+                  <Ionicons name={item.icon} size={20} color={currentShift === item.label ? 'white' : theme.primary} />
                 </View>
                 <View className="flex-1">
-                  <Text className={`text-[15px] font-semibold ${currentShift === item.label ? 'text-[#7370FF]' : 'text-[#1E1E1E]'
-                    }`}>{item.label}</Text>
-                  <Text className="text-[11px] text-[#A3A3A3]">{item.desc}</Text>
+                  <Text className="text-[15px] font-semibold" style={{ color: currentShift === item.label ? theme.primary : theme.text }}>{item.label}</Text>
+                  <Text className="text-[11px]" style={{ color: theme.textMuted }}>{item.desc}</Text>
                 </View>
                 {currentShift === item.label && (
-                  <Ionicons name="checkmark-circle" size={22} color={PRIMARY} />
+                  <Ionicons name="checkmark-circle" size={22} color={theme.primary} />
                 )}
               </TouchableOpacity>
             ))}
@@ -634,9 +639,9 @@ export default function TaskDetailScreen({
           activeOpacity={1}
           onPress={() => setShowStatusModal(false)}
           className="flex-1 justify-end bg-black/40">
-          <View className="bg-white rounded-t-[30px] p-6 pb-12">
-            <View className="h-1 w-10 bg-gray-300 self-center rounded-full mb-6" />
-            <Text className="text-center text-[18px] font-bold text-[#1E1E1E] mb-6">Update Status</Text>
+          <View className="rounded-t-[30px] p-6 pb-12" style={{ backgroundColor: theme.elevated }}>
+            <View className="h-1 w-10 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
+            <Text className="text-center text-[18px] font-bold mb-6" style={{ color: theme.text }}>Update Status</Text>
 
             {[
               { label: 'To Do', value: 'todo', icon: 'list-outline' as const, color: '#FF6B6B', bg: '#FFEBEB' },
@@ -669,19 +674,19 @@ export default function TaskDetailScreen({
                     Alert.alert('Update Failed', err.message || 'Could not update status. Please try again.');
                   }
                 }}
-                className={`mb-3 flex-row items-center rounded-xl border p-4 ${currentStatus === item.value
-                    ? 'border-[#7370FF] bg-[#F5F5FF]'
-                    : 'border-[#F0F0F0] bg-[#FAFAFA]'
-                  }`}>
-                <View className={`mr-3 h-10 w-10 items-center justify-center rounded-full`} style={{ backgroundColor: item.bg }}>
+                className="mb-3 flex-row items-center rounded-xl border p-4"
+                style={{ 
+                  backgroundColor: currentStatus === item.value ? theme.primaryLight : theme.input,
+                  borderColor: currentStatus === item.value ? theme.primary : theme.border
+                }}>
+                <View className="mr-3 h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: item.bg }}>
                   <Ionicons name={item.icon} size={20} color={item.color} />
                 </View>
                 <View className="flex-1">
-                  <Text className={`text-[15px] font-semibold ${currentStatus === item.value ? 'text-[#7370FF]' : 'text-[#1E1E1E]'
-                    }`}>{item.label}</Text>
+                  <Text className="text-[15px] font-semibold" style={{ color: currentStatus === item.value ? theme.primary : theme.text }}>{item.label}</Text>
                 </View>
                 {currentStatus === item.value && (
-                  <Ionicons name="checkmark-circle" size={22} color={PRIMARY} />
+                  <Ionicons name="checkmark-circle" size={22} color={theme.primary} />
                 )}
               </TouchableOpacity>
             ))}
@@ -690,6 +695,5 @@ export default function TaskDetailScreen({
       </Modal>
 
     </Modal>
-
   );
 }

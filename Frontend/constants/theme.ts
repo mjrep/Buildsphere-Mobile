@@ -1,41 +1,100 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+export const brand = {
+  primary: '#7370FF',
+  primaryPressed: '#5F5CFF',
+  primaryLight: '#8B88FF',
+};
 
-export const Colors = {
+export const AppThemes = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    mode: 'light',
+    background: '#F5F5F7',
+    surface: '#FFFFFF',
+    surfaceAlt: '#FAFAFA',
+    elevated: '#FFFFFF',
+    border: '#E7E7EE',
+    text: '#1E1E1E',
+    textSecondary: '#6F707A',
+    textMuted: '#A3A3A3',
+    input: '#FAFAFA',
+    overlay: 'rgba(0,0,0,0.40)',
+    primary: brand.primary,
+    primaryPressed: brand.primaryPressed,
+    primaryLight: '#EAE8FF',
+    success: '#23A55A',
+    warning: '#FAA61A',
+    danger: '#ED4245',
+    tabBar: '#FFFFFF',
+    shadow: '#000000',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    mode: 'dark',
+    background: '#1E1F22',
+    surface: '#2B2D31',
+    surfaceAlt: '#26282C',
+    elevated: '#313338',
+    border: '#3F4147',
+    text: '#F2F3F5',
+    textSecondary: '#B5BAC1',
+    textMuted: '#949BA4',
+    input: '#313338',
+    overlay: 'rgba(0,0,0,0.62)',
+    primary: brand.primary,
+    primaryPressed: brand.primaryPressed,
+    primaryLight: '#3A3A66',
+    success: '#23A55A',
+    warning: '#FAA61A',
+    danger: '#ED4245',
+    tabBar: '#2B2D31',
+    shadow: '#000000',
+  },
+} as const;
+
+export type ThemeMode = keyof typeof AppThemes;
+export type AppTheme = (typeof AppThemes)[ThemeMode];
+
+export const softCardShadow = {
+  shadowColor: '#000000',
+  shadowOffset: { width: 0, height: 3 },
+  shadowOpacity: 0.06,
+  shadowRadius: 10,
+  elevation: 3,
+} as const;
+
+export const floatingNavShadow = {
+  shadowColor: '#000000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.08,
+  shadowRadius: 12,
+  elevation: 6,
+} as const;
+
+// Backward-compatible Expo starter export used by hooks/use-theme-color.ts.
+export const Colors = {
+  light: {
+    text: AppThemes.light.text,
+    background: AppThemes.light.background,
+    tint: AppThemes.light.primary,
+    icon: AppThemes.light.textSecondary,
+    tabIconDefault: AppThemes.light.textMuted,
+    tabIconSelected: AppThemes.light.primary,
+  },
+  dark: {
+    text: AppThemes.dark.text,
+    background: AppThemes.dark.background,
+    tint: AppThemes.dark.primary,
+    icon: AppThemes.dark.textSecondary,
+    tabIconDefault: AppThemes.dark.textMuted,
+    tabIconSelected: AppThemes.dark.primary,
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {

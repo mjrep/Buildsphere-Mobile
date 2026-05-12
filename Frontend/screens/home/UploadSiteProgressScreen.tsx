@@ -24,6 +24,7 @@ import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
 import { hybridGlassAudit, CVDetection, CVAuditResult } from '../../lib/generative-ai';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface Props {
   visible: boolean;
@@ -57,6 +58,7 @@ type AnalysisStatus =
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function UploadSiteProgressScreen({ visible, user, onClose, projects, initialTask }: Props) {
+  const { theme } = useAppTheme();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
   const [projectId, setProjectId] = useState<number | null>(initialTask?.project_id || null);
@@ -81,6 +83,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const [avgConfidence, setAvgConfidence] = useState<number>(0);
   const [aiDetectedCount, setAiDetectedCount] = useState<number>(0);
   const [verifiedPanelCount, setVerifiedPanelCount] = useState<number>(0);
+  const [partialPanels, setPartialPanels] = useState<number>(0);
+  const [unclearPanels, setUnclearPanels] = useState<number>(0);
+  const [excludedPanels, setExcludedPanels] = useState<number>(0);
+  const [hasWarnings, setHasWarnings] = useState<boolean>(false);
+  const [warningMessage, setWarningMessage] = useState<string>('');
   const [aiSummary, setAiSummary] = useState<string>('');
   const [detections, setDetections] = useState<CVDetection[]>([]);
 
@@ -102,6 +109,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setAvgConfidence(0);
     setAiDetectedCount(0);
     setVerifiedPanelCount(0);
+    setPartialPanels(0);
+    setUnclearPanels(0);
+    setExcludedPanels(0);
+    setHasWarnings(false);
+    setWarningMessage('');
     setAiSummary('');
     setDetections([]);
   };
@@ -131,16 +143,25 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   }, [user.id, initialTask]);
 
   const handleClose = () => {
+    // If we're on the success step, just close without alert
+    if (step === 4) {
+      reset();
+      onClose();
+      return;
+    }
+
     const hasDraft =
       selectedPhotos.length > 0 ||
       !!notes.trim() ||
       verifiedPanelCount > 0 ||
       step > 1;
+
     if (!hasDraft) {
       reset();
       onClose();
       return;
     }
+
     Alert.alert('Discard progress?', 'Your current upload draft will be lost.', [
       { text: 'Keep editing', style: 'cancel' },
       {
@@ -153,6 +174,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       },
     ]);
   };
+
   const pickFromLibrary = async (multiple = true) => {
     const remainingLimit = 5 - selectedPhotos.length;
     if (remainingLimit <= 0) {
@@ -222,6 +244,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
     setAnalyzing(true);
     setAnalysisStatus('uploading');
+    setPartialPanels(0);
+    setUnclearPanels(0);
+    setExcludedPanels(0);
+    setHasWarnings(false);
+    setWarningMessage('');
     try {
       const currentPhoto = selectedPhotos[0];
       const filename = currentPhoto.uri.split('/').pop() || 'photo.jpg';
@@ -243,6 +270,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       setGlassCount(result.count);
       setDetectionMode(result.detectionMode);
       setAvgConfidence(result.avgConfidence);
+      setPartialPanels(result.partialPanels);
+      setUnclearPanels(result.unclearPanels);
+      setExcludedPanels(result.excludedPanels);
+      setHasWarnings(result.hasWarnings);
+      setWarningMessage(result.warningMessage || '');
       setDetections(result.detections);
       setAiSummary(result.summary);
 
@@ -270,18 +302,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       } else {
         setAnalysisStatus('complete');
 
-        // Detection mode label for user
-        const modeLabel =
-          result.detectionMode === 'segmentation' ? 'Segmentation Mode' :
-          result.detectionMode === 'gemini-fallback' ? 'Fallback Detection' :
-          'Box Detection Mode';
-
         Alert.alert(
           'Analysis Complete',
-          `Detected: ${result.count} panels\n` +
-          `Mode: ${modeLabel}\n` +
-          `Avg Confidence: ${(result.avgConfidence * 100).toFixed(1)}%\n\n` +
-          `${result.summary}`
+          result.summary || `${result.count} complete glass panels were detected. Please verify the final count before saving.`
         );
       }
 
@@ -326,8 +349,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       // ── New CV detection fields ─────────────────────────────────
       formData.append('ai_detected_count', aiDetectedCount.toString());
       formData.append('verified_panel_count', verifiedPanelCount.toString());
+      formData.append('partial_panels', partialPanels.toString());
+      formData.append('unclear_panels', unclearPanels.toString());
+      formData.append('excluded_panels', excludedPanels.toString());
       formData.append('avg_confidence', avgConfidence.toFixed(4));
       formData.append('detection_mode', detectionMode);
+      formData.append('warning_message', warningMessage);
 
       if (selectedPhotos.length > 0) {
         selectedPhotos.forEach((photo, index) => {
@@ -368,13 +395,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
   const inputStyle = {
     borderWidth: 1,
-    borderColor: '#E7E7EE',
+    borderColor: theme.border,
     borderRadius: 12,
     paddingHorizontal: 14,
     height: 50,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: theme.input,
     fontSize: 14,
-    color: '#1E1E1E',
+    color: theme.text,
     marginBottom: 12,
   } as const;
 
@@ -388,17 +415,17 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <View className="flex-1 bg-white">
+        <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* ── STEP 1: Upload photo + quick info ── */}
         {step === 1 && (
           <>
 
             {/* Header */}
-            <View className="flex-row items-center justify-between border-b border-[#F0F0F0] px-5 pb-4 pt-10">
+            <View className="flex-row items-center justify-between border-b px-5 pb-4 pt-10" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
               <TouchableOpacity onPress={handleClose}>
-                <Ionicons name="close" size={24} color="#1E1E1E" />
+                <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
-              <Text className="text-[16px] font-bold text-[#1E1E1E]">Upload a site progress</Text>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Upload a site progress</Text>
               <View style={{ width: 24 }} />
             </View>
 
@@ -423,54 +450,54 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                     ))}
                     <TouchableOpacity
                       onPress={showPhotoOptions}
-                      className="items-center justify-center rounded-[16px] border-2 border-dashed border-[#D3D0FF] bg-[#F8F7FF]"
-                      style={{ width: 100, height: 160 }}>
+                      className="items-center justify-center rounded-[16px] border-2 border-dashed"
+                      style={{ width: 100, height: 160, backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
                       <Ionicons name="add" size={32} color={PRIMARY} />
-                      <Text className="text-[10px] text-[#7370FF]">Add more</Text>
+                      <Text className="text-[10px]" style={{ color: theme.primary }}>Add more</Text>
                     </TouchableOpacity>
                   </ScrollView>
                 </View>
               ) : (
                 <TouchableOpacity
                   onPress={showPhotoOptions}
-                  className="mb-6 items-center justify-center rounded-[16px] border-2 border-dashed border-[#D3D0FF] bg-[#F8F7FF]"
-                  style={{ height: 160 }}>
-                  <View className="mb-2 h-14 w-14 items-center justify-center rounded-full bg-[#EAE8FF]">
+                  className="mb-6 items-center justify-center rounded-[16px] border-2 border-dashed"
+                  style={{ height: 160, backgroundColor: theme.surface, borderColor: theme.primary }}>
+                  <View className="mb-2 h-14 w-14 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
                     <Ionicons name="camera" size={26} color={PRIMARY} />
                   </View>
-                  <Text className="text-[13px] text-[#A3A3A3]">Tap to upload photo</Text>
+                  <Text className="text-[13px]" style={{ color: theme.textMuted }}>Tap to upload photo</Text>
                 </TouchableOpacity>
               )}
               
-              <Text className="mb-1 text-[12px] font-semibold text-[#2D2D2D]">Task</Text>
+              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Task</Text>
               <TouchableOpacity
                 onPress={() => setIsTaskModalVisible(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border border-[#E7E7EE] bg-[#FAFAFA] px-4"
-                style={{ height: 50 }}>
-                <Text style={{ color: taskId ? '#1E1E1E' : '#C0C0C0' }}>
+                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
+                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
+                <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
                   {loadingTasks ? 'Loading tasks...' : (userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task')}
                 </Text>
-                <Ionicons name="chevron-down" size={20} color="#777" />
+                <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
               {/* Shift Dropdown */}
-              <Text className="mb-1 text-[12px] font-semibold text-[#2D2D2D]">Shift</Text>
+              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Shift</Text>
               <TouchableOpacity
                 onPress={() => setIsShiftModalVisible(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border border-[#E7E7EE] bg-[#FAFAFA] px-4"
-                style={{ height: 50 }}>
-                <Text style={{ color: '#1E1E1E' }}>{shift}</Text>
-                <Ionicons name="chevron-down" size={20} color="#777" />
+                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
+                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
+                <Text style={{ color: theme.text }}>{shift}</Text>
+                <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
               {/* Date Picker */}
-              <Text className="mb-1 text-[12px] font-semibold text-[#2D2D2D]">Work Date</Text>
+              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Work Date</Text>
               <TouchableOpacity
                 onPress={() => setShowDatePicker(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border border-[#E7E7EE] bg-[#FAFAFA] px-4"
-                style={{ height: 50 }}>
-                <Text style={{ color: '#1E1E1E' }}>{workDate.toDateString()}</Text>
-                <Ionicons name="calendar-outline" size={20} color="#777" />
+                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
+                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
+                <Text style={{ color: theme.text }}>{workDate.toDateString()}</Text>
+                <Ionicons name="calendar-outline" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
               {showDatePicker && (
@@ -559,11 +586,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         {step === 2 && selectedPhotos.length > 0 && (
           <View className="flex-1 bg-[#F9F9FB]">
             {/* Header */}
-            <View className="flex-row items-center border-b border-[#F0F0F0] bg-white px-5 pb-4 pt-10">
+            <View className="flex-row items-center border-b px-5 pb-4 pt-10" style={{ backgroundColor: theme.background, borderColor: theme.border }}>
               <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 -mt-1 mr-3">
-                <Ionicons name="caret-back-outline" size={24} color="black" />
+                <Ionicons name="caret-back-outline" size={24} color={theme.text} />
               </TouchableOpacity>
-              <Text className="text-[16px] font-bold text-[#1E1E1E]">
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
                 Preview Photos ({selectedPhotos.length})
               </Text>
             </View>
@@ -607,16 +634,15 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             </View>
 
             {/* Footer Buttons */}
-            <View className="bg-white border-t border-[#F0F0F0] px-5 pb-10 pt-4">
+            <View className="border-t px-5 pb-10 pt-4" style={{ backgroundColor: theme.background, borderColor: theme.border }}>
               {/* Analysis status banner */}
-              {analysisStatus === 'complete' && (
+              {false && analysisStatus === 'complete' && (
                 <View className="mb-3 flex-row items-center rounded-xl bg-[#E8F5E9] px-4 py-3">
                   <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
                   <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#2E7D32]">
                     {aiDetectedCount} panels detected • {
-                      detectionMode === 'segmentation' ? 'Segmentation Mode' :
-                      detectionMode === 'gemini-fallback' ? 'Fallback Detection' :
-                      'Box Detection Mode'
+                      false ? 'Fallback Detection' :
+                      'Analysis complete. Verify the panel count before saving.'
                     }
                   </Text>
                 </View>
@@ -648,18 +674,19 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               <TouchableOpacity
                 onPress={handleCountGlass}
                 disabled={analyzing}
-                className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2 border-[#D3D0FF] bg-[#F8F7FF]">
+              className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
+              style={{ backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
                 {analyzing ? (
                   <View className="flex-row items-center">
                     <ActivityIndicator color={PRIMARY} />
-                    <Text className="ml-3 text-[14px] font-semibold text-[#7370FF]">
+                    <Text className="ml-3 text-[14px] font-semibold" style={{ color: theme.primary }}>
                       {analysisStatus === 'uploading' ? 'Uploading image...' : 'Analyzing glass panels...'}
                     </Text>
                   </View>
                 ) : (
                   <>
                     <Ionicons name="sparkles" size={20} color={PRIMARY} />
-                    <Text className="ml-2 text-[16px] font-bold text-[#7370FF]">
+                    <Text className="ml-2 text-[16px] font-bold" style={{ color: theme.primary }}>
                       Count Glass Panels (AI)
                     </Text>
                   </>
@@ -672,18 +699,18 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         {/* ── STEP 3: Form Details ── */}
         {step === 3 && (
           <>
-            <View className="flex-row items-center border-b border-[#F0F0F0] px-5 pb-4 pt-10">
+            <View className="flex-row items-center border-b px-5 pb-4 pt-10" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
               <TouchableOpacity onPress={() => setStep(selectedPhotos.length > 0 ? 2 : 1)} className="-ml-2 -mt-1 mr-3">
-                <Ionicons name="caret-back-outline" size={24} color="black" />
+                <Ionicons name="caret-back-outline" size={24} color={theme.text} />
               </TouchableOpacity>
-              <Text className="text-[16px] font-bold text-[#1E1E1E]">
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
                 Finalize Record
               </Text>
             </View>
 
             {/* Mini photo preview if available */}
             {selectedPhotos.length > 0 && (
-              <View className="bg-[#F8F9FA] border-b border-[#F0F0F0] py-4">
+              <View className="border-b py-4" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-5">
                   {selectedPhotos.map((photo, index) => (
                     <Image
@@ -698,35 +725,35 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             )}
 
             <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingTop: 20, paddingBottom: 40 }}>
-              <Text className="mb-1.5 text-[12px] font-semibold text-[#2D2D2D]">Task</Text>
+              <Text className="mb-1.5 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Task</Text>
               <TouchableOpacity
                 onPress={() => setIsTaskModalVisible(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border border-[#E7E7EE] bg-[#FAFAFA] px-4"
-                style={{ height: 50 }}>
-                <Text style={{ color: taskId ? '#1E1E1E' : '#C0C0C0' }}>
+                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
+                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
+                <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
                   {loadingTasks ? 'Loading...' : (userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task')}
                 </Text>
-                <Ionicons name="chevron-down" size={20} color="#777" />
+                <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
               {/* Shift Dropdown */}
-              <Text className="mb-1 text-[12px] font-semibold text-[#2D2D2D]">Shift</Text>
+              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Shift</Text>
               <TouchableOpacity
                 onPress={() => setIsShiftModalVisible(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border border-[#E7E7EE] bg-[#FAFAFA] px-4"
-                style={{ height: 50 }}>
-                <Text style={{ color: '#1E1E1E' }}>{shift}</Text>
-                <Ionicons name="chevron-down" size={20} color="#777" />
+                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
+                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
+                <Text style={{ color: theme.text }}>{shift}</Text>
+                <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
               {/* Date Picker */}
-              <Text className="mb-1 text-[12px] font-semibold text-[#2D2D2D]">Work Date</Text>
+              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Work Date</Text>
               <TouchableOpacity
                 onPress={() => setShowDatePicker(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border border-[#E7E7EE] bg-[#FAFAFA] px-4"
-                style={{ height: 50 }}>
-                <Text style={{ color: '#1E1E1E' }}>{workDate.toDateString()}</Text>
-                <Ionicons name="calendar-outline" size={20} color="#777" />
+                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
+                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
+                <Text style={{ color: theme.text }}>{workDate.toDateString()}</Text>
+                <Ionicons name="calendar-outline" size={20} color={theme.textMuted} />
               </TouchableOpacity>
 
               {showDatePicker && (
@@ -741,51 +768,34 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 />
               )}
 
-              <Text className="mb-1.5 mt-2 text-[12px] font-semibold text-[#2D2D2D]">Notes / Comments</Text>
+              <Text className="mb-1.5 mt-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Notes / Comments</Text>
               <TextInput
                 value={notes}
                 onChangeText={setNotes}
                 style={{ ...inputStyle, height: 100, textAlignVertical: 'top', paddingTop: 12 }}
                 placeholder="Add comments about progress..."
-                placeholderTextColor="#C0C0C0"
+                placeholderTextColor={theme.textMuted}
                 multiline
               />
 
               {/* ── AI Detection Results + Human Verification ───────── */}
-              <View className="mt-6 mb-4 rounded-2xl border border-[#D3D0FF] bg-[#F8F7FF] p-4">
+              <View className="mt-6 mb-4 rounded-2xl border p-4" style={{ backgroundColor: theme.surface, borderColor: theme.primary }}>
 
                 {/* Header */}
-                <View className="flex-row items-center justify-between mb-3">
+                <View className="mb-3 flex-row items-center">
                   <View className="flex-row items-center">
-                    <View className="mr-3 h-8 w-8 items-center justify-center rounded-full bg-[#EAE8FF]">
+                    <View className="mr-3 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
                       <Ionicons name="analytics" size={16} color={PRIMARY} />
                     </View>
-                    <Text className="text-[13px] font-semibold text-[#1E1E1E]">
-                      AI Detection Results
+                    <Text className="text-[13px] font-semibold" style={{ color: theme.text }}>
+                      AI Summary
                     </Text>
                   </View>
                   {/* Detection Mode Badge */}
-                  <View className="rounded-full px-3 py-1" style={{
-                    backgroundColor:
-                      detectionMode === 'segmentation' ? '#E3F2FD' :
-                      detectionMode === 'gemini-fallback' ? '#FFF3E0' :
-                      '#E8F5E9'
-                  }}>
-                    <Text className="text-[10px] font-bold" style={{
-                      color:
-                        detectionMode === 'segmentation' ? '#1565C0' :
-                        detectionMode === 'gemini-fallback' ? '#E65100' :
-                        '#2E7D32'
-                    }}>
-                      {detectionMode === 'segmentation' ? '⬡ SEGMENTATION' :
-                       detectionMode === 'gemini-fallback' ? '⚠ FALLBACK' :
-                       '▢ BOX DETECTION'}
-                    </Text>
-                  </View>
                 </View>
 
                 {/* Gemini fallback warning */}
-                {detectionMode === 'gemini-fallback' && (
+                {false && detectionMode === 'gemini-fallback' && (
                   <View className="mb-3 flex-row items-center rounded-lg bg-[#FFF8E1] px-3 py-2">
                     <Ionicons name="warning" size={14} color="#F57C00" />
                     <Text className="ml-2 flex-1 text-[11px] text-[#E65100]">
@@ -795,6 +805,15 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 )}
 
                 {/* AI analysis failed — manual mode */}
+                {false && hasWarnings && (
+                  <View className="mb-3 flex-row items-center rounded-lg bg-[#FFF3E0] px-3 py-2">
+                    <Ionicons name="alert-circle" size={14} color="#F57C00" />
+                    <Text className="ml-2 flex-1 text-[11px] text-[#E65100]">
+                      {warningMessage || 'Some glass panels are cut off or unclear. They were excluded from the AI count. Please retake the photo or verify manually.'}
+                    </Text>
+                  </View>
+                )}
+
                 {analysisStatus === 'failed' && (
                   <View className="mb-3 flex-row items-center rounded-lg bg-[#FFEBEE] px-3 py-2">
                     <Ionicons name="alert-circle" size={14} color="#E53935" />
@@ -804,39 +823,51 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   </View>
                 )}
 
-                {/* Stats Row: AI Count + Confidence */}
-                {analysisStatus !== 'failed' && analysisStatus !== 'idle' && (
+                {/* Stats Row: AI Count + Detection Mode */}
+                {false && analysisStatus !== 'failed' && analysisStatus !== 'idle' && (
                   <View className="mb-3 flex-row">
                     <View className="flex-1 items-center rounded-xl bg-white py-2 mr-2 border border-[#E0E0E0]">
-                      <Text className="text-[10px] text-gray-400">AI Detected</Text>
+                      <Text className="text-[10px] text-gray-400">AI Counted</Text>
                       <Text className="text-[18px] font-bold text-[#7370FF]">{aiDetectedCount}</Text>
-                      <Text className="text-[9px] text-gray-400">panels</Text>
+                      <Text className="text-[9px] text-gray-400">complete</Text>
                     </View>
                     <View className="flex-1 items-center rounded-xl bg-white py-2 border border-[#E0E0E0]">
-                      <Text className="text-[10px] text-gray-400">Avg Confidence</Text>
-                      <Text className="text-[18px] font-bold text-[#4CAF50]">{(avgConfidence * 100).toFixed(1)}%</Text>
-                      <Text className="text-[9px] text-gray-400">accuracy</Text>
+                      <Text className="text-[10px] text-gray-400">Detection Mode</Text>
+                      <Text className="text-[14px] font-bold text-[#4CAF50]">
+                        {detectionMode === 'gemini-fallback' ? 'Fallback' : 'Box'}
+                      </Text>
+                      <Text className="text-[9px] text-gray-400">YOLOv8</Text>
                     </View>
+                  </View>
+                )}
+
+                {false && analysisStatus !== 'failed' && analysisStatus !== 'idle' && (
+                  <View className="mb-3 rounded-xl bg-white px-3 py-2 border border-[#E0E0E0]">
+                    <Text className="text-[10px] font-semibold text-gray-400 mb-1">Excluded Panels</Text>
+                    <Text className="text-[12px] text-[#333]">
+                      Partial: {partialPanels} | Unclear: {unclearPanels} | Total excluded: {excludedPanels}
+                    </Text>
                   </View>
                 )}
 
                 {/* AI Summary */}
                 {aiSummary ? (
-                  <View className="mb-3 rounded-xl bg-white px-3 py-2 border border-[#E0E0E0]">
-                    <Text className="text-[10px] font-semibold text-gray-400 mb-1">AI Summary</Text>
-                    <Text className="text-[12px] text-[#333] leading-4">{aiSummary}</Text>
+                  <View className="mb-3 rounded-xl px-3 py-2 border" style={{ backgroundColor: theme.elevated, borderColor: theme.border }}>
+                    <Text className="text-[10px] font-semibold mb-1" style={{ color: theme.textMuted }}>AI Summary</Text>
+                    <Text className="text-[12px] leading-4" style={{ color: theme.textSecondary }}>{aiSummary}</Text>
                   </View>
                 ) : null}
 
                 {/* ── Verified Panel Count (Editable) ───────────── */}
                 <View className="mt-1">
-                  <Text className="text-[11px] font-semibold text-[#2D2D2D] mb-2">
+                  <Text className="text-[11px] font-semibold mb-2" style={{ color: theme.textSecondary }}>
                     Verified Panel Count
                   </Text>
-                  <View className="flex-row items-center justify-between bg-white rounded-xl border border-[#E0E0E0] p-2 px-4">
+                  <View className="flex-row items-center justify-between rounded-xl border p-2 px-4" style={{ backgroundColor: theme.elevated, borderColor: theme.border }}>
                     <TouchableOpacity 
                       onPress={() => setVerifiedPanelCount(Math.max(0, verifiedPanelCount - 1))}
-                      className="h-8 w-8 items-center justify-center rounded-full bg-gray-100">
+                      className="h-8 w-8 items-center justify-center rounded-full"
+                      style={{ backgroundColor: theme.input }}>
                         <Ionicons name="remove" size={20} color={PRIMARY} />
                     </TouchableOpacity>
                     
@@ -844,17 +875,18 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                       value={String(verifiedPanelCount)}
                       onChangeText={(v) => setVerifiedPanelCount(parseInt(v) || 0)}
                       keyboardType="numeric"
-                      className="text-[20px] font-bold text-[#7370FF] text-center"
-                      style={{ minWidth: 50 }}
+                      className="text-[20px] font-bold text-center"
+                      style={{ minWidth: 50, color: theme.primary }}
                     />
                     
                     <TouchableOpacity 
                       onPress={() => setVerifiedPanelCount(verifiedPanelCount + 1)}
-                      className="h-8 w-8 items-center justify-center rounded-full bg-[#7370FF]">
+                      className="h-8 w-8 items-center justify-center rounded-full"
+                      style={{ backgroundColor: theme.primary }}>
                         <Ionicons name="add" size={20} color="white" />
                     </TouchableOpacity>
                   </View>
-                  <Text className="mt-1.5 text-center text-[10px] text-gray-400">
+                  <Text className="mt-1.5 text-center text-[10px]" style={{ color: theme.textMuted }}>
                     Adjust if the AI count is incorrect
                   </Text>
                 </View>
@@ -862,7 +894,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
             </ScrollView>
 
-            <View className="border-t border-[#F0F0F0] px-5 pb-10 pt-3">
+            <View className="border-t px-5 pb-10 pt-3" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
               <TouchableOpacity
                 onPress={handleSave}
                 disabled={saving}
@@ -894,10 +926,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               <Ionicons name="checkmark" size={48} color="white" />
             </View>
 
-            <Text className="mb-3 text-center text-[22px] font-bold text-[#1E1E1E]">
+            <Text className="mb-3 text-center text-[22px] font-bold" style={{ color: theme.text }}>
               Site progress uploaded!
             </Text>
-            <Text className="mb-10 text-center text-[14px] leading-6 text-[#A3A3A3]">
+            <Text className="mb-10 text-center text-[14px] leading-6" style={{ color: theme.textMuted }}>
               Photo(s) uploaded and progress recorded successfully.
             </Text>
 
@@ -914,12 +946,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
       {/* ── Task Selection Modal ── */}
       <Modal visible={isTaskModalVisible} animationType="slide" transparent>
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="h-[60%] w-full rounded-t-[30px] bg-white p-6">
+        <View className="flex-1 justify-end" style={{ backgroundColor: theme.overlay }}>
+          <View className="h-[60%] w-full rounded-t-[30px] p-6" style={{ backgroundColor: theme.elevated }}>
             <View className="mb-6 flex-row items-center justify-between">
-              <Text className="text-[18px] font-bold text-[#1E1E1E]">Select Task</Text>
+              <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Select Task</Text>
               <TouchableOpacity onPress={() => setIsTaskModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#1E1E1E" />
+                <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
             </View>
 
@@ -934,7 +966,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 </TouchableOpacity>
               </View>
             ) : userTasks.length === 0 ? (
-              <Text className="text-center text-gray-500 py-10">No tasks assigned to you yet.</Text>
+              <Text className="text-center py-10" style={{ color: theme.textMuted }}>No tasks assigned to you yet.</Text>
             ) : (
               <ScrollView>
                 {userTasks.map((t) => (
@@ -945,13 +977,14 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                       setProjectId(t.project_id);
                       setIsTaskModalVisible(false);
                     }}
-                    className="mb-3 flex-row items-center rounded-xl border border-[#F0F0F0] p-4 bg-[#FAFAFA]">
-                    <View className="mr-3 h-8 w-8 items-center justify-center rounded-full bg-[#EAE8FF]">
+                    className="mb-3 flex-row items-center rounded-xl border p-4"
+                    style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                    <View className="mr-3 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
                       <Ionicons name="clipboard-outline" size={16} color={PRIMARY} />
                     </View>
                     <View className="flex-1">
-                      <Text className="text-[14px] font-semibold text-[#1E1E1E]">{t.title}</Text>
-                      <Text className="text-[12px] text-gray-500">{t.project || 'No Project'}</Text>
+                      <Text className="text-[14px] font-semibold" style={{ color: theme.text }}>{t.title}</Text>
+                      <Text className="text-[12px]" style={{ color: theme.textMuted }}>{t.project || 'No Project'}</Text>
                     </View>
                     {String(taskId) === String(t.id) && (
                       <Ionicons name="checkmark-circle" size={20} color={PRIMARY} />
@@ -966,12 +999,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
       {/* ── Shift Selection Modal ── */}
       <Modal visible={isShiftModalVisible} animationType="slide" transparent>
-        <View className="flex-1 justify-end bg-black/40">
-          <View className="h-[40%] w-full rounded-t-[30px] bg-white p-6">
+        <View className="flex-1 justify-end" style={{ backgroundColor: theme.overlay }}>
+          <View className="h-[40%] w-full rounded-t-[30px] p-6" style={{ backgroundColor: theme.elevated }}>
             <View className="mb-6 flex-row items-center justify-between">
-              <Text className="text-[18px] font-bold text-[#1E1E1E]">Select Shift</Text>
+              <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Select Shift</Text>
               <TouchableOpacity onPress={() => setIsShiftModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#1E1E1E" />
+                <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
             </View>
 
@@ -982,8 +1015,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   setShift(item);
                   setIsShiftModalVisible(false);
                 }}
-                className="mb-3 flex-row items-center rounded-xl border border-[#F0F0F0] p-4 bg-[#FAFAFA]">
-                <Text className="flex-1 text-[14px] font-semibold text-[#1E1E1E]">{item}</Text>
+                className="mb-3 flex-row items-center rounded-xl border p-4"
+                style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                <Text className="flex-1 text-[14px] font-semibold" style={{ color: theme.text }}>{item}</Text>
                 {shift === item && <Ionicons name="checkmark-circle" size={20} color={PRIMARY} />}
               </TouchableOpacity>
             ))}

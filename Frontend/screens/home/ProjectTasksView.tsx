@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface Task {
   id: number;
@@ -31,6 +32,7 @@ interface ProjectTasksViewProps {
 const PRIMARY = '#7370FF';
 
 export default function ProjectTasksView({ projectId, currentUserId, onTaskSelect, onBack }: ProjectTasksViewProps) {
+  const { theme } = useAppTheme();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'in-progress' | 'in-review' | 'completed'>('all');
@@ -90,42 +92,47 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
   };
 
   return (
-    <View className="flex-1 bg-white">
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
       {/* Header */}
-      <View className="flex-row items-center px-5 pb-4 pt-10 border-b border-[#F5F5F7]">
+      <View className="flex-row items-center px-5 pb-4 pt-10 border-b" style={{ borderColor: theme.border }}>
         <TouchableOpacity onPress={onBack} className="-ml-2 -mt-1 mr-3">
-          <Ionicons name="caret-back-outline" size={24} color="black" />
+          <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
-        <Text className="text-[25px] font-bold text-[#7370FF]">Project Tasks</Text>
+        <Text className="text-[25px] font-bold" style={{ color: theme.primary }}>Project Tasks</Text>
       </View>
 
       {/* Search & Toggle */}
       <View className="px-5 pt-4">
-        <View className="flex-row items-center bg-[#F8F8FA] rounded-xl px-4 py-2 mb-4">
-          <Ionicons name="search-outline" size={20} color="#A3A3A3" />
+        <View className="flex-row items-center rounded-xl px-4 py-2 mb-4" style={{ backgroundColor: theme.input }}>
+          <Ionicons name="search-outline" size={20} color={theme.textMuted} />
           <TextInput
             placeholder="Search tasks..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             className="flex-1 ml-2 h-10 text-[14px]"
-            placeholderTextColor="#A3A3A3"
+            placeholderTextColor={theme.textMuted}
+            style={{ color: theme.text }}
           />
         </View>
 
         <View className="flex-row items-center justify-between mb-6">
           <TouchableOpacity 
             onPress={() => setShowOnlyMine(!showOnlyMine)}
-            className={`flex-row items-center rounded-full px-4 py-2 border ${showOnlyMine ? 'bg-[#7370FF] border-[#7370FF]' : 'bg-white border-[#E7E7EE]'}`}
+            className="flex-row items-center rounded-full px-4 py-2 border"
+            style={{ 
+              backgroundColor: showOnlyMine ? theme.primary : theme.surface, 
+              borderColor: showOnlyMine ? theme.primary : theme.border 
+            }}
           >
-            <Ionicons name={showOnlyMine ? "person" : "person-outline"} size={16} color={showOnlyMine ? "white" : "#7370FF"} />
-            <Text className={`ml-2 text-[12px] font-bold ${showOnlyMine ? "white text-white" : "text-[#7370FF]"}`}>
+            <Ionicons name={showOnlyMine ? "person" : "person-outline"} size={16} color={showOnlyMine ? "white" : theme.primary} />
+            <Text className="ml-2 text-[12px] font-bold" style={{ color: showOnlyMine ? "white" : theme.primary }}>
               {showOnlyMine ? "My Tasks" : "All Team Tasks"}
             </Text>
           </TouchableOpacity>
 
           <View className="flex-row items-center">
-            <Ionicons name="list" size={16} color="#A3A3A3" />
-            <Text className="ml-1 text-[12px] text-[#A3A3A3] font-medium">{filteredTasks.length} tasks</Text>
+            <Ionicons name="list" size={16} color={theme.textMuted} />
+            <Text className="ml-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>{filteredTasks.length} tasks</Text>
           </View>
         </View>
 
@@ -135,7 +142,7 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
             const isActive = activeFilter === filter;
             const isAll = filter === 'all';
             
-            // Map colors from My Work
+            // Map colors from Task
             let color = '#7370FF'; // Default / In Progress
             let label = 'Project Tasks';
             
@@ -159,17 +166,24 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
               <TouchableOpacity
                 key={filter}
                 onPress={() => setActiveFilter(filter)}
-                className={`mr-3 rounded-full border ${isActive ? 'px-5 py-2.5' : 'bg-white border-[#F2F2F7] px-4 py-2'}`}
+                className="mr-3 rounded-full border"
                 style={isActive ? { 
                   backgroundColor: color, 
                   borderColor: color,
+                  paddingHorizontal: 20,
+                  paddingVertical: 10,
                   shadowColor: color, 
                   shadowOpacity: 0.2, 
                   shadowRadius: 5, 
                   elevation: 2,
-                } : {}}
+                } : {
+                  backgroundColor: theme.surface,
+                  borderColor: theme.border,
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                }}
               >
-                <Text className={`text-[12px] font-bold ${isActive ? 'text-white' : 'text-[#7A7A7A]'}`}>
+                <Text className="text-[12px] font-bold" style={{ color: isActive ? 'white' : theme.textSecondary }}>
                   {label}
                 </Text>
               </TouchableOpacity>
@@ -183,8 +197,8 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
           <ActivityIndicator color={PRIMARY} className="mt-10" />
         ) : filteredTasks.length === 0 ? (
           <View className="mt-20 items-center">
-            <Ionicons name="document-text-outline" size={48} color="#E0E0E0" />
-            <Text className="mt-4 text-[14px] text-[#A3A3A3]">No tasks found here.</Text>
+            <Ionicons name="document-text-outline" size={48} color={theme.textMuted} />
+            <Text className="mt-4 text-[14px]" style={{ color: theme.textMuted }}>No tasks found here.</Text>
           </View>
         ) : (
           filteredTasks.map((task) => {
@@ -193,12 +207,12 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
               <TouchableOpacity
                 key={task.id}
                 onPress={() => onTaskSelect(task)}
-                className="mb-4 rounded-2xl bg-white p-5 border border-[#F5F5F7]"
-                style={{ shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 10, elevation: 1 }}
+                className="mb-4 rounded-2xl p-5 border"
+                style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.03, shadowRadius: 10, elevation: 1 }}
               >
                 <View className="flex-row justify-between items-start mb-3">
                   <View className="flex-1 mr-3">
-                    <Text className="text-[16px] font-bold text-[#1E1E1E]" numberOfLines={2}>{task.title}</Text>
+                    <Text className="text-[16px] font-bold" style={{ color: theme.text }} numberOfLines={2}>{task.title}</Text>
                   </View>
                   <View className="rounded-full px-2.5 py-1" style={{ backgroundColor: status.bg }}>
                     <Text className="text-[10px] font-bold" style={{ color: status.color }}>
@@ -209,24 +223,24 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
 
                 <View className="space-y-3">
                   <View className="flex-row items-center">
-                    <View className="w-6 h-6 rounded-full bg-[#F0F0F0] items-center justify-center mr-2">
-                      <Ionicons name="person-outline" size={12} color="#7A7A7A" />
+                    <View className="w-6 h-6 rounded-full items-center justify-center mr-2" style={{ backgroundColor: theme.input }}>
+                      <Ionicons name="person-outline" size={12} color={theme.textSecondary} />
                     </View>
-                    <Text className="text-[12px] text-[#7A7A7A]">
-                      <Text className="font-semibold text-[#1E1E1E]">PIC: </Text>
+                    <Text className="text-[12px]" style={{ color: theme.textSecondary }}>
+                      <Text className="font-semibold" style={{ color: theme.text }}>PIC: </Text>
                       {task.assigned_to_name || 'Unassigned'}
                     </Text>
                   </View>
 
-                  <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-[#F9F9F9]">
+                  <View className="flex-row items-center justify-between mt-3 pt-3 border-t" style={{ borderColor: theme.border }}>
                     <View className="flex-row items-center">
-                      <Ionicons name="calendar-outline" size={14} color="#A3A3A3" />
-                      <Text className="ml-1.5 text-[11px] text-[#A3A3A3] font-medium">Due: {task.due_date}</Text>
+                      <Ionicons name="calendar-outline" size={14} color={theme.textMuted} />
+                      <Text className="ml-1.5 text-[11px] font-medium" style={{ color: theme.textMuted }}>Due: {task.due_date}</Text>
                     </View>
                     
                     <View className="flex-row items-center">
                       <View className="w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: getPriorityColor(task.priority) }} />
-                      <Text className="text-[11px] font-bold text-[#7A7A7A] uppercase tracking-wider">{task.priority || 'Normal'}</Text>
+                      <Text className="text-[11px] font-bold uppercase tracking-wider" style={{ color: theme.textSecondary }}>{task.priority || 'Normal'}</Text>
                     </View>
                   </View>
                 </View>

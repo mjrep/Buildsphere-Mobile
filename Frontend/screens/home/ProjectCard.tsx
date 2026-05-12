@@ -1,5 +1,7 @@
 import { View, Text, TouchableOpacity, Image, ImageSourcePropType } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { useAppTheme } from '../../contexts/ThemeContext';
+import { softCardShadow } from '../../constants/theme';
 
 interface ProjectCardProps {
   name: string;
@@ -20,18 +22,16 @@ export default function ProjectCard({
   image,
   onAction,
 }: ProjectCardProps) {
+  const { theme } = useAppTheme();
   // Use the color directly (it's a hex code) or fallback to pinkish default
   const bannerColor = color || '#FFDFF2';
 
   return (
     <View
-      className="mb-6 overflow-hidden rounded-[30px] bg-white pb-4"
+      className="mb-6 overflow-hidden rounded-[30px] pb-4"
       style={{
-        shadowColor: '#000',
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-        shadowOffset: { width: 0, height: 5 },
-        elevation: 5,
+        backgroundColor: theme.surface,
+        ...softCardShadow,
       }}>
       {/* Banner */}
       <View style={{ backgroundColor: bannerColor, height: 180 }}>
@@ -66,32 +66,32 @@ export default function ProjectCard({
 
           <View className="flex-1">
             <View className="flex-row items-center justify-between">
-              <Text className="flex-1 text-[14px] font-bold text-[#1E1E1E]">
+              <Text className="flex-1 text-[14px] font-bold" style={{ color: theme.text }}>
                 {name}
               </Text>
 
               {daysLeft !== undefined && (
-                <View className="ml-2 flex-row items-center rounded-md bg-[#EAE8FF] px-1.5 py-0.5">
-                  <Ionicons name="time-outline" size={7} color="#6C63FF" />
-                  <Text className="ml-1 text-[10px] font-bold text-[#6C63FF]">
+                <View className="ml-2 flex-row items-center rounded-md px-1.5 py-0.5" style={{ backgroundColor: theme.primaryLight }}>
+                  <Ionicons name="time-outline" size={7} color={theme.primary} />
+                  <Text className="ml-1 text-[10px] font-bold" style={{ color: theme.primary }}>
                     {daysLeft} Days Left
                   </Text>
                 </View>
               )}
             </View>
-            <Text className="mt-2 text-[11px] text-[#A3A3A3]">{location}</Text>
+            <Text className="mt-2 text-[11px]" style={{ color: theme.textMuted }}>{location}</Text>
           </View>
         </View>
 
         {/* Progress Section */}
         <View className="mt-2">
-          <View className="h-[6px] overflow-hidden rounded-full bg-[#F0F0F0]">
+          <View className="h-[6px] overflow-hidden rounded-full" style={{ backgroundColor: theme.border }}>
             <View
               style={{ width: `${progress}%` }}
               className={`h-full rounded-full ${progress > 0 ? 'bg-[#5DBF50]' : 'bg-[#F0F0F0]'}`}
             />
           </View>
-          <Text className="mt-1 text-right text-[12px] text-[#A3A3A3]">
+          <Text className="mt-1 text-right text-[12px]" style={{ color: theme.textMuted }}>
             {progress}%
           </Text>
         </View>

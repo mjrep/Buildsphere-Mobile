@@ -91,7 +91,10 @@ class TestDetectPanelsValid:
         data = response.json()
 
         # Validate response structure
-        assert "total_glass_panels" in data
+        assert "total_valid_panels" in data
+        assert "partial_panels" in data
+        assert "excluded_panels" in data
+        assert data["detection_mode"] == "box"
         assert "detections" in data
         assert "image_width" in data
         assert "image_height" in data
@@ -101,10 +104,10 @@ class TestDetectPanelsValid:
         assert "nms_iou_threshold" in data
 
         # Validate types
-        assert isinstance(data["total_glass_panels"], int)
+        assert isinstance(data["total_valid_panels"], int)
         assert isinstance(data["detections"], list)
         assert isinstance(data["inference_time_ms"], (int, float))
-        assert data["total_glass_panels"] >= 0
+        assert data["total_valid_panels"] >= 0
 
     def test_detect_png_image(self, client):
         """POST /detect-panels with a valid PNG should return 200."""
@@ -115,7 +118,7 @@ class TestDetectPanelsValid:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "total_glass_panels" in data
+        assert "total_valid_panels" in data
 
     def test_detection_response_format(self, client):
         """Each detection should have bounding_box, confidence_score, and label."""
@@ -131,6 +134,8 @@ class TestDetectPanelsValid:
             assert "bounding_box" in det
             assert "confidence_score" in det
             assert "label" in det
+            assert "status" in det
+            assert "counted" in det
             assert len(det["bounding_box"]) == 4
             assert 0.0 <= det["confidence_score"] <= 1.0
 

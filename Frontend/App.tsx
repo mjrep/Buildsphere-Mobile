@@ -11,6 +11,7 @@ import type { UserRole } from './constants/roles';
 import * as Notifications from 'expo-notifications';
 import { API_URL } from './lib/api';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
+import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
 
 export interface UserInfo {
   id: number;
@@ -30,12 +31,13 @@ export interface UserInfo {
   role: UserRole;
 }
 
-export default function App() {
+function AppContent() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingNotificationData, setPendingNotificationData] = useState<Record<string, any> | null>(null);
 
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const { theme, isDark } = useAppTheme();
 
   // Restore session from storage
   useEffect(() => {
@@ -119,8 +121,8 @@ export default function App() {
   if (loading) {
     return (
       <SafeAreaProvider>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#7370FF" />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.background }}>
+          <ActivityIndicator size="large" color={theme.primary} />
         </View>
       </SafeAreaProvider>
     );
@@ -129,7 +131,7 @@ export default function App() {
   if (user) {
     return (
       <SafeAreaProvider>
-        <StatusBar style="dark" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
         <HomeScreen
           user={user}
           onLogout={handleLogout}
@@ -145,7 +147,7 @@ export default function App() {
   if (showForgotPassword) {
     return (
       <SafeAreaProvider>
-        <StatusBar style="dark" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
         <ForgotPasswordScreen onBackToLogin={() => setShowForgotPassword(false)} />
       </SafeAreaProvider>
     );
@@ -153,8 +155,16 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <LoginScreen onLogin={handleLogin} onForgotPassword={() => setShowForgotPassword(true)} />
     </SafeAreaProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <BuildSphereThemeProvider>
+      <AppContent />
+    </BuildSphereThemeProvider>
   );
 }

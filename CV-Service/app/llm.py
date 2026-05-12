@@ -1,140 +1,148 @@
 """
-BuildSphere CV Service — Gemini AI Integration.
+BuildSphere CV Service - Gemini AI integration.
 
-Handles generating natural language summaries from detection statistics.
-Supported by a YOLOv8 model trained on 170 site images.
+Gemini summarizes structured detection results for the user. It does not decide
+or override the count; YOLOv8 produces boxes and Python classifies/counts them.
 """
 
+import json
 import logging
+
 import google.generativeai as genai
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Configure Gemini if the key is available
 if settings.GEMINI_API_KEY:
     genai.configure(api_key=settings.GEMINI_API_KEY)
 
 
-def generate_audit_summary(total_valid_panels: int, avg_confidence: float) -> str:
+def generate_audit_summary(
+    total_valid_panels: int,
+    partial_panels: int = 0,
+    unclear_panels: int = 0,
+    avg_confidence: float = 0.0,
+    detection_mode: str = "box",
+    warning_message: str | None = None,
+) -> str:
     """
     Generate a professional site audit summary using Gemini.
-    Gemini acts as the 'Auditor' — explaining the results to the user.
+
+    Gemini receives structured values and summarizes only. The authoritative
+    AI count remains total_valid_panels from Python post-processing.
     """
+    fallback = _fallback_summary(
+        total_valid_panels,
+        partial_panels,
+        unclear_panels,
+        warning_message,
+    )
+
     if not settings.GEMINI_API_KEY:
-        return (
-            f"Site Audit Complete. BuildSphere YOLO detected {total_valid_panels} "
-            f"verified glass panels with an average confidence of {avg_confidence:.1%}."
-        )
+        return fallback
 
-    models_to_try = [
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
-    ]
-    
-    model = None
-    last_error = None
-    
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(model_name)
-            # No test generation here to save quota; we'll catch errors in the real call
-            break
-        except Exception as e:
-            last_error = e
-            continue
-
+    model = _first_available_text_model()
     if not model:
-        return f"Site Audit: {total_valid_panels} glass panels verified ({avg_confidence:.1%} confidence)."
+        return fallback
+
+    payload = {
+        "total_valid_panels": total_valid_panels,
+        "partial_panels": partial_panels,
+        "unclear_panels": unclear_panels,
+        "detection_mode": detection_mode,
+        "warning_message": warning_message,
+    }
 
     try:
         prompt = (
-            f"You are a BuildSphere Senior Construction Auditor.\n"
-            f"Context: A Computer Vision scan (YOLO) has just completed.\n"
-            f"Result: {total_valid_panels} glass panels were detected with {avg_confidence:.1%} average confidence.\n"
-            "\n"
-            "Task: Write a concise, 1-sentence professional audit summary for the site manager. "
-            "Focus on the verification of the count. If confidence is low (below 60%), mention that "
-            "manual verification is recommended."
+            "You are a BuildSphere construction audit summarizer.\n"
+            "Use only the structured JSON below. Do not change, infer, or override the count.\n"
+            "YOLOv8 detected glass panels with boxes. Python counted full panels and excluded partial panels. "
+            "The user will verify the final count before saving.\n\n"
+            f"Detection result JSON:\n{json.dumps(payload, indent=2)}\n\n"
+            "Write one concise professional sentence. Mention excluded partial/unclear panels when present. "
+            "Do not mention confidence percentages."
         )
         response = model.generate_content(prompt)
         return response.text.strip()
-    except Exception as e:
-        error_msg = str(e).lower()
+    except Exception as exc:
+        error_msg = str(exc).lower()
         if "429" in error_msg or "quota" in error_msg:
-            return f"Site Audit: {total_valid_panels} panels verified."
-        return f"Site Audit: {total_valid_panels} panels detected."
+            logger.warning("Gemini summary hit quota/rate limit. Returning fallback summary.")
+        else:
+            logger.warning("Gemini summary failed: %s", exc)
+        return fallback
 
 
 def vision_box_fallback(image_bytes: bytes) -> list[list[int]]:
     """
-    EMERGENCY FALLBACK ONLY.
-    Uses Gemini Vision to detect bounding boxes of panels ONLY if YOLO returns 0 detections.
-    Returns a list of boxes in [ymin, xmin, ymax, xmax] format (0-1000 scale).
+    Emergency fallback only.
+
+    Uses Gemini Vision to propose boxes only if YOLO returns no boxes. Python
+    still classifies full vs partial and the user verifies the final count.
     """
     if not settings.GEMINI_API_KEY:
         return []
-        
+
     try:
-        models_to_try = [
-            'gemini-1.5-flash', 
-            'gemini-1.5-pro'
-        ]
-        model = None
-        for m_name in models_to_try:
-            try:
-                model = genai.GenerativeModel(m_name)
-                # Quick probe to see if model is available/not rate limited
-                model.generate_content("test")
-                break
-            except Exception as probe_err:
-                probe_msg = str(probe_err).lower()
-                if "429" in probe_msg or "quota" in probe_msg or "rate limit" in probe_msg:
-                    logger.warning(f"Gemini model {m_name} rate-limited during fallback probe.")
-                    continue
-                continue
-                
+        model = _first_available_text_model(probe=True)
         if not model:
-            logger.warning("No Gemini models available for fallback (all rate-limited or unavailable).")
+            logger.warning("No Gemini models available for fallback.")
             return []
-            
+
         prompt = (
-            "You are a Senior Construction Auditor specialized in High-Precision Glass Panel Detection.\n"
-            "\n"
-            "CRITICAL MISSION: You must provide an EXACT count of INSTALLED glass panels. Mistakes lead to multi-million dollar errors.\n"
-            "\n"
-            "DETECTION RULES (BE EXTREMELY CAREFUL):\n"
-            "1. ONLY count physical glass panes that are transparent or reflective.\n"
-            "2. LOOK FOR the 'glint', 'reflection', or 'transparency' that characterizes glass.\n"
-            "3. DO NOT count brown wood panels, plywood slabs, or orange-tinted protective boards.\n"
-            "4. DO NOT count grey concrete walls, columns, or textured plaster.\n"
-            "5. DO NOT count floors, ceilings, or scaffolding components.\n"
-            "6. For glass facades, count the INDIVIDUAL PANES separated by frames (mullions).\n"
-            "\n"
-            "Return ONLY a JSON array of bounding boxes in this exact format:\n"
-            "[\n"
-            "  [ymin, xmin, ymax, xmax],\n"
-            "  ...\n"
-            "]\n"
-            "Coordinates must be integers normalized between 0 and 1000."
+            "Emergency fallback for BuildSphere glass panel detection.\n"
+            "Return ONLY a JSON array of bounding boxes for visible glass panels.\n"
+            "Use [ymin, xmin, ymax, xmax] coordinates normalized from 0 to 1000.\n"
+            "Do not provide prose."
         )
-        
-        response = model.generate_content([
-            prompt,
-            {"mime_type": "image/jpeg", "data": image_bytes}
-        ])
-        
+
+        response = model.generate_content(
+            [
+                prompt,
+                {"mime_type": "image/jpeg", "data": image_bytes},
+            ]
+        )
+
         text = response.text.strip().replace("```json", "").replace("```", "").strip()
-        import json
         boxes = json.loads(text)
-        if isinstance(boxes, list):
-            return boxes
-        return []
-    except Exception as e:
-        error_msg = str(e).lower()
+        return boxes if isinstance(boxes, list) else []
+    except Exception as exc:
+        error_msg = str(exc).lower()
         if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg:
-            logger.warning("Vision box fallback hit rate limit during inference. Returning empty result.")
+            logger.warning("Vision box fallback hit rate limit. Returning empty result.")
             return []
-        logger.error(f"Vision box fallback failed: {e}")
+        logger.error("Vision box fallback failed: %s", exc)
         return []
+
+
+def _first_available_text_model(probe: bool = False):
+    for model_name in ("gemini-1.5-flash", "gemini-1.5-pro"):
+        try:
+            model = genai.GenerativeModel(model_name)
+            if probe:
+                model.generate_content("test")
+            return model
+        except Exception as exc:
+            logger.warning("Gemini model %s unavailable: %s", model_name, exc)
+    return None
+
+
+def _fallback_summary(
+    total_valid_panels: int,
+    partial_panels: int,
+    unclear_panels: int,
+    warning_message: str | None,
+) -> str:
+    excluded = partial_panels + unclear_panels
+    if excluded > 0:
+        detail = warning_message or (
+            f"{excluded} partial or unclear panels were excluded from the AI count."
+        )
+        return (
+            f"{total_valid_panels} complete glass panels were detected. "
+            f"{detail} Please retake the photo or verify manually before saving."
+        )
+
+    return f"{total_valid_panels} complete glass panels were detected. Please verify the final count before saving."

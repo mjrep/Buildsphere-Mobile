@@ -1,14 +1,15 @@
 """
-BuildSphere CV Service — Pydantic Response Models.
+BuildSphere CV Service - Pydantic response models.
 
-Defines the exact JSON structure returned by the /detect-panels endpoint.
+The CV service returns YOLOv8 box detections. Python classifies full vs partial
+panels, Gemini summarizes only, and the mobile user verifies the final count.
 """
 
 from pydantic import BaseModel, Field
 
 
 class Detection(BaseModel):
-    """A single detected glass panel with its bounding box and confidence."""
+    """A single detected glass panel with box, confidence, and count status."""
 
     bounding_box: list[float] = Field(
         ...,
@@ -26,49 +27,102 @@ class Detection(BaseModel):
         default="glass_panel",
         description="Class label for the detection",
     )
-    # ── Segmentation support (YOLOv8-seg) ─────────────────────────────
-    # Only populated when a segmentation model returns masks.
-    # Format: [[x1, y1], [x2, y2], ...] — polygon vertices in pixel coords.
-    polygon: list[list[float]] | None = Field(
-        default=None,
-        description=(
-            "Polygon vertices [[x, y], ...] from YOLOv8-seg mask. "
-            "None when using a standard detection model."
-        ),
+    status: str = Field(
+        default="full",
+        description="'full' is counted; 'partial' or 'unclear' is excluded from the AI count",
+        examples=["full"],
+    )
+    counted: bool = Field(
+        default=True,
+        description="Whether this detection contributed to total_valid_panels",
     )
 
 
 class DetectionResponse(BaseModel):
-    """
-    Final response payload containing detection results, summary, and annotated image.
-    """
+    """Final payload containing counts, warnings, detections, and annotated image."""
 
     total_valid_panels: int = Field(
         ...,
         ge=0,
-        description="Total number of fully visible (Class A) glass panels detected in the image",
-        examples=[12],
+        description="Number of full glass panels counted by Python from YOLOv8 boxes",
+        examples=[8],
+    )
+    partial_panels: int = Field(
+        default=0,
+        ge=0,
+        description="Detected panels touching or near the image edge and excluded from the AI count",
+    )
+    unclear_panels: int = Field(
+        default=0,
+        ge=0,
+        description="Detected panels excluded because they are unclear, if supported",
+    )
+    excluded_panels: int = Field(
+        default=0,
+        ge=0,
+        description="All detections excluded from the final AI count",
+    )
+    excluded_low_confidence: int = Field(
+        default=0,
+        ge=0,
+        description="Detections excluded below the configured confidence threshold",
+    )
+    excluded_duplicates: int = Field(
+        default=0,
+        ge=0,
+        description="Detections removed by duplicate/overlap filtering",
+    )
+    excluded_contained: int = Field(
+        default=0,
+        ge=0,
+        description="Smaller detections removed because they were mostly inside another box",
+    )
+    excluded_small_boxes: int = Field(
+        default=0,
+        ge=0,
+        description="Detections excluded because they were too small relative to the image",
+    )
+    excluded_unrealistic_shape: int = Field(
+        default=0,
+        ge=0,
+        description="Detections excluded because their aspect ratio looked unrealistic for a panel",
+    )
+    avg_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Average confidence score across returned detections",
+    )
+    detection_mode: str = Field(
+        default="box",
+        description="'box' for regular YOLOv8 detection, or 'gemini-fallback' for emergency fallback",
+    )
+    has_warnings: bool = Field(
+        default=False,
+        description="True when partial or unclear panels were excluded",
+    )
+    warning_message: str | None = Field(
+        default=None,
+        description="Human-readable warning when panels were excluded from the AI count",
+    )
+    summary: str | None = Field(
+        default=None,
+        description="Gemini-generated professional summary of the structured CV result.",
     )
     summary_text: str | None = Field(
-        None,
-        description="AI-generated summary of the site audit.",
+        default=None,
+        description="Backward-compatible alias for the Gemini-generated summary.",
     )
     annotated_image_base64: str | None = Field(
-        None,
+        default=None,
         description="Base64 encoded JPEG image with drawn bounding boxes.",
     )
     detections: list[Detection] = Field(
         default_factory=list,
         description="Array of individual panel detections with bounding boxes",
     )
-    image_width: int = Field(
-        ...,
-        description="Original image width in pixels",
-    )
-    image_height: int = Field(
-        ...,
-        description="Original image height in pixels",
-    )
+    image_width: int = Field(..., description="Original image width in pixels")
+    image_height: int = Field(..., description="Original image height in pixels")
     inference_time_ms: float = Field(
         ...,
         ge=0.0,
@@ -88,22 +142,6 @@ class DetectionResponse(BaseModel):
         ...,
         description="NMS IoU threshold used for suppressing overlapping boxes",
     )
-    # ── Detection mode indicator ──────────────────────────────────────
-    # "box" = standard YOLOv8 detection, "segmentation" = YOLOv8-seg,
-    # "gemini-fallback" = Gemini Vision emergency fallback.
-    detection_mode: str = Field(
-        default="box",
-        description=(
-            "Detection method used: 'box' (YOLOv8), "
-            "'segmentation' (YOLOv8-seg), or 'gemini-fallback'."
-        ),
-    )
-    avg_confidence: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Average confidence score across all valid detections",
-    )
 
 
 class HealthResponse(BaseModel):
@@ -113,24 +151,12 @@ class HealthResponse(BaseModel):
     model_loaded: bool = Field(default=False)
     model_path: str = Field(default="")
     version: str = Field(default="1.0.0")
-    device: str = Field(
-        default="cpu",
-        description="Compute device (cpu/cuda)",
-    )
+    device: str = Field(default="cpu", description="Compute device (cpu/cuda)")
 
 
 class ErrorResponse(BaseModel):
     """Standardized error response."""
 
-    error: str = Field(
-        ...,
-        description="Human-readable error message",
-    )
-    detail: str = Field(
-        default="",
-        description="Technical details for debugging",
-    )
-    status_code: int = Field(
-        ...,
-        description="HTTP status code",
-    )
+    error: str = Field(..., description="Human-readable error message")
+    detail: str = Field(default="", description="Technical details for debugging")
+    status_code: int = Field(..., description="HTTP status code")

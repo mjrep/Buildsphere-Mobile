@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 const { width } = Dimensions.get('window');
 
@@ -44,6 +45,7 @@ interface Props {
 const PRIMARY = '#7370FF';
 
 export default function SiteUpdatesScreen({ visible, onClose, projectName }: Props) {
+  const { theme } = useAppTheme();
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'Today' | 'Past'>('Today');
   const [activeShift, setActiveShift] = useState<'Morning' | 'Noon' | 'Afternoon'>('Noon');
@@ -89,18 +91,18 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
     const dates = Array.from({ length: 31 }, (_, i) => i + 1);
     
     return (
-      <View className="bg-white rounded-[24px] border border-[#F0F0F0] p-5 mb-8">
+      <View className="rounded-[24px] border p-5 mb-8" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
         <View className="flex-row items-center justify-between mb-4">
-          <Text className="text-[16px] font-bold text-[#1E1E1E]">January</Text>
+          <Text className="text-[16px] font-bold" style={{ color: theme.text }}>January</Text>
           <View className="flex-row gap-4">
-            <Ionicons name="chevron-back" size={20} color="#A3A3A3" />
-            <Ionicons name="chevron-forward" size={20} color="#A3A3A3" />
+            <Ionicons name="chevron-back" size={20} color={theme.textMuted} />
+            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
           </View>
         </View>
         
         <View className="flex-row justify-between mb-2">
           {days.map((d, i) => (
-            <Text key={`${d}-${i}`} className="w-8 text-center text-[11px] font-bold text-[#D1D1D6]">{d}</Text>
+            <Text key={`${d}-${i}`} className="w-8 text-center text-[11px] font-bold" style={{ color: theme.textMuted }}>{d}</Text>
           ))}
         </View>
 
@@ -112,7 +114,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
               <TouchableOpacity 
                 key={date}
                 className={`w-8 h-8 items-center justify-center rounded-full mb-1 ${isSelected ? 'bg-[#7370FF]' : ''}`}>
-                <Text className={`text-[12px] font-semibold ${isSelected ? 'text-white' : 'text-[#1E1E1E]'}`}>
+                <Text className={`text-[12px] font-semibold ${isSelected ? 'text-white' : ''}`} style={{ color: isSelected ? 'white' : theme.text }}>
                   {date}
                 </Text>
               </TouchableOpacity>
@@ -125,13 +127,13 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false}>
-      <View className="flex-1 bg-white">
+      <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* Header */}
         <View className="flex-row items-center px-5 pb-4 pt-12">
           <TouchableOpacity onPress={onClose} className="mr-3 -ml-2 -mt-1">
-            <Ionicons name="caret-back-outline" size={24} color="black" />
+            <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
-          <Text className="text-[32px] font-bold text-[#7370FF]">Site Updates</Text>
+          <Text className="text-[32px] font-bold" style={{ color: theme.primary }}>Site Updates</Text>
         </View>
 
         <ScrollView
@@ -144,30 +146,35 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
             {/* Layer 1: Today / Past Toggle (Figure 111 Type) */}
             <View className="mb-6 flex-row gap-8">
               <TouchableOpacity onPress={() => setTimeRange('Today')}>
-                <Text className={`text-[14px] font-bold ${timeRange === 'Today' ? 'text-[#7370FF]' : 'text-[#A3A3A3]'}`}>
+                <Text className="text-[14px] font-bold" style={{ color: timeRange === 'Today' ? theme.primary : theme.textMuted }}>
                   Today
                 </Text>
-                {timeRange === 'Today' && <View className="mt-1 h-0.5 w-full bg-[#7370FF]" />}
+                {timeRange === 'Today' && <View className="mt-1 h-0.5 w-full" style={{ backgroundColor: theme.primary }} />}
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setTimeRange('Past')}>
-                <Text className={`text-[14px] font-bold ${timeRange === 'Past' ? 'text-[#7370FF]' : 'text-[#A3A3A3]'}`}>
+                <Text className="text-[14px] font-bold" style={{ color: timeRange === 'Past' ? theme.primary : theme.textMuted }}>
                   Past
                 </Text>
-                {timeRange === 'Past' && <View className="mt-1 h-0.5 w-full bg-[#7370FF]" />}
+                {timeRange === 'Past' && <View className="mt-1 h-0.5 w-full" style={{ backgroundColor: theme.primary }} />}
               </TouchableOpacity>
             </View>
 
             {/* Layer 2: Shift Switcher */}
             {timeRange === 'Today' && (
               <View className="mb-8 flex-row">
-                <View className="h-[60px] flex-1 flex-row rounded-[14px] border border-[#E7E7EE] bg-white p-1">
+                <View className="h-[60px] flex-1 flex-row rounded-[14px] border p-1" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
                   {['Morning', 'Noon', 'Afternoon'].map((tab) => (
                     <TouchableOpacity
                       key={tab}
                       onPress={() => setActiveShift(tab as any)}
-                      className={`flex-1 items-center justify-center rounded-[10px] ${activeShift === tab ? 'border border-[#7370FF] bg-[#F8F7FF]' : ''}`}>
+                      className={`flex-1 items-center justify-center rounded-[10px] ${activeShift === tab ? 'border' : ''}`}
+                      style={{ 
+                        backgroundColor: activeShift === tab ? theme.primaryLight : 'transparent',
+                        borderColor: activeShift === tab ? theme.primary : 'transparent'
+                      }}>
                       <Text
-                        className={`text-[13px] font-bold ${activeShift === tab ? 'text-[#7370FF]' : 'text-[#A3A3A3]'}`}>
+                        className="text-[13px] font-bold"
+                        style={{ color: activeShift === tab ? theme.primary : theme.textMuted }}>
                         {tab}
                       </Text>
                     </TouchableOpacity>
@@ -179,7 +186,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
             {/* Calendar for "Past" mode */}
             {timeRange === 'Past' && renderCalendar()}
 
-            <Text className="mb-4 text-[18px] font-bold text-[#1E1E1E]">Site Photos</Text>
+            <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Site Photos</Text>
 
             {loading ? (
               <ActivityIndicator color={PRIMARY} />
@@ -202,7 +209,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                       return (
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
                           {photos.map((p, idx) => (
-                            <View key={idx} className="relative h-[240px] w-[300px] mr-4 overflow-hidden rounded-[24px] bg-[#F0F0F0]">
+                            <View key={idx} className="relative h-[240px] w-[300px] mr-4 overflow-hidden rounded-[24px]" style={{ backgroundColor: theme.surfaceAlt }}>
                               <Image
                                 source={{
                                   uri: p.startsWith('http') ? p : `${API_URL}${p}`,
@@ -211,7 +218,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                                 resizeMode="cover"
                               />
                               {/* Count Badge on the first photo or each photo? Let's show on each for clarity */}
-                              <View className="absolute bottom-4 right-4 rounded-full bg-[#5DBF50]/90 px-3 py-1 shadow-sm">
+                              <View className="absolute bottom-4 right-4 rounded-full px-3 py-1 shadow-sm" style={{ backgroundColor: 'rgba(93, 191, 80, 0.9)' }}>
                                 <Text className="text-[10px] font-bold text-white">
                                   {currentUpdate?.glass_count || 0} installed
                                 </Text>
@@ -223,9 +230,9 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                     }
 
                     return (
-                      <View className="h-[240px] w-full items-center justify-center rounded-[24px] bg-[#F0F0F0]">
-                        <Ionicons name="image-outline" size={48} color="#D1D1D6" />
-                        <Text className="text-[12px] text-gray-400 mt-2">No photo for this shift</Text>
+                      <View className="h-[240px] w-full items-center justify-center rounded-[24px]" style={{ backgroundColor: theme.surfaceAlt }}>
+                        <Ionicons name="image-outline" size={48} color={theme.textMuted} />
+                        <Text className="text-[12px] mt-2" style={{ color: theme.textMuted }}>No photo for this shift</Text>
                       </View>
                     );
                   })()}
@@ -234,20 +241,20 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                 {/* Metadata Grid */}
                 <View className="mb-6 flex-row">
                   <View className="flex-1">
-                    <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Date</Text>
-                    <Text className="text-[16px] font-bold text-[#1E1E1E]">
+                    <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Date</Text>
+                    <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
                       {currentUpdate ? new Date(currentUpdate.created_at).toLocaleDateString() : '01/31/2026'}
                     </Text>
                   </View>
                   <View className="flex-1 items-center">
-                    <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Taken By</Text>
-                    <Text className="text-[16px] font-bold text-[#1E1E1E]">
+                    <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Taken By</Text>
+                    <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
                       {currentUpdate?.partner || 'Gavin Rama'}
                     </Text>
                   </View>
                   <View className="flex-1 items-end">
-                    <Text className="mb-1 text-[12px] font-medium text-[#A3A3A3]">Time</Text>
-                    <Text className="text-[16px] font-bold text-[#1E1E1E]">
+                    <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Time</Text>
+                    <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
                       {activeShift === 'Morning' ? '08:00 AM' : activeShift === 'Noon' ? '12:00 PM' : '04:00 PM'}
                     </Text>
                   </View>
@@ -255,15 +262,15 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
 
                 {/* Notes */}
                 <View className="mb-8">
-                  <Text className="mb-1 text-[13px] font-medium text-[#A3A3A3]">Notes</Text>
-                  <Text className="text-[15px] font-semibold leading-6 text-[#1E1E1E]">
+                  <Text className="mb-1 text-[13px] font-medium" style={{ color: theme.textMuted }}>Notes</Text>
+                  <Text className="text-[15px] font-semibold leading-6" style={{ color: theme.text }}>
                     {currentUpdate?.notes || 'Ongoing Works: Glass Panes Installing.'}
                   </Text>
                 </View>
 
                 {/* Comments Section */}
-                <View className="mb-10 rounded-[24px] bg-[#F6F6FF] p-6 border border-[#EDECFF]">
-                  <Text className="mb-6 text-[18px] font-bold text-[#1E1E1E]">Comments</Text>
+                <View className="mb-10 rounded-[24px] p-6 border" style={{ backgroundColor: theme.primaryLight, borderColor: theme.border }}>
+                  <Text className="mb-6 text-[18px] font-bold" style={{ color: theme.text }}>Comments</Text>
 
                   {comments.length > 0 ? (
                     comments.map((comment, index) => (
@@ -277,13 +284,13 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                             {comment.initials}
                           </Text>
                         </View>
-                        <Text className="flex-1 text-[14px] font-medium text-[#1E1E1E]">
+                        <Text className="flex-1 text-[14px] font-medium" style={{ color: theme.text }}>
                           {comment.text}
                         </Text>
                       </View>
                     ))
                   ) : (
-                    <Text className="text-[13px] text-gray-400 italic">No comments yet</Text>
+                    <Text className="text-[13px] italic" style={{ color: theme.textMuted }}>No comments yet</Text>
                   )}
 
                 </View>

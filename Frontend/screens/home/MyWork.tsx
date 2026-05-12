@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface Task {
   id: number;
@@ -48,6 +49,7 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
   const [sortBy, setSortBy] = useState<'due_date_asc' | 'due_date_desc' | 'priority'>('due_date_asc');
   const [filterBy, setFilterBy] = useState<'all' | 'high_priority' | 'medium_priority' | 'low_priority'>('all');
   const [error, setError] = useState<string | null>(null);
+  const { theme } = useAppTheme();
 
   const TABS: { label: Tab; color: string }[] = [
     { label: 'To Do', color: '#FF6B6B' },
@@ -161,9 +163,9 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
   };
 
   return (
-    <View className="flex-1">
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <View className="px-5 pt-10">
-        <Text className="text-[32px] font-bold text-[#7370FF]">My work</Text>
+        <Text className="text-[32px] font-bold" style={{ color: theme.primary }}>Task</Text>
 
 
 
@@ -176,18 +178,18 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
               <TouchableOpacity
                 key={tab.label}
                 onPress={() => setActiveTab(tab.label)}
-                className={`h-[100px] items-center justify-center rounded-[16px] border bg-white ${isActive ? 'w-[26%]' : 'w-[23%] border-[#F2F2F7]'}`}
+                className={`h-[100px] items-center justify-center rounded-[16px] border ${isActive ? 'w-[26%]' : 'w-[23%]'}`}
                 style={
                   isActive
-                    ? { borderColor: tab.color, shadowColor: tab.color, shadowOpacity: 0.1, shadowRadius: 10, elevation: 2 }
-                    : {}
+                    ? { backgroundColor: theme.surface, borderColor: tab.color, shadowColor: tab.color, shadowOpacity: 0.1, shadowRadius: 10, elevation: 2 }
+                    : { backgroundColor: theme.surface, borderColor: theme.border }
                 }>
                 <Text className={`mb-1 text-[28px] font-bold`} style={{ color: tab.color }}>
                   {count}
                 </Text>
                 <Text
                   className={`text-[11px] font-semibold ${isActive ? tab.color : '#A3A3A3'}`}
-                  style={{ color: isActive ? tab.color : '#A3A3A3' }}>
+                  style={{ color: isActive ? tab.color : theme.textMuted }}>
                   {tab.label}
                 </Text>
               </TouchableOpacity>
@@ -199,17 +201,19 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
         <View className="mt-4 flex-row items-center px-1">
           <TouchableOpacity
             onPress={handleSortPress}
-            className={`mr-2 flex-row items-center rounded-lg border px-3 py-2 ${sortBy !== 'due_date_asc' ? 'border-[#7370FF] bg-[#F5F5FF]' : 'border-[#E7E7EE] bg-white'}`}>
-            <Ionicons name="swap-vertical" size={14} color={sortBy !== 'due_date_asc' ? '#7370FF' : '#1E1E1E'} />
-            <Text className={`ml-1.5 text-[12px] ${sortBy !== 'due_date_asc' ? 'text-[#7370FF] font-bold' : 'text-[#1E1E1E]'}`}>
+            className={`mr-2 flex-row items-center rounded-lg border px-3 py-2 ${sortBy !== 'due_date_asc' ? 'font-bold' : ''}`}
+            style={{ backgroundColor: sortBy !== 'due_date_asc' ? theme.primaryLight : theme.surface, borderColor: sortBy !== 'due_date_asc' ? theme.primary : theme.border }}>
+            <Ionicons name="swap-vertical" size={14} color={sortBy !== 'due_date_asc' ? theme.primary : theme.text} />
+            <Text className={`ml-1.5 text-[12px] ${sortBy !== 'due_date_asc' ? 'font-bold' : ''}`} style={{ color: sortBy !== 'due_date_asc' ? theme.primary : theme.text }}>
               {sortBy === 'priority' ? 'Prio' : sortBy === 'due_date_desc' ? 'Due' : 'Sort'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleFilterPress}
-            className={`mr-2 flex-row items-center rounded-lg border px-3 py-2 ${filterBy !== 'all' ? 'border-[#7370FF] bg-[#F5F5FF]' : 'border-[#E7E7EE] bg-white'}`}>
-            <Ionicons name="filter" size={14} color={filterBy !== 'all' ? '#7370FF' : '#1E1E1E'} />
-            <Text className={`ml-1.5 text-[12px] ${filterBy !== 'all' ? 'text-[#7370FF] font-bold' : 'text-[#1E1E1E]'}`}>
+            className={`mr-2 flex-row items-center rounded-lg border px-3 py-2 ${filterBy !== 'all' ? 'font-bold' : ''}`}
+            style={{ backgroundColor: filterBy !== 'all' ? theme.primaryLight : theme.surface, borderColor: filterBy !== 'all' ? theme.primary : theme.border }}>
+            <Ionicons name="filter" size={14} color={filterBy !== 'all' ? theme.primary : theme.text} />
+            <Text className={`ml-1.5 text-[12px] ${filterBy !== 'all' ? 'font-bold' : ''}`} style={{ color: filterBy !== 'all' ? theme.primary : theme.text }}>
               {filterBy !== 'all' ? 'Filtered' : 'Filter'}
             </Text>
           </TouchableOpacity>
@@ -217,8 +221,8 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
           {/* Purple Project Dropdown */}
           <TouchableOpacity
             onPress={() => setShowProjectModal(true)}
-            className="flex-1 flex-row items-center justify-between rounded-lg bg-[#7370FF] px-3 py-2"
-            style={{ shadowColor: '#7370FF', shadowOpacity: 0.2, shadowRadius: 5, elevation: 2 }}
+            className="flex-1 flex-row items-center justify-between rounded-lg px-3 py-2"
+            style={{ backgroundColor: theme.primary, shadowColor: theme.primary, shadowOpacity: 0.2, shadowRadius: 5, elevation: 2 }}
           >
             <Text className="text-[12px] font-bold text-white mr-2" numberOfLines={1}>
               {selectedProject === 'All' ? 'All Projects' : selectedProject}
@@ -233,19 +237,19 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}>
         {loading ? (
-          <ActivityIndicator color="#7370FF" style={{ marginTop: 40 }} />
+          <ActivityIndicator color={theme.primary} style={{ marginTop: 40 }} />
         ) : error ? (
           <View className="mt-20 items-center justify-center">
-            <Ionicons name="alert-circle-outline" size={40} color="#FF6B6B" />
-            <Text className="mt-3 text-[13px] text-[#A06565]">{error}</Text>
-            <TouchableOpacity onPress={loadTasks} className="mt-3 rounded-lg bg-[#7370FF] px-4 py-2">
+            <Ionicons name="alert-circle-outline" size={40} color={theme.danger} />
+            <Text className="mt-3 text-[13px]" style={{ color: theme.textSecondary }}>{error}</Text>
+            <TouchableOpacity onPress={loadTasks} className="mt-3 rounded-lg px-4 py-2" style={{ backgroundColor: theme.primary }}>
               <Text className="text-[12px] font-semibold text-white">Retry</Text>
             </TouchableOpacity>
           </View>
         ) : filteredTasks.length === 0 ? (
           <View className="mt-20 items-center justify-center">
-            <Ionicons name="document-text-outline" size={48} color="#E0E0E0" />
-            <Text className="mt-4 text-[14px] text-[#A3A3A3]">
+            <Ionicons name="document-text-outline" size={48} color={theme.textMuted} />
+            <Text className="mt-4 text-[14px]" style={{ color: theme.textMuted }}>
               {selectedProject === 'All'
                 ? 'No tasks in this category'
                 : `No tasks for ${selectedProject} in this category`}
@@ -256,9 +260,11 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
             <TouchableOpacity
               key={task.id}
               onPress={() => onTaskSelect(task)}
-              className="mb-3 overflow-hidden rounded-xl border border-[#F0F0F0] bg-white"
+              className="mb-3 overflow-hidden rounded-xl border"
               style={{
-                shadowColor: '#000',
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                shadowColor: theme.shadow,
                 shadowOpacity: 0.04,
                 shadowRadius: 8,
                 shadowOffset: { width: 0, height: 2 },
@@ -271,23 +277,23 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
                 />
                 <View className="flex-1 flex-row items-center justify-between p-4">
                   <View className="mr-3 flex-1">
-                    <Text className="text-[15px] font-semibold text-[#1E1E1E]" numberOfLines={1}>
+                    <Text className="text-[15px] font-semibold" style={{ color: theme.text }} numberOfLines={1}>
                       {task.title}
                     </Text>
                     <View className="mt-1.5 flex-row items-center">
-                      <Text className="text-[12px] text-[#A3A3A3]">{task.project}</Text>
+                      <Text className="text-[12px]" style={{ color: theme.textMuted }}>{task.project}</Text>
                       {task.phase && (
                         <>
-                          <View className="mx-2 h-1 w-1 rounded-full bg-[#D9D9D9]" />
-                          <Text className="text-[12px] text-[#A3A3A3]">{task.phase}</Text>
+                          <View className="mx-2 h-1 w-1 rounded-full" style={{ backgroundColor: theme.border }} />
+                          <Text className="text-[12px]" style={{ color: theme.textMuted }}>{task.phase}</Text>
                         </>
                       )}
                     </View>
                   </View>
                   <View className="items-end">
-                    <Ionicons name="ellipsis-horizontal" size={18} color="#B9B9B9" />
-                    <View className="mt-2 rounded-md bg-[#F9F9F9] px-2 py-0.5">
-                      <Text className="text-[10px] font-medium text-[#A3A3A3]">
+                    <Ionicons name="ellipsis-horizontal" size={18} color={theme.textMuted} />
+                    <View className="mt-2 rounded-md px-2 py-0.5" style={{ backgroundColor: theme.input }}>
+                      <Text className="text-[10px] font-medium" style={{ color: theme.textMuted }}>
                         {task.due_date}
                       </Text>
                     </View>
@@ -311,9 +317,9 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
           activeOpacity={1}
           onPress={() => setShowProjectModal(false)}
         >
-          <View className="bg-white rounded-t-[30px] p-6 pb-10 max-h-[70%]">
-            <View className="w-10 h-1 bg-gray-200 self-center rounded-full mb-6" />
-            <Text className="text-xl font-bold text-[#1E1E1E] mb-6 text-center">Select Project</Text>
+          <View className="rounded-t-[30px] p-6 pb-10 max-h-[70%]" style={{ backgroundColor: theme.elevated }}>
+            <View className="w-10 h-1 self-center rounded-full mb-6" style={{ backgroundColor: theme.border }} />
+            <Text className="text-xl font-bold mb-6 text-center" style={{ color: theme.text }}>Select Project</Text>
             
             <ScrollView showsVerticalScrollIndicator={false}>
               {projectList.map((proj) => (
@@ -323,16 +329,17 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
                     setSelectedProject(proj);
                     setShowProjectModal(false);
                   }}
-                  className={`flex-row items-center justify-between py-4 border-b border-[#F2F2F7] ${selectedProject === proj ? 'bg-[#F5F5FF] -mx-6 px-6' : ''}`}
+                  className={`flex-row items-center justify-between py-4 border-b ${selectedProject === proj ? '-mx-6 px-6' : ''}`}
+                  style={{ borderColor: theme.border, backgroundColor: selectedProject === proj ? theme.primaryLight : 'transparent' }}
                 >
                   <View className="flex-row items-center">
-                    <View className={`w-2 h-2 rounded-full mr-3 ${selectedProject === proj ? 'bg-[#7370FF]' : 'bg-gray-300'}`} />
-                    <Text className={`text-base ${selectedProject === proj ? 'font-bold text-[#7370FF]' : 'text-[#2D2D2D]'}`}>
+                    <View className="w-2 h-2 rounded-full mr-3" style={{ backgroundColor: selectedProject === proj ? theme.primary : theme.border }} />
+                    <Text className={`text-base ${selectedProject === proj ? 'font-bold' : ''}`} style={{ color: selectedProject === proj ? theme.primary : theme.text }}>
                       {proj === 'All' ? 'All Projects' : proj}
                     </Text>
                   </View>
                   {selectedProject === proj && (
-                    <Ionicons name="checkmark-sharp" size={20} color="#7370FF" />
+                    <Ionicons name="checkmark-sharp" size={20} color={theme.primary} />
                   )}
                 </TouchableOpacity>
               ))}
@@ -340,8 +347,8 @@ export default function MyWork({ userId, onTaskSelect }: MyWorkProps) {
 
             <TouchableOpacity 
               onPress={() => setShowProjectModal(false)}
-              className="mt-6 h-14 bg-[#7370FF] items-center justify-center rounded-2xl shadow-lg"
-              style={{ shadowColor: '#7370FF', shadowOpacity: 0.3, shadowRadius: 10, elevation: 4 }}
+              className="mt-6 h-14 items-center justify-center rounded-2xl shadow-lg"
+              style={{ backgroundColor: theme.primary, shadowColor: theme.primary, shadowOpacity: 0.3, shadowRadius: 10, elevation: 4 }}
             >
               <Text className="text-white font-bold text-base">Close</Text>
             </TouchableOpacity>

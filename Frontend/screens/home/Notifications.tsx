@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { LEGACY_NOTIFICATION_TYPE_MAP } from '../../constants/constants';
+import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface NotificationMetadata {
   task_id?: number;
@@ -34,6 +35,7 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
+  const { theme } = useAppTheme();
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -101,7 +103,7 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
   }, [fetchNotifications]);
 
   const getIcon = (type: string) => {
-    const normalized = LEGACY_NOTIFICATION_TYPE_MAP[type] || type;
+    const normalized: string = LEGACY_NOTIFICATION_TYPE_MAP[type] || type;
     switch (normalized) {
       case 'WARNING':
         return 'warning-outline';
@@ -125,7 +127,7 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
 
 
   const getColor = (type: string) => {
-    const normalized = LEGACY_NOTIFICATION_TYPE_MAP[type] || type;
+    const normalized: string = LEGACY_NOTIFICATION_TYPE_MAP[type] || type;
     switch (normalized) {
       case 'WARNING':
         return '#FF9F43';
@@ -197,7 +199,7 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
     } else if (notif.type === 'alert' && meta?.project_id && onNavigateToInventory) {
       onNavigateToInventory(meta.project_id);
     } else if (onNavigateToTab) {
-      // Fallback: If no metadata (old notifications), just go to My Work
+      // Fallback: If no metadata (old notifications), just go to Task
       onNavigateToTab('mywork');
     }
   };
@@ -230,7 +232,7 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
   };
 
   return (
-    <View className="flex-1">
+    <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <ScrollView
         className="flex-1 px-5"
         contentContainerStyle={{ paddingBottom: 160 }}
@@ -238,15 +240,15 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#7370FF']}
-            tintColor="#7370FF"
+            colors={[theme.primary]}
+            tintColor={theme.primary}
           />
         }>
         {/* Header */}
         <View className="flex-row items-center justify-between pb-4 pt-5">
           <View>
-            <Text className="text-[24px] font-bold text-[#7370FF]">Notifications</Text>
-            <Text className="mt-1 text-[13px] text-[#A3A3A3]">
+            <Text className="text-[24px] font-bold" style={{ color: theme.primary }}>Notifications</Text>
+            <Text className="mt-1 text-[13px]" style={{ color: theme.textMuted }}>
               {loading ? 'Loading...' : unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
             </Text>
           </View>
@@ -268,14 +270,15 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
                   Alert.alert('Error', 'Network error.');
                 }
               }} 
-              className="mr-2 rounded-full bg-[#F0F0F0] px-3 py-1.5"
+              className="mr-2 rounded-full px-3 py-1.5"
+              style={{ backgroundColor: theme.input }}
             >
-              <Text className="text-[12px] font-semibold text-[#666]">Send Test</Text>
+              <Text className="text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Send Test</Text>
             </TouchableOpacity>
 
             {unreadCount > 0 && (
-              <TouchableOpacity onPress={markAllRead} className="rounded-full bg-[#EAE8FF] px-3 py-1.5">
-                <Text className="text-[12px] font-semibold text-[#7370FF]">Mark all read</Text>
+              <TouchableOpacity onPress={markAllRead} className="rounded-full px-3 py-1.5" style={{ backgroundColor: theme.primaryLight }}>
+                <Text className="text-[12px] font-semibold" style={{ color: theme.primary }}>Mark all read</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -283,25 +286,28 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
 
 
         { }
-        <View className="mb-6 flex-row rounded-[100px] border border-[#F0F0F0] bg-[#FAFAFA] p-1.5 self-center w-full">
+        <View className="mb-6 flex-row rounded-[100px] border p-1.5 self-center w-full" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
           <TouchableOpacity
-            className={`flex-1 items-center rounded-full py-2.5 ${filter === 'all' ? 'bg-[#7370FF]' : ''}`}
+            className="flex-1 items-center rounded-full py-2.5"
             onPress={() => setFilter('all')}
             style={
               filter === 'all'
-                ? { shadowColor: '#7370FF', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }
+                ? { backgroundColor: theme.primary, shadowColor: theme.primary, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }
                 : {}
             }>
             <Text
-              className={`text-[13px] font-bold ${filter === 'all' ? 'text-white' : 'text-[#A3A3A3]'}`}>
+              className="text-[13px] font-bold"
+              style={{ color: filter === 'all' ? '#FFFFFF' : theme.textMuted }}>
               All
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            className={`flex-1 items-center rounded-full py-2.5 ${filter === 'unread' ? 'bg-[#7370FF]' : ''}`}
+            className="flex-1 items-center rounded-full py-2.5"
+            style={{ backgroundColor: filter === 'unread' ? theme.primary : 'transparent' }}
             onPress={() => setFilter('unread')}>
             <Text
-              className={`text-[13px] font-bold ${filter === 'unread' ? 'text-white' : 'text-[#A3A3A3]'}`}>
+              className="text-[13px] font-bold"
+              style={{ color: filter === 'unread' ? '#FFFFFF' : theme.textMuted }}>
               Unread {unreadCount > 0 ? `(${unreadCount})` : ''}
             </Text>
           </TouchableOpacity>
@@ -309,21 +315,21 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
 
 
         {loading ? (
-          <ActivityIndicator color="#7370FF" size="large" className="mt-10" />
+          <ActivityIndicator color={theme.primary} size="large" className="mt-10" />
         ) : error ? (
           <View className="mt-20 items-center justify-center">
-            <Ionicons name="alert-circle-outline" size={40} color="#FF6B6B" />
-            <Text className="mt-3 text-[13px] text-[#A06565]">{error}</Text>
-            <TouchableOpacity onPress={fetchNotifications} className="mt-3 rounded-lg bg-[#7370FF] px-4 py-2">
+            <Ionicons name="alert-circle-outline" size={40} color={theme.danger} />
+            <Text className="mt-3 text-[13px]" style={{ color: theme.textSecondary }}>{error}</Text>
+            <TouchableOpacity onPress={fetchNotifications} className="mt-3 rounded-lg px-4 py-2" style={{ backgroundColor: theme.primary }}>
               <Text className="text-[12px] font-semibold text-white">Retry</Text>
             </TouchableOpacity>
           </View>
         ) : filtered.length === 0 ? (
           <View className="mt-20 items-center justify-center">
-            <View className="mb-4 h-20 w-20 items-center justify-center rounded-full bg-[#F5F5F7]">
-              <Ionicons name="notifications-off-outline" size={40} color="#D1D1D6" />
+            <View className="mb-4 h-20 w-20 items-center justify-center rounded-full" style={{ backgroundColor: theme.surface }}>
+              <Ionicons name="notifications-off-outline" size={40} color={theme.textMuted} />
             </View>
-            <Text className="text-base font-medium text-[#A3A3A3]">
+            <Text className="text-base font-medium" style={{ color: theme.textMuted }}>
               {filter === 'unread' ? 'No unread notifications' : 'No notifications yet'}
             </Text>
           </View>
@@ -334,9 +340,11 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
               onPress={() => handleNotificationPress(notif)}
               onLongPress={() => deleteNotification(notif.id)}
               activeOpacity={0.7}
-              className={`mb-4 rounded-[20px] border bg-white p-5 ${notif.is_read ? 'border-[#F8F8F8]' : 'border-[#EDE9FF]'}`}
+              className="mb-4 rounded-[20px] border p-5"
               style={{
-                shadowColor: '#000',
+                backgroundColor: theme.surface,
+                borderColor: notif.is_read ? theme.border : theme.primary,
+                shadowColor: theme.shadow,
                 shadowOpacity: 0.02,
                 shadowRadius: 10,
                 elevation: 1,
@@ -345,34 +353,36 @@ export default function Notifications({ userId, onNavigateToTask, onNavigateToIn
                 {/* Icon container */}
                 <View
                   className="mr-4 h-11 w-11 items-center justify-center rounded-[15px]"
-                  style={{ backgroundColor: '#E8E7FF' }}>
+                  style={{ backgroundColor: theme.primaryLight }}>
                   <Ionicons
                     name={getIcon(notif.type) as any}
                     size={22}
-                    color="#7370FF"
+                    color={theme.primary}
                   />
                 </View>
 
                 <View className="flex-1">
                   <View className="flex-row items-center justify-between mb-1">
                     <Text
-                      className="text-[15px] font-bold text-[#1E1E1E]">
+                      className="text-[15px] font-bold"
+                      style={{ color: theme.text }}>
                       {notif.title}
                     </Text>
 
-                    {!notif.is_read && <View className="h-2 w-2 rounded-full bg-[#7370FF]" />}
+                    {!notif.is_read && <View className="h-2 w-2 rounded-full" style={{ backgroundColor: theme.primary }} />}
                   </View>
                   <Text
-                    className="text-[13px] leading-[20px] text-[#444]">
+                    className="text-[13px] leading-[20px]"
+                    style={{ color: theme.textSecondary }}>
                     {notif.message}
 
                     {notif.metadata?.task_id && (
-                      <Text className="text-[#7370FF] font-bold"> Check details.</Text>
+                      <Text style={{ color: theme.primary, fontWeight: '700' }}> Check details.</Text>
                     )}
                   </Text>
                   <View className="mt-3 flex-row items-center">
-                    <Ionicons name="time-outline" size={13} color="#D1D1D1" />
-                    <Text className="ml-1 text-[11px] font-medium text-[#D1D1D1]">
+                    <Ionicons name="time-outline" size={13} color={theme.textMuted} />
+                    <Text className="ml-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>
                       {formatTime(notif.time, (notif as any).created_at)}
                     </Text>
                   </View>
