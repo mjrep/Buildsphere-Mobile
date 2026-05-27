@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 
@@ -44,6 +45,7 @@ interface Props {
 
 export default function SiteUpdatesScreen({ visible, onClose, projectName }: Props) {
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'Today' | 'Past'>('Today');
   const [activeShift, setActiveShift] = useState<'Morning' | 'Noon' | 'Afternoon'>('Noon');
@@ -127,11 +129,13 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* Header */}
-        <View className="flex-row items-center px-5 pb-4 pt-12">
-          <TouchableOpacity onPress={onClose} className="mr-3 -ml-2 -mt-1">
+        <View
+          className="flex-row items-center px-5 pb-4"
+          style={{ paddingTop: Math.max(insets.top + 14, 64) }}>
+          <TouchableOpacity onPress={onClose} className="mr-3 -ml-2 h-10 w-8 items-center justify-center">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
-          <Text className="text-[32px] font-bold" style={{ color: theme.primary }}>Site Updates</Text>
+          <Text className="text-[28px] font-bold" style={{ color: theme.primary }}>Site Updates</Text>
         </View>
 
         <ScrollView

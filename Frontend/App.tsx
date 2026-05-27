@@ -38,7 +38,7 @@ export interface UserInfo {
 type AuthScreen = 'login' | 'forgot' | 'reset';
 
 function isResetPasswordUrl(url: string) {
-  if (url.startsWith(PASSWORD_RESET_REDIRECT_URL)) return true;
+  if (url.startsWith(PASSWORD_RESET_REDIRECT_URL) || url.includes('reset-password')) return true;
 
   const parsed = Linking.parse(url);
   return parsed.hostname === 'reset-password' || parsed.path === 'reset-password';
@@ -102,6 +102,8 @@ function AppContent() {
         if (error) throw error;
         return;
       }
+
+      setRecoveryError('This password reset link is missing or expired. Please request a new reset link.');
     } catch (error) {
       setRecoveryError(error instanceof Error ? error.message : 'Could not open password recovery link.');
     } finally {

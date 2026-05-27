@@ -60,27 +60,13 @@ export default function LoginScreen({
         return;
       }
 
-      if (authError?.message?.toLowerCase().includes('api key')) {
-        const message = authError?.message?.toLowerCase().includes('api key')
+      const isApiKeyError = authError?.message?.toLowerCase().includes('api key');
+      Alert.alert(
+        'Login Failed',
+        isApiKeyError
           ? 'Supabase is rejecting the app API key. Check EXPO_PUBLIC_SUPABASE_KEY in Frontend/.env and restart Expo with cache cleared.'
-          : authError?.message || 'Invalid email or password.';
-        Alert.alert('Login Failed', message);
-        return;
-      }
-
-      const legacyRes = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: trimmedEmail, password }),
-      });
-      const legacyData = await legacyRes.json();
-
-      if (!legacyRes.ok) {
-        Alert.alert('Login Failed', legacyData.error || authError?.message || 'Invalid email or password.');
-        return;
-      }
-
-      onLogin(legacyData.user, legacyData.token);
+          : authError?.message || 'Invalid email or password.'
+      );
     } catch (err) {
       Alert.alert(
         'Connection Error',

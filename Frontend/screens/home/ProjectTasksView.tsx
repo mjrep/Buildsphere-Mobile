@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { TaskCardSkeleton } from '../../components/skeletons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Task {
   id: number;
@@ -31,6 +32,7 @@ interface ProjectTasksViewProps {
 
 export default function ProjectTasksView({ projectId, currentUserId, onTaskSelect, onBack }: ProjectTasksViewProps) {
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'in-progress' | 'in-review' | 'completed'>('all');
@@ -92,11 +94,13 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       {/* Header */}
-      <View className="flex-row items-center px-5 pb-4 pt-10 border-b" style={{ borderColor: theme.border }}>
-        <TouchableOpacity onPress={onBack} className="-ml-2 -mt-1 mr-3">
+      <View
+        className="flex-row items-center px-5 pb-4 border-b"
+        style={{ borderColor: theme.border, paddingTop: Math.max(insets.top + 14, 64) }}>
+        <TouchableOpacity onPress={onBack} className="-ml-2 mr-3 h-10 w-8 items-center justify-center">
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
-        <Text className="text-[25px] font-bold" style={{ color: theme.primary }}>Project Tasks</Text>
+        <Text className="text-[28px] font-bold" style={{ color: theme.primary }}>Project Tasks</Text>
       </View>
 
       {/* Search & Toggle */}

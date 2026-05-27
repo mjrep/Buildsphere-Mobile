@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import * as Linking from 'expo-linking';
 import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
@@ -20,8 +21,8 @@ interface ForgotPasswordScreenProps {
 }
 
 // Supabase Dashboard > Authentication > URL Configuration > Redirect URLs
-// must include this exact URL for password recovery links to open the app.
-export const PASSWORD_RESET_REDIRECT_URL = 'buildsphere://reset-password';
+// must include this URL for password recovery links to open the app.
+export const PASSWORD_RESET_REDIRECT_URL = Linking.createURL('reset-password');
 const GENERIC_SUCCESS_MESSAGE = 'If this email exists, a password reset link has been sent.';
 
 export default function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProps) {
@@ -62,9 +63,19 @@ export default function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordSc
           error.status === 429 ||
           error.code === 'over_email_send_rate_limit' ||
           error.message.toLowerCase().includes('rate limit');
+        const isInvalidEmail =
+          error.code === 'email_address_invalid' ||
+          error.message.toLowerCase().includes('email address') && error.message.toLowerCase().includes('invalid');
+        const isRedirectError =
+          error.message.toLowerCase().includes('redirect') ||
+          error.message.toLowerCase().includes('not allowed');
         setErrorMessage(
           isRateLimited
             ? 'Too many reset emails were requested. Please wait a few minutes, then try again.'
+            : isInvalidEmail
+              ? 'This email address cannot receive reset links. Please use the real email address on your account.'
+            : isRedirectError
+              ? 'The reset link is not allowed yet. Add the app reset URL to Supabase redirect URLs, then try again.'
             : 'Could not send reset link. Please try again.'
         );
         return;

@@ -532,11 +532,11 @@ export default function InventoryScreen({
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <View
         className="flex-row items-center px-5 pb-3"
-        style={{ paddingTop: Math.max(insets.top + 4, 44) }}>
-        <TouchableOpacity onPress={onBack} className="mr-3 -ml-2">
+        style={{ paddingTop: Math.max(insets.top + 14, 64) }}>
+        <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 h-10 w-8 items-center justify-center">
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
-        <Text className="text-[26px] font-bold" style={{ color: theme.primary }}>Inventory</Text>
+        <Text className="text-[28px] font-bold" style={{ color: theme.primary }}>Inventory</Text>
       </View>
 
       <View className="px-5 pb-3">

@@ -53,6 +53,10 @@ export default function ResetPasswordScreen({
 
   const handleSavePassword = async () => {
     if (recoveryLoading) return;
+    if (recoveryError) {
+      setErrorMessage('Please request a new password reset email before saving a new password.');
+      return;
+    }
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
       setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
@@ -94,7 +98,7 @@ export default function ResetPasswordScreen({
     }
   };
 
-  const disabled = loading || recoveryLoading || Boolean(successMessage);
+  const disabled = loading || recoveryLoading || Boolean(successMessage) || Boolean(recoveryError);
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
