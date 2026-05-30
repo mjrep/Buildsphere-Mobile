@@ -67,6 +67,7 @@ export default function HomeScreen({
   const [showSiteProgress, setShowSiteProgress] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [showAddTask, setShowAddTask] = useState(false);
+  const [taskRefreshKey, setTaskRefreshKey] = useState(0);
   const [showInventory, setShowInventory] = useState(false);
   const [showInventoryProjectPicker, setShowInventoryProjectPicker] = useState(false);
   const [inventoryProjectId, setInventoryProjectId] = useState<number | null>(null);
@@ -423,6 +424,7 @@ export default function HomeScreen({
             projectsLoading={loadingProjects}
             projectsError={projectsError}
             onRetryProjects={fetchProjects}
+            refreshKey={taskRefreshKey}
           />
         ) : activeTab === 'notifications' ? (
           <Notifications
@@ -551,7 +553,11 @@ export default function HomeScreen({
         onClose={() => setShowAddTask(false)}
         userId={user.id}
         projects={projects}
-        onTaskAdded={() => { }}
+        onTaskAdded={() => {
+          setTaskRefreshKey((value) => value + 1);
+          fetchProjects();
+          fetchNotificationCount();
+        }}
       />
 
       {/* Project Picker for Global Inventory Action */}

@@ -438,29 +438,6 @@ export default function Notifications({
             )}
           </View>
           <View className="flex-row items-center">
-            <TouchableOpacity 
-              onPress={async () => {
-                try {
-                  const res = await fetch(`${API_URL}/notifications/test`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: userId }),
-                  });
-                  if (res.ok) {
-                    Alert.alert('Success', 'Test notification sent!');
-                  } else {
-                    Alert.alert('Error', 'Failed to send test notification.');
-                  }
-                } catch (err) {
-                  Alert.alert('Error', 'Network error.');
-                }
-              }} 
-              className="mr-2 rounded-full px-3 py-1.5"
-              style={{ backgroundColor: theme.input }}
-            >
-              <Text className="text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Send Test</Text>
-            </TouchableOpacity>
-
             {unreadCount > 0 && (
               <TouchableOpacity onPress={markAllRead} className="rounded-full px-3 py-1.5" style={{ backgroundColor: theme.primaryLight }}>
                 <Text className="text-[12px] font-semibold" style={{ color: theme.primary }}>Mark all read</Text>

@@ -74,12 +74,12 @@ export default function EditProjectScreen({
       });
 
       if (res.ok) {
-        Alert.alert('Success', 'Project updated successfully!');
+        Alert.alert('Success', 'Project Updated Successfully!');
         onProjectUpdated();
         onClose();
       } else {
         const errData = await res.json();
-        Alert.alert('Error', errData.error || 'Failed to update project.');
+        Alert.alert('Error', errData.error || 'Failed to Update Project.');
       }
     } catch (err) {
       Alert.alert('Error', 'Something went wrong.');

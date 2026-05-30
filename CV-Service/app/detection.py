@@ -372,6 +372,46 @@ class GlassPanelDetector:
                 settings.CONTAINMENT_THRESHOLD,
             )
 
+        grid_boxes = self._detect_mullion_grid_cells(rgb_arr)
+        if len(grid_boxes) > max(total_valid_panels, 1):
+            logger.info(
+                "Glass analysis grid fallback | replacing counted_boxes=%s with grid_cells=%s",
+                total_valid_panels,
+                len(grid_boxes),
+            )
+            detections = []
+            total_valid_panels = 0
+            partial_panels = 0
+            unclear_panels = 0
+            excluded_low_confidence = 0
+            excluded_duplicates = 0
+            excluded_contained = 0
+            excluded_small_boxes = 0
+            excluded_unrealistic_shape = 0
+            detection_mode = "grid"
+            cv_img = np.array(image.convert("RGB"))[:, :, ::-1].copy()
+
+            for x_min, y_min, x_max, y_max in grid_boxes:
+                total_valid_panels += 1
+                detections.append(
+                    Detection(
+                        bounding_box=[float(x_min), float(y_min), float(x_max), float(y_max)],
+                        confidence_score=0.85,
+                        label="glass_panel",
+                        status="full",
+                        counted=True,
+                    )
+                )
+                color = (0, 0, 255)
+                overlay = cv_img.copy()
+                cv2.rectangle(overlay, (x_min, y_min), (x_max, y_max), color, -1)
+                cv2.addWeighted(overlay, 0.18, cv_img, 0.82, 0, cv_img)
+                cv2.rectangle(cv_img, (x_min, y_min), (x_max, y_max), color, 2)
+
+            if grid_boxes:
+                x_min, y_min, _, _ = grid_boxes[0]
+                self._draw_label(cv_img, cv2, x_min, y_min, f"Counted {total_valid_panels} panels", (0, 0, 255))
+
         avg_confidence = (
             sum(det.confidence_score for det in detections) / len(detections)
             if detections
@@ -799,6 +839,156 @@ class GlassPanelDetector:
         variance = float(np.mean(np.std(crop.reshape(-1, 3).astype(np.float32), axis=0)))
         logger.debug("Box [%s,%s,%s,%s] color variance = %.1f", x1, y1, x2, y2, variance)
         return variance < _MIN_COLOR_VARIANCE
+
+    @staticmethod
+    def _detect_mullion_grid_cells(rgb_arr: np.ndarray) -> list[tuple[int, int, int, int]]:
+        """
+        Count panes in clear gridded windows when YOLO keeps only one pane.
+
+        The custom detector can under-count architectural windows because a
+        single pane often receives the highest confidence. For obvious mullion
+        grids, dark vertical and horizontal bars give a deterministic pane map:
+        cells are the rectangles between consecutive grid lines.
+        """
+        import cv2
+
+        img_h, img_w = rgb_arr.shape[:2]
+        if img_w < 120 or img_h < 120:
+            return []
+
+        gray = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2GRAY)
+        dark_mask = cv2.inRange(gray, 0, 95)
+
+        vertical_kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (3, max(35, img_h // 18)),
+        )
+        horizontal_kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (max(35, img_w // 18), 3),
+        )
+        vertical_lines = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, vertical_kernel)
+        horizontal_lines = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, horizontal_kernel)
+
+        x_positions = GlassPanelDetector._projection_clusters(
+            np.count_nonzero(vertical_lines, axis=0),
+            min_strength=max(45, int(img_h * 0.18)),
+            min_gap=max(8, img_w // 160),
+        )
+        x_positions = GlassPanelDetector._largest_regular_line_group(x_positions, img_w)
+        if len(x_positions) < 3:
+            return []
+
+        x_window_min = max(0, x_positions[0] - 10)
+        x_window_max = min(img_w, x_positions[-1] + 10)
+        window_width = max(1, x_window_max - x_window_min)
+        y_positions = GlassPanelDetector._projection_clusters(
+            np.count_nonzero(horizontal_lines[:, x_window_min:x_window_max], axis=1),
+            min_strength=max(45, int(window_width * 0.65)),
+            min_gap=max(8, img_h // 160),
+        )
+
+        y_positions = GlassPanelDetector._largest_regular_line_group(y_positions, img_h)
+
+        if len(x_positions) < 3 or len(y_positions) < 3:
+            return []
+
+        column_widths = np.diff(x_positions)
+        row_heights = np.diff(y_positions)
+        if np.median(column_widths) < img_w * 0.06 or np.median(row_heights) < img_h * 0.045:
+            return []
+
+        max_cells = 80
+        cell_count = (len(x_positions) - 1) * (len(y_positions) - 1)
+        if cell_count < 4 or cell_count > max_cells:
+            return []
+
+        boxes: list[tuple[int, int, int, int]] = []
+        for row_idx in range(len(y_positions) - 1):
+            for col_idx in range(len(x_positions) - 1):
+                x1 = int(x_positions[col_idx])
+                x2 = int(x_positions[col_idx + 1])
+                y1 = int(y_positions[row_idx])
+                y2 = int(y_positions[row_idx + 1])
+                inset_x = max(3, int((x2 - x1) * 0.04))
+                inset_y = max(3, int((y2 - y1) * 0.04))
+                boxes.append((x1 + inset_x, y1 + inset_y, x2 - inset_x, y2 - inset_y))
+
+        logger.info(
+            "Glass grid fallback detected | vertical_lines=%s horizontal_lines=%s cells=%s",
+            x_positions,
+            y_positions,
+            len(boxes),
+        )
+        return boxes
+
+    @staticmethod
+    def _projection_clusters(
+        projection: np.ndarray,
+        min_strength: int,
+        min_gap: int,
+    ) -> list[int]:
+        active_indices = np.where(projection >= min_strength)[0]
+        if active_indices.size == 0:
+            return []
+
+        clusters: list[np.ndarray] = []
+        start = 0
+        for idx in range(1, active_indices.size):
+            if active_indices[idx] - active_indices[idx - 1] > min_gap:
+                clusters.append(active_indices[start:idx])
+                start = idx
+        clusters.append(active_indices[start:])
+
+        centers: list[int] = []
+        for cluster in clusters:
+            strengths = projection[cluster].astype(float)
+            if strengths.sum() <= 0:
+                centers.append(int(np.mean(cluster)))
+            else:
+                centers.append(int(round(float(np.average(cluster, weights=strengths)))))
+        return centers
+
+    @staticmethod
+    def _largest_regular_line_group(positions: list[int], image_span: int) -> list[int]:
+        if len(positions) < 3:
+            return positions
+
+        positions = sorted(positions)
+        best_group: list[int] = []
+        min_spacing = max(20, int(image_span * 0.045))
+        max_spacing = max(min_spacing + 1, int(image_span * 0.35))
+
+        for start_idx, start in enumerate(positions):
+            for next_idx in range(start_idx + 1, len(positions)):
+                spacing = positions[next_idx] - start
+                if spacing < min_spacing:
+                    continue
+                if spacing > max_spacing:
+                    break
+
+                tolerance = max(16, int(spacing * 0.28))
+                group = [start, positions[next_idx]]
+                expected = positions[next_idx] + spacing
+
+                for candidate in positions[next_idx + 1:]:
+                    if abs(candidate - expected) <= tolerance:
+                        group.append(candidate)
+                        expected = candidate + spacing
+                    elif candidate > expected + tolerance:
+                        while candidate > expected + tolerance:
+                            expected += spacing
+                        if abs(candidate - expected) <= tolerance:
+                            group.append(candidate)
+                            expected = candidate + spacing
+
+                if len(group) > len(best_group):
+                    best_group = group
+                elif len(group) == len(best_group) and group:
+                    if (group[-1] - group[0]) > (best_group[-1] - best_group[0]):
+                        best_group = group
+
+        return best_group if len(best_group) >= 3 else positions
 
     @staticmethod
     def _remove_contained_boxes(detections: list[dict], containment_threshold: float) -> list[dict]:

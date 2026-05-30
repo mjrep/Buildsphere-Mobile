@@ -104,6 +104,7 @@ export default function InventoryScreen({
   const canAdd = perms.canAddInventory;
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const headerTopPadding = Math.max(insets.top - 28, Platform.OS === 'ios' ? 20 : 12);
 
   const [activeTab, setActiveTab] = useState<'items' | 'logs'>('items');
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -532,7 +533,7 @@ export default function InventoryScreen({
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <View
         className="flex-row items-center px-5 pb-3"
-        style={{ paddingTop: Math.max(insets.top + 14, 64) }}>
+        style={{ paddingTop: headerTopPadding }}>
         <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 h-10 w-8 items-center justify-center">
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>

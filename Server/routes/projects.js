@@ -80,6 +80,57 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /projects/:id/milestone-plan
+// Web and mobile both use this shape to populate Phase -> Milestone selectors.
+router.get('/:id/milestone-plan', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const phasesResult = await pool.query(
+      `SELECT id, project_id, phase_key, sequence_no, weight_percentage, start_date, end_date
+       FROM project_phases
+       WHERE project_id = $1
+       ORDER BY sequence_no ASC, id ASC`,
+      [projectId]
+    );
+    const milestonesResult = await pool.query(
+      `SELECT
+         id,
+         project_id,
+         project_phase_id,
+         milestone_name,
+         sequence_no,
+         start_date,
+         end_date,
+         has_quantity,
+         target_quantity,
+         current_quantity,
+         unit_of_measure
+       FROM project_milestones
+       WHERE project_id = $1
+       ORDER BY sequence_no ASC, id ASC`,
+      [projectId]
+    );
+
+    const milestonesByPhase = new Map();
+    milestonesResult.rows.forEach((milestone) => {
+      const key = String(milestone.project_phase_id);
+      if (!milestonesByPhase.has(key)) milestonesByPhase.set(key, []);
+      milestonesByPhase.get(key).push(milestone);
+    });
+
+    res.json({
+      phases: phasesResult.rows.map((phase) => ({
+        ...phase,
+        phase_title: phase.phase_key,
+        milestones: milestonesByPhase.get(String(phase.id)) || [],
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch milestone plan.' });
+  }
+});
+
 
 // UPDATE /projects/:id
 router.put('/:id', async (req, res) => {

@@ -1,7 +1,109 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const pool = require('../db');
 const { sendPushNotificationToUser } = require('../services/pushNotificationService');
+
+const TASK_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
+const TASK_STATUSES = new Set(['todo', 'pending', 'in_progress', 'in-progress', 'in_review', 'in-review', 'completed']);
+const CREATOR_ROLES = new Set([
+  'ceo',
+  'coo',
+  'project_engineer',
+  'project_coordinator',
+  'sales',
+  'human_resource',
+  'human_resources',
+  'hr',
+  'procurement',
+]);
+
+const attachmentDir = path.join(__dirname, '../uploads/task_attachments');
+fs.mkdirSync(attachmentDir, { recursive: true });
+
+const attachmentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, attachmentDir),
+  filename: (_req, file, cb) => {
+    const safeBase = path
+      .basename(file.originalname, path.extname(file.originalname))
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 48);
+    cb(null, `task_${Date.now()}_${safeBase}${path.extname(file.originalname)}`);
+  },
+});
+
+const uploadTaskAttachments = multer({
+  storage: attachmentStorage,
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+});
+
+function normalizeStatus(status) {
+  const normalized = String(status || 'todo').toLowerCase().replace('-', '_');
+  return normalized === 'pending' ? 'todo' : normalized;
+}
+
+function mobileStatus(status) {
+  const normalized = String(status || '').toLowerCase().replace('_', '-');
+  if (normalized === 'todo') return 'pending';
+  return normalized;
+}
+
+function normalizeDateForInput(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function formatTask(row) {
+  return {
+    ...row,
+    project: row.project || row.project_name || null,
+    phase: row.phase || row.phase_name || null,
+    milestone: row.milestone || row.milestone_name || null,
+    status: mobileStatus(row.status),
+    start_date: normalizeDateForInput(row.start_date),
+    due_date: normalizeDateForInput(row.due_date),
+  };
+}
+
+function validateTaskPayload(body) {
+  const errors = {};
+  const title = String(body.title || '').trim();
+  const projectId = Number(body.project_id);
+  const phaseId = Number(body.phase_id);
+  const milestoneId = Number(body.milestone_id);
+  const assigneeId = Number(body.assigned_to || body.user_id);
+  const priority = String(body.priority || '').toLowerCase();
+  const startDate = normalizeDateForInput(body.start_date);
+  const dueDate = normalizeDateForInput(body.due_date);
+
+  if (!title) errors.title = 'Task title is required.';
+  if (!Number.isFinite(projectId) || projectId <= 0) errors.project_id = 'Project is required.';
+  if (!Number.isFinite(phaseId) || phaseId <= 0) errors.phase_id = 'Phase is required.';
+  if (!Number.isFinite(milestoneId) || milestoneId <= 0) errors.milestone_id = 'Milestone is required.';
+  if (!Number.isFinite(assigneeId) || assigneeId <= 0) errors.assigned_to = 'Assigned user is required.';
+  if (!TASK_PRIORITIES.has(priority)) errors.priority = 'Priority must be low, medium, high, or urgent.';
+  if (!startDate) errors.start_date = 'Start date is required.';
+  if (!dueDate) errors.due_date = 'End date is required.';
+  if (startDate && dueDate && dueDate < startDate) {
+    errors.due_date = 'End date cannot be earlier than start date.';
+  }
+
+  return {
+    errors,
+    values: { title, projectId, phaseId, milestoneId, assigneeId, priority, startDate, dueDate },
+  };
+}
+
+async function canCreateTasks(actorId) {
+  if (!actorId) return true;
+  const result = await pool.query('SELECT role FROM users WHERE id = $1', [actorId]);
+  const role = String(result.rows[0]?.role || '').toLowerCase().replace(/[\s-]+/g, '_');
+  return CREATOR_ROLES.has(role);
+}
 
 // GET /tasks?userId=xxx
 router.get('/', async (req, res) => {
@@ -9,31 +111,65 @@ router.get('/', async (req, res) => {
   try {
     // In the screenshot, tasks has 'project' (text) and 'user_id' directly.
     const result = await pool.query(
-      `SELECT t.*, p.project_name as project 
+      `SELECT
+         t.*,
+         p.project_name as project,
+         pp.phase_key as phase,
+         pm.milestone_name as milestone,
+         u.first_name || ' ' || u.last_name as assigned_to_name
        FROM "public"."tasks" t
        LEFT JOIN "public"."projects" p ON t.project_id = p.id
+       LEFT JOIN "public"."project_phases" pp ON t.phase_id = pp.id
+       LEFT JOIN "public"."project_milestones" pm ON t.milestone_id = pm.id
+       LEFT JOIN "public"."users" u ON t.assigned_to = u.id
        WHERE t.assigned_to = $1 AND t.deleted_at IS NULL
        ORDER BY t.created_at DESC`,
       [userId]
     );
 
-    // Normalize data for frontend (e.g., status mapping)
-    const normalized = result.rows.map(row => {
-      let status = (row.status || '').toLowerCase().replace('_', '-');
-      // Normalize 'todo' to 'pending' to match mobile frontend mapping
-      if (status === 'todo') status = 'pending';
-
-      return {
-        ...row,
-        status,
-        due_date: row.due_date ? new Date(row.due_date).toLocaleDateString() : row.due_date
-      };
-    });
-
-    res.json(normalized);
+    res.json(result.rows.map(formatTask));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch tasks.' });
+  }
+});
+
+// GET /tasks/meta
+router.get('/meta', async (_req, res) => {
+  try {
+    const [projects, users] = await Promise.all([
+      pool.query(`
+        SELECT id, project_name as name, status, color
+        FROM projects
+        WHERE deleted_at IS NULL
+        ORDER BY project_name ASC
+      `),
+      pool.query(`
+        SELECT id, first_name || ' ' || last_name as name, email, role
+        FROM users
+        ORDER BY first_name ASC, last_name ASC
+      `),
+    ]);
+
+    res.json({
+      projects: projects.rows,
+      users: users.rows,
+      priorities: [
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'urgent', label: 'Urgent' },
+      ],
+      statuses: [
+        { value: 'todo', label: 'To Do' },
+        { value: 'in_progress', label: 'In Progress' },
+        { value: 'in_review', label: 'In Review' },
+        { value: 'completed', label: 'Completed' },
+      ],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch task metadata.' });
   }
 });
 
@@ -65,25 +201,23 @@ router.get('/project/:projectId', async (req, res) => {
   const { projectId } = req.params;
   try {
     const result = await pool.query(
-      `SELECT t.*, u.first_name || ' ' || u.last_name as assigned_to_name 
+      `SELECT
+         t.*,
+         p.project_name as project,
+         pp.phase_key as phase,
+         pm.milestone_name as milestone,
+         u.first_name || ' ' || u.last_name as assigned_to_name
        FROM tasks t
+       LEFT JOIN projects p ON t.project_id = p.id
+       LEFT JOIN project_phases pp ON t.phase_id = pp.id
+       LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
        LEFT JOIN users u ON t.assigned_to = u.id
        WHERE t.project_id = $1 AND t.deleted_at IS NULL 
        ORDER BY t.created_at DESC`,
       [projectId]
     );
     
-    const normalized = result.rows.map(row => {
-      let status = (row.status || '').toLowerCase().replace('_', '-');
-      if (status === 'todo') status = 'pending';
-      return {
-        ...row,
-        status,
-        due_date: row.due_date ? new Date(row.due_date).toLocaleDateString() : row.due_date
-      };
-    });
-    
-    res.json(normalized);
+    res.json(result.rows.map(formatTask));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch project tasks.' });
@@ -93,64 +227,145 @@ router.get('/project/:projectId', async (req, res) => {
 
 
 // POST /tasks
-router.post('/', async (req, res) => {
+router.post(
+  '/',
+  uploadTaskAttachments.fields([
+    { name: 'attachments', maxCount: 5 },
+    { name: 'attachments[]', maxCount: 5 },
+  ]),
+  async (req, res) => {
   const {
     title,
     project_id,
-    due_date,
     status,
-    priority,
-    user_id,
     description,
-    phase,
-    milestone,
-    start_date,
     created_by,
+    assigned_by,
   } = req.body;
 
-  if (!title || !project_id || !due_date || !user_id) {
-    return res.status(400).json({ error: 'Title, project ID, due date, and assigned user are required.' });
+  const { errors, values } = validateTaskPayload(req.body);
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({ error: 'Please complete the required task fields.', errors });
   }
 
   try {
+    const actorId = Number(created_by || assigned_by);
+    if (!(await canCreateTasks(actorId))) {
+      return res.status(403).json({ error: 'Unauthorized to create tasks.' });
+    }
+
+    const normalizedStatus = normalizeStatus(status);
+    if (!TASK_STATUSES.has(normalizedStatus)) {
+      return res.status(400).json({ error: 'Invalid task status.' });
+    }
+
+    const relationCheck = await pool.query(
+      `SELECT
+         pp.id as phase_id,
+         pm.id as milestone_id
+       FROM project_phases pp
+       JOIN project_milestones pm ON pm.project_phase_id = pp.id
+       WHERE pp.id = $1
+         AND pp.project_id = $2
+         AND pm.id = $3
+         AND pm.project_id = $2`,
+      [values.phaseId, values.projectId, values.milestoneId]
+    );
+    if (relationCheck.rows.length === 0) {
+      return res.status(400).json({
+        error: 'Selected phase and milestone must belong to the selected project.',
+        errors: {
+          phase_id: 'Invalid phase for selected project.',
+          milestone_id: 'Invalid milestone for selected phase.',
+        },
+      });
+    }
+
     const result = await pool.query(
-      'INSERT INTO tasks (title, project_id, due_date, status, priority, assigned_to, description, phase, milestone, start_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+      `INSERT INTO tasks (
+         title, project_id, phase_id, milestone_id, description,
+         assigned_by, assigned_to, priority, status, start_date, due_date,
+         created_by, visibility_scope
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING *`,
       [
-        title,
-        project_id,
-        due_date,
-        status || 'pending',
-        priority || 'medium',
-        user_id, // Map frontend user_id to assigned_to
-        description,
-        phase,
-        milestone,
-        start_date,
+        values.title,
+        values.projectId,
+        values.phaseId,
+        values.milestoneId,
+        description || null,
+        actorId || null,
+        values.assigneeId,
+        values.priority,
+        normalizedStatus,
+        values.startDate,
+        values.dueDate,
+        actorId || null,
+        req.body.visibility_scope || 'public',
       ]
     );
     const task = result.rows[0];
-    const projectName = (await pool.query('SELECT project_name FROM projects WHERE id = $1', [project_id])).rows[0]?.project_name || 'this project';
+    const files = [
+      ...((req.files && req.files.attachments) || []),
+      ...((req.files && req.files['attachments[]']) || []),
+    ];
+    if (files.length > 0) {
+      for (const file of files) {
+        await pool.query(
+          `INSERT INTO task_attachments (task_id, file_name, file_path, file_type, file_size, uploaded_by)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            task.id,
+            file.originalname,
+            `/uploads/task_attachments/${file.filename}`,
+            file.mimetype,
+            file.size,
+            actorId || null,
+          ]
+        );
+      }
+    }
+
+    const projectName = (await pool.query('SELECT project_name FROM projects WHERE id = $1', [values.projectId])).rows[0]?.project_name || 'this project';
 
     // Phase 2: Use sendPushNotificationToUser which handles both Push and DB persistence
     // This avoids duplicate entries and ensures reference_url is set.
     await sendPushNotificationToUser(
-      user_id,
+      values.assigneeId,
       'New Task Assigned',
-      `You have been assigned a new task: '${title}' for ${projectName}.`,
+      `You have been assigned a new task: '${values.title}' for ${projectName}.`,
       {
         type: 'INFO',
         screen: 'TaskDetails',
         task_id: String(task.id),
-        project_id: String(project_id),
+        project_id: String(values.projectId),
       }
     );
 
-    res.status(201).json(task);
+    const createdTaskResult = await pool.query(
+      `SELECT
+         t.*,
+         p.project_name as project,
+         pp.phase_key as phase,
+         pm.milestone_name as milestone,
+         u.first_name || ' ' || u.last_name as assigned_to_name
+       FROM tasks t
+       LEFT JOIN projects p ON t.project_id = p.id
+       LEFT JOIN project_phases pp ON t.phase_id = pp.id
+       LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
+       LEFT JOIN users u ON t.assigned_to = u.id
+       WHERE t.id = $1`,
+      [task.id]
+    );
+
+    res.status(201).json(formatTask(createdTaskResult.rows[0] || task));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create task.' });
   }
-});
+  }
+);
 
 
 // PATCH /tasks/:id

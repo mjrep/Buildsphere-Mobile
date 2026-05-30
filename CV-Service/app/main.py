@@ -188,10 +188,19 @@ async def detect_panels(
     file_ext = Path(file.filename).suffix.lower()
     logger.info(f"Incoming file: {file.filename} (Ext: {file_ext}, Content-Type: {file.content_type})")
     
-    if not file_ext or file_ext not in settings.ALLOWED_EXTENSIONS:
-        # If it's a known image mime type but missing/weird extension, let's allow it
+    if file_ext and file_ext not in settings.ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"Unsupported file type: '{file_ext}'. "
+                f"Allowed: {', '.join(sorted(settings.ALLOWED_EXTENSIONS))}"
+            ),
+        )
+
+    if not file_ext:
+        # If extension is missing but the MIME type is a known image, allow it.
         if file.content_type and file.content_type.startswith("image/"):
-             logger.info(f"Allowing based on mime-type: {file.content_type}")
+            logger.info(f"Allowing based on mime-type: {file.content_type}")
         else:
             raise HTTPException(
                 status_code=415,

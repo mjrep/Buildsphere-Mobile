@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { API_URL } from './api';
 
 const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(API_KEY);
@@ -86,9 +87,18 @@ export interface CVAuditResult {
   summary: string;
   annotatedImage: string | null;
   detections: CVDetection[];
-  detectionMode: 'box' | 'gemini-fallback';
+  detectionMode: 'box' | 'grid' | 'gemini-fallback';
   avgConfidence: number;
 }
+
+const getCvDetectUrl = () => {
+  const configuredUrl = process.env.EXPO_PUBLIC_CV_API_URL;
+  if (configuredUrl) {
+    return `${configuredUrl.replace(/\/$/, '')}/detect-panels`;
+  }
+
+  return `${API_URL.replace(/:\d+$/, ':8000').replace(/\/$/, '')}/detect-panels`;
+};
 
 export const hybridGlassAudit = async (
   base64Image: string,
@@ -97,15 +107,14 @@ export const hybridGlassAudit = async (
 ): Promise<CVAuditResult> => {
   console.log('DEBUG: Hybrid AI Audit Commencing (Local YOLO + Gemini Summary)');
 
-  // Use the local IP address for a stable connection (bypassing flaky LocalTunnel).
-  const CV_API_URL = 'http://192.168.0.69:8000/detect-panels';
+  const cvDetectUrl = getCvDetectUrl();
 
   try {
     if (!photoUri) {
       throw new Error('Photo URI is required for local CV Service.');
     }
 
-    console.log('DEBUG: Calling Local CV Service...');
+    console.log(`DEBUG: Calling Local CV Service: ${cvDetectUrl}`);
     console.log(`DEBUG: CV upload uses original selected photo URI: ${photoUri}`);
 
     const formData = new FormData();
@@ -120,7 +129,7 @@ export const hybridGlassAudit = async (
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-    const cvResponse = await fetch(CV_API_URL, {
+    const cvResponse = await fetch(cvDetectUrl, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -147,7 +156,7 @@ export const hybridGlassAudit = async (
     const hasWarnings: boolean = !!cvData.has_warnings;
     const warningMessage: string | null = cvData.warning_message || null;
     const detections: CVDetection[] = cvData.detections || [];
-    const detectionMode: 'box' | 'gemini-fallback' = cvData.detection_mode || 'box';
+    const detectionMode: 'box' | 'grid' | 'gemini-fallback' = cvData.detection_mode || 'box';
     const summary: string =
       cvData.summary ||
       cvData.summary_text ||

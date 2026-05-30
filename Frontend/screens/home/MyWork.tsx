@@ -41,6 +41,7 @@ interface MyWorkProps {
   projectsLoading?: boolean;
   projectsError?: string | null;
   onRetryProjects?: () => void;
+  refreshKey?: number;
 }
 
 type Tab = 'To Do' | 'In Progress' | 'To Review' | 'Completed';
@@ -59,6 +60,7 @@ export default function MyWork({
   projectsLoading = false,
   projectsError = null,
   onRetryProjects,
+  refreshKey = 0,
 }: MyWorkProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,7 +98,7 @@ export default function MyWork({
 
   useEffect(() => {
     loadTasks();
-  }, [userId]);
+  }, [userId, refreshKey]);
 
   const projectList = useMemo(() => {
     const byId = new Map<number, ProjectFilterOption>();
