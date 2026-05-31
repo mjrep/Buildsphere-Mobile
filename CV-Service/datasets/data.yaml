@@ -1,7 +1,0 @@
-path: C:\Users\rama_\Desktop\BuildSphere Project\Buildsphere-Mobile\CV-Service\datasets
-train: train\images
-val: valid\images
-test: test\images
-
-nc: 1
-names: ['glass_panel']

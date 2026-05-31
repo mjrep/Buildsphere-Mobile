@@ -1,6 +1,9 @@
 /* global __dirname */
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const authRoutes = require('./routes/auth');
 const projectsRoutes = require('./routes/projects');
@@ -10,7 +13,7 @@ const usersRoutes = require('./routes/users');
 const uploadRoutes = require('./routes/upload');
 const siteProgressRoutes = require('./routes/siteProgress');
 const inventoryRoutes = require('./routes/inventory');
-const path = require('path');
+const aiRoutes = require('./routes/ai');
 
 const app = express();
 app.use(cors());
@@ -30,6 +33,7 @@ app.use('/users', usersRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/site-progress', siteProgressRoutes);
 app.use('/inventory', inventoryRoutes);
+app.use('/api/ai', aiRoutes);
 // Phase 2 spec path: /api/projects/:projectId/inventory
 app.use('/api/projects/:projectId/inventory', (req, res, next) => {
   // Inject projectId into query for route handlers that expect it
@@ -39,7 +43,7 @@ app.use('/api/projects/:projectId/inventory', (req, res, next) => {
 
 app.get('/', (req, res) => res.send('BuildSphere API is running ✅'));
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ BuildSphere API running at http://0.0.0.0:${PORT}`);
 });

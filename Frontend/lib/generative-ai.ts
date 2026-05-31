@@ -1,8 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { API_URL } from './api';
-
-const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(API_KEY);
 
 const withRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000): Promise<T> => {
   try {
@@ -16,65 +12,34 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000): Pr
   }
 };
 
-export const countGlassPanels = async (base64Image: string, mimeType: string) => {
-  console.log('DEBUG: High-Precision Coordinate Detection Mode Engaged');
-  try {
-    return await withRetry(async () => {
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+export interface GeminiPanel {
+  id: string;
+  bbox: number[];
+  visibility_percentage: number;
+  panel_type: 'Residential Window' | 'Balcony Door Glass' | 'Curtain Wall Glass' | 'Fixed Glass Panel';
+  confidence: number;
+  requires_manual_verification: boolean;
+  notes?: string;
+}
 
-      const prompt = `
-                You are a high-precision object detection system for BuildSphere construction audits.
+export interface UncertainDetection {
+  id: string;
+  bbox: number[];
+  reason: string;
+  confidence: number;
+}
 
-                OBJECTIVE: Detect every INDIVIDUAL glass panel in the image.
-
-                DETECTION RULES:
-                1. Look for the physical frame of each glass pane.
-                2. For mullioned/grid windows, count the large functional sections, NOT the decorative tiny internal squares.
-                3. Return the bounding box for EACH panel in [ymin, xmin, ymax, xmax] format.
-
-                Return ONLY JSON:
-                {
-                    "panels": [
-                        {"label": "glass_panel", "box_2d": [ymin, xmin, ymax, xmax]},
-                        ...
-                    ],
-                    "count": <total number of detected boxes>,
-                    "explanation": "Summarize how you separated panels from reflections."
-                }
-            `;
-
-      const result = await model.generateContent([
-        prompt,
-        { inlineData: { data: base64Image, mimeType: mimeType } },
-      ]);
-
-      const response = await result.response;
-      const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(text);
-
-      if (parsed.panels && !parsed.count) {
-        parsed.count = parsed.panels.length;
-      }
-
-      return parsed;
-    });
-  } catch (error: any) {
-    console.error('DETECTION_ERROR:', error);
-    if (error.message?.includes('429')) {
-      throw new Error('QUOTA_LIMIT: Please wait 30 seconds.');
-    }
-    throw new Error(`AI_UNAVAILABLE: ${error.message}`);
-  }
-};
-
-// CV Service detection types. Current primary mode is regular YOLOv8 boxes:
-// Python classifies full vs partial, Gemini summarizes only, and the user verifies.
 export interface CVDetection {
+  id?: string;
   bounding_box: number[];
   confidence_score: number;
   label: string;
   status: 'full' | 'partial' | 'unclear';
   counted: boolean;
+  visibility_percentage?: number;
+  panel_type?: GeminiPanel['panel_type'];
+  requires_manual_verification?: boolean;
+  notes?: string;
 }
 
 export interface CVAuditResult {
@@ -87,53 +52,54 @@ export interface CVAuditResult {
   summary: string;
   annotatedImage: string | null;
   detections: CVDetection[];
-  detectionMode: 'box' | 'grid' | 'gemini-fallback';
+  detectionMode: 'gemini-only' | 'gemini' | 'box' | 'grid' | 'gemini-fallback';
   avgConfidence: number;
+  panels: GeminiPanel[];
+  uncertainDetections: UncertainDetection[];
 }
 
-const getCvDetectUrl = () => {
-  const configuredUrl = process.env.EXPO_PUBLIC_CV_API_URL;
-  if (configuredUrl) {
-    return `${configuredUrl.replace(/\/$/, '')}/detect-panels`;
+interface BackendGlassAnalysisResponse {
+  total_valid_panels: number;
+  ai_detected_count: number;
+  verified_panel_count: number;
+  summary: string;
+  detection_mode: 'gemini-only';
+  detection_confidence?: number;
+  avg_confidence?: number;
+  has_warnings: boolean;
+  warning_message: string;
+  panels: GeminiPanel[];
+  uncertain_detections: UncertainDetection[];
+}
+
+export const countGlassPanels = async (
+  _base64Image: string,
+  _mimeType: string,
+  photoUri?: string
+): Promise<BackendGlassAnalysisResponse> => {
+  if (!photoUri) {
+    throw new Error('Photo URI is required for backend Gemini image analysis.');
   }
 
-  return `${API_URL.replace(/:\d+$/, ':8000').replace(/\/$/, '')}/detect-panels`;
-};
-
-export const hybridGlassAudit = async (
-  base64Image: string,
-  mimeType: string,
-  photoUri?: string
-): Promise<CVAuditResult> => {
-  console.log('DEBUG: Hybrid AI Audit Commencing (Local YOLO + Gemini Summary)');
-
-  const cvDetectUrl = getCvDetectUrl();
-
-  try {
-    if (!photoUri) {
-      throw new Error('Photo URI is required for local CV Service.');
-    }
-
-    console.log(`DEBUG: Calling Local CV Service: ${cvDetectUrl}`);
-    console.log(`DEBUG: CV upload uses original selected photo URI: ${photoUri}`);
-
-    const formData = new FormData();
+  return withRetry(async () => {
     const filename = photoUri.split('/').pop() || 'photo.jpg';
+    const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
+    const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+    const formData = new FormData();
 
-    formData.append('file', {
+    formData.append('image', {
       uri: photoUri,
       name: filename,
       type: mimeType,
     } as any);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
 
-    const cvResponse = await fetch(cvDetectUrl, {
+    const response = await fetch(`${API_URL}/api/ai/glass-analysis`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        'bypass-tunnel-reminder': 'true',
       },
       body: formData,
       signal: controller.signal,
@@ -141,69 +107,77 @@ export const hybridGlassAudit = async (
 
     clearTimeout(timeoutId);
 
-    if (!cvResponse.ok) {
-      const errText = await cvResponse.text();
-      console.error('CV_API_ERROR:', cvResponse.status, errText);
-      throw new Error(`CV Service Error (${cvResponse.status}): ${errText.substring(0, 100)}`);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`AI analysis failed (${response.status}): ${body.substring(0, 300)}`);
     }
 
-    const cvData = await cvResponse.json();
+    return response.json();
+  });
+};
 
-    const count: number = cvData.total_valid_panels || 0;
-    const partialPanels: number = cvData.partial_panels || 0;
-    const unclearPanels: number = cvData.unclear_panels || 0;
-    const excludedPanels: number = cvData.excluded_panels || 0;
-    const hasWarnings: boolean = !!cvData.has_warnings;
-    const warningMessage: string | null = cvData.warning_message || null;
-    const detections: CVDetection[] = cvData.detections || [];
-    const detectionMode: 'box' | 'grid' | 'gemini-fallback' = cvData.detection_mode || 'box';
-    const summary: string =
-      cvData.summary ||
-      cvData.summary_text ||
-      `${count} complete glass panels were detected. Please verify the final count before saving.`;
-    const annotatedImage: string | null = cvData.annotated_image_base64 || null;
+export const hybridGlassAudit = async (
+  base64Image: string,
+  mimeType: string,
+  photoUri?: string
+): Promise<CVAuditResult> => {
+  console.log('DEBUG: Backend Gemini glass audit commencing');
+
+  try {
+    const analysis = await countGlassPanels(base64Image, mimeType, photoUri);
+    const panels = Array.isArray(analysis.panels) ? analysis.panels : [];
+    const uncertainDetections = Array.isArray(analysis.uncertain_detections)
+      ? analysis.uncertain_detections
+      : [];
+    const count = Number(analysis.total_valid_panels || analysis.ai_detected_count || panels.length || 0);
+
+    const detections: CVDetection[] = panels.map((panel) => ({
+      id: panel.id,
+      bounding_box: panel.bbox,
+      confidence_score: panel.confidence,
+      label: panel.panel_type,
+      status: panel.requires_manual_verification ? 'unclear' : 'full',
+      counted: true,
+      visibility_percentage: panel.visibility_percentage,
+      panel_type: panel.panel_type,
+      requires_manual_verification: panel.requires_manual_verification,
+      notes: panel.notes,
+    }));
 
     const avgConfidence =
-      cvData.avg_confidence !== undefined
-        ? cvData.avg_confidence
-        : detections.length > 0
-          ? detections.reduce((sum, detection) => sum + detection.confidence_score, 0) / detections.length
-          : 0;
-
-    console.log(
-      `DEBUG: CV Service returned ${count} counted panels, ` +
-        `${partialPanels} partial, mode=${detectionMode}, avgConf=${avgConfidence.toFixed(3)}`
-    );
+      typeof analysis.avg_confidence === 'number'
+        ? analysis.avg_confidence
+        : typeof analysis.detection_confidence === 'number'
+          ? analysis.detection_confidence
+          : detections.length > 0
+        ? detections.reduce((sum, detection) => sum + detection.confidence_score, 0) / detections.length
+        : 0;
 
     return {
       count,
-      partialPanels,
-      unclearPanels,
-      excludedPanels,
-      hasWarnings,
-      warningMessage,
-      summary,
-      annotatedImage,
+      partialPanels: 0,
+      unclearPanels: uncertainDetections.length,
+      excludedPanels: 0,
+      hasWarnings: Boolean(analysis.has_warnings),
+      warningMessage: analysis.warning_message || null,
+      summary: analysis.summary,
+      annotatedImage: null,
       detections,
-      detectionMode,
+      detectionMode: analysis.detection_mode || 'gemini-only',
       avgConfidence,
+      panels,
+      uncertainDetections,
     };
   } catch (error: any) {
-    console.error('HYBRID_AUDIT_ERROR:', error);
-    throw new Error(`Hybrid Audit Failed: ${error.message || 'Unknown Error'}`);
+    console.error('GEMINI_BACKEND_AUDIT_ERROR:', error);
+    throw new Error(`Gemini Audit Failed: ${error.message || 'Unknown Error'}`);
   }
 };
 
 export const getBuildsphereAI = async (p: string) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const result = await model.generateContent(p);
-  return result.response.text();
+  throw new Error(`Text Gemini calls must go through the backend. Prompt was not sent: ${p.slice(0, 40)}`);
 };
 
-export const analyzeBuildsphereImage = async (p: string, b: string, m: string) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const result = await model.generateContent([p, { inlineData: { data: b, mimeType: m } }]);
-  return result.response.text();
+export const analyzeBuildsphereImage = async (p: string, _b: string, _m: string) => {
+  throw new Error(`Image Gemini calls must go through the backend. Prompt was not sent: ${p.slice(0, 40)}`);
 };
-
-export default genAI;

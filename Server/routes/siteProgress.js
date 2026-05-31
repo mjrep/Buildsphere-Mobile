@@ -23,7 +23,7 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
   const {
     projectId, taskId, quantityInstalled, notes, userId,
     glassCount, shift, workDate,
-    // ── AI detection fields (from CV Service) ──────────────
+    // ── AI detection fields (from Gemini) ──────────────
     ai_detected_count, verified_panel_count,
     avg_confidence, detection_mode,
   } = req.body;

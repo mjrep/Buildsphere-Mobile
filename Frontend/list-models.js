@@ -1,19 +1,28 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../Server/.env") });
 
-const genAI = new GoogleGenerativeAI("AIzaSyAh9f6RKRY5-rag3bTHnt_YE8krXP3mIUc");
+const apiKey = process.env.GEMINI_API_KEY;
+
+if (!apiKey) {
+  throw new Error("Set GEMINI_API_KEY in Server/.env before listing models.");
+}
 
 async function listModels() {
   try {
-    const models = await genAI.listModels();
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`HTTP ${response.status}: ${body.substring(0, 500)}`);
+    }
+
+    const models = await response.json();
     console.log("--- AVAILABLE MODELS ---");
     models.models.forEach(m => {
-        console.log(`Name: ${m.name}, Display: ${m.displayName}, Methods: ${m.supportedMethods.join(', ')}`);
+        console.log(`Name: ${m.name}, Display: ${m.displayName}, Methods: ${(m.supportedGenerationMethods || []).join(', ')}`);
     });
   } catch (error) {
     console.error("LIST_MODELS_ERROR:", error.message);
-    if (error.response) {
-        console.error("DATA:", error.response.data);
-    }
   }
 }
 

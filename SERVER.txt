@@ -1,4 +1,3 @@
 Node Backend: cd Server/npm start
 Expo Frontend: cd Frontend && npx expo start -c
-YOLO Server: cd CV-Service && .\venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-Localtunnel: cd CV-Service && npx localtunnel --port 8000 --subdomain buildsphere-ai-audit
+Gemini panel counting: configured in Server/.env with GEMINI_API_KEY, GEMINI_MODEL, and AI_ANALYSIS_MODE

@@ -83,9 +83,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [glassCount, setGlassCount] = useState<number>(0);
 
-  // ── New: CV Service detection state ──────────────────────────────
+  // ── AI detection state ──────────────────────────────
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle');
-  const [detectionMode, setDetectionMode] = useState<string>('box');
+  const [detectionMode, setDetectionMode] = useState<string>('gemini');
   const [avgConfidence, setAvgConfidence] = useState<number>(0);
   const [aiDetectedCount, setAiDetectedCount] = useState<number>(0);
   const [verifiedPanelCount, setVerifiedPanelCount] = useState<number>(0);
@@ -96,6 +96,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const [warningMessage, setWarningMessage] = useState<string>('');
   const [aiSummary, setAiSummary] = useState<string>('');
   const [detections, setDetections] = useState<CVDetection[]>([]);
+  const [annotatedImageUri, setAnnotatedImageUri] = useState<string | null>(null);
 
 
   const reset = () => {
@@ -111,9 +112,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setSaving(false);
     setHasUnsavedChanges(false);
     setRecordSaved(false);
-    // Reset CV detection state
+    // Reset AI detection state
     setAnalysisStatus('idle');
-    setDetectionMode('box');
+    setDetectionMode('gemini');
     setAvgConfidence(0);
     setAiDetectedCount(0);
     setVerifiedPanelCount(0);
@@ -124,6 +125,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setWarningMessage('');
     setAiSummary('');
     setDetections([]);
+    setAnnotatedImageUri(null);
   };
 
   const markDirty = () => {
@@ -245,7 +247,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   };
 
   const handleCountGlass = async () => {
-    console.log('DEBUG: handleCountGlass triggered (CV Service)');
+    console.log('DEBUG: handleCountGlass triggered (Gemini)');
     if (selectedPhotos.length === 0) {
       console.log('DEBUG: no photos, returning');
       return;
@@ -266,7 +268,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       const fileInfo = await FileSystem.getInfoAsync(currentPhoto.uri);
 
       console.log(
-        `DEBUG: CV Analysis starting. Mime: ${mimeType}, ` +
+        `DEBUG: Gemini analysis starting. Mime: ${mimeType}, ` +
         `pickerSize=${currentPhoto.width || 'unknown'}x${currentPhoto.height || 'unknown'}, ` +
         `pickerFileSize=${currentPhoto.fileSize || 'unknown'}, ` +
         `uriFileSize=${fileInfo.exists && 'size' in fileInfo ? fileInfo.size : 'unknown'}, ` +
@@ -274,11 +276,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       );
       setAnalysisStatus('analyzing');
 
-      const result: CVAuditResult = await hybridGlassAudit(
-        currentPhoto.base64!, mimeType, currentPhoto.uri
-      );
+      const result: CVAuditResult = await hybridGlassAudit(currentPhoto.base64 || '', mimeType, currentPhoto.uri);
 
-      console.log(`DEBUG: CV Success! Count: ${result.count}, Mode: ${result.detectionMode}`);
+      console.log(`DEBUG: Gemini success! Count: ${result.count}, Mode: ${result.detectionMode}`);
       const summaryText = `${result.count} complete glass panels were detected. Please verify the final count before saving.`;
 
       // ── Populate all detection state ──────────────────────────────
@@ -293,6 +293,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       setHasWarnings(result.hasWarnings);
       setWarningMessage(result.warningMessage || '');
       setDetections(result.detections);
+      setAnnotatedImageUri(result.annotatedImage);
       setAiSummary(summaryText);
 
       if (result.count === 0) {
@@ -518,27 +519,37 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
 
               {/* Glass Panels Count (Editable) */}
-              <View className="mt-8 mb-6 rounded-2xl border border-[#D3D0FF] bg-[#F8F7FF] p-4">
+              <View
+                className="mt-8 mb-6 rounded-2xl border p-4"
+                style={{ backgroundColor: theme.surface, borderColor: theme.primary }}
+              >
 
                 <View className="flex-row items-center justify-between mb-4">
                   <View className="flex-row items-center">
-                    <View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-[#EAE8FF]">
+                    <View
+                      className="mr-3 h-10 w-10 items-center justify-center rounded-full"
+                      style={{ backgroundColor: theme.primaryLight }}
+                    >
                       <Ionicons name="apps" size={20} color={PRIMARY} />
                     </View>
-                    <Text className="text-[14px] font-semibold text-[#1E1E1E]">
+                    <Text className="text-[14px] font-semibold" style={{ color: theme.text }}>
                       Glass Panels Count
                     </Text>
                   </View>
                 </View>
                 
-                <View className="flex-row items-center justify-between bg-white rounded-xl border border-[#E0E0E0] p-3">
+                <View
+                  className="flex-row items-center justify-between rounded-xl border p-3"
+                  style={{ backgroundColor: theme.elevated, borderColor: theme.border }}
+                >
                   <TouchableOpacity 
                     onPress={() => {
                       const nextCount = Math.max(0, verifiedPanelCount - 1);
                       setVerifiedPanelCount(nextCount);
                       if (nextCount !== verifiedPanelCount) markDirty();
                     }}
-                    className="h-10 w-10 items-center justify-center rounded-full bg-gray-100">
+                    className="h-10 w-10 items-center justify-center rounded-full"
+                    style={{ backgroundColor: theme.input }}>
                       <Ionicons name="remove" size={24} color={PRIMARY} />
                   </TouchableOpacity>
                   
@@ -550,8 +561,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                       if (nextCount !== verifiedPanelCount) markDirty();
                     }}
                     keyboardType="numeric"
-                    className="text-[24px] font-bold text-[#7370FF] text-center"
-                    style={{ minWidth: 60 }}
+                    className="text-[24px] font-bold text-center"
+                    style={{ minWidth: 60, color: theme.primary }}
                   />
                   
                   <TouchableOpacity 
@@ -563,10 +574,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                       <Ionicons name="add" size={24} color="white" />
                   </TouchableOpacity>
                 </View>
-                <Text className="mt-2 text-center text-[10px] text-gray-400">Verify and adjust the count above</Text>
+                <Text className="mt-2 text-center text-[10px]" style={{ color: theme.textMuted }}>
+                  Verify and adjust the count above
+                </Text>
               </View>
 
-              <Text className="mb-1 text-[12px] font-semibold text-[#2D2D2D]">Notes / Comments</Text>
+              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Notes / Comments</Text>
               <TextInput
                 value={notes}
                 onChangeText={(value) => {
@@ -575,7 +588,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 }}
                 style={{ ...inputStyle, height: 80, textAlignVertical: 'top', paddingTop: 12 }}
                 placeholder="Add comments about progress..."
-                placeholderTextColor="#C0C0C0"
+                placeholderTextColor={theme.textMuted}
                 multiline
               />
 
@@ -583,11 +596,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             </ScrollView>
 
             {/* Footer Buttons */}
-            <View className="flex-row gap-3 border-t border-[#F0F0F0] px-5 pb-10 pt-3">
+            <View className="flex-row gap-3 border-t px-5 pb-10 pt-3" style={{ borderColor: theme.border, backgroundColor: theme.background }}>
               <TouchableOpacity
                 onPress={handleClose}
-                className="h-12 flex-1 items-center justify-center rounded-[14px] border border-[#E0E0E0]">
-                <Text className="text-[14px] font-semibold text-[#777]">Back</Text>
+                className="h-12 flex-1 items-center justify-center rounded-[14px] border"
+                style={{ borderColor: theme.border, backgroundColor: theme.background }}>
+                <Text className="text-[14px] font-semibold" style={{ color: theme.textMuted }}>Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => (selectedPhotos.length > 0 ? setStep(2) : setStep(3))}
@@ -601,7 +615,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
         {/* ── STEP 2: Photo Preview (Framed) ── */}
         {step === 2 && selectedPhotos.length > 0 && (
-          <View className="flex-1 bg-[#F9F9FB]">
+          <View className="flex-1" style={{ backgroundColor: theme.background }}>
             {/* Header */}
             <View className="flex-row items-center border-b px-5 pb-4 pt-10" style={{ backgroundColor: theme.background, borderColor: theme.border }}>
               <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 -mt-1 mr-3">
@@ -615,8 +629,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             {/* Framed Image Container */}
             <View className="flex-1 justify-center px-5 py-8">
               <View 
-                className="overflow-hidden rounded-[24px] bg-white shadow-xl"
+                className="overflow-hidden rounded-[24px] shadow-xl"
                 style={{ 
+                  backgroundColor: theme.surface,
                   height: '100%', 
                   shadowColor: '#000', 
                   shadowOpacity: 0.1, 
@@ -738,19 +753,40 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               </Text>
             </View>
 
-            {/* Mini photo preview if available */}
+            {/* AI highlighted photo preview if available */}
             {selectedPhotos.length > 0 && (
-              <View className="border-b py-4" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-5">
-                  {selectedPhotos.map((photo, index) => (
-                    <Image
-                      key={index}
-                      source={{ uri: photo.uri }}
-                      style={{ width: 110, height: 110, borderRadius: 16, marginRight: 12 }}
-                      resizeMode="cover"
-                    />
-                  ))}
-                </ScrollView>
+              <View className="border-b px-5 py-4" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
+                <View className="mb-2 flex-row items-center justify-between">
+                  <Text className="text-[12px] font-semibold" style={{ color: theme.textSecondary }}>
+                    {annotatedImageUri ? 'AI Highlighted Panels' : 'Photo Preview'}
+                  </Text>
+                  {annotatedImageUri ? (
+                    <View className="rounded-full px-2 py-1" style={{ backgroundColor: theme.primaryLight }}>
+                      <Text className="text-[10px] font-bold" style={{ color: theme.primary }}>
+                        {detections.filter((detection) => detection.counted).length} highlighted
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {annotatedImageUri ? (
+                  <Image
+                    source={{ uri: annotatedImageUri }}
+                    style={{ width: '100%', height: 220, borderRadius: 16 }}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {selectedPhotos.map((photo, index) => (
+                      <Image
+                        key={index}
+                        source={{ uri: photo.uri }}
+                        style={{ width: 110, height: 110, borderRadius: 16, marginRight: 12 }}
+                        resizeMode="cover"
+                      />
+                    ))}
+                  </ScrollView>
+                )}
               </View>
             )}
 
@@ -877,7 +913,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                       <Text className="text-[14px] font-bold text-[#4CAF50]">
                         {detectionMode === 'gemini-fallback' ? 'Fallback' : 'Box'}
                       </Text>
-                      <Text className="text-[9px] text-gray-400">YOLOv8</Text>
+                      <Text className="text-[9px] text-gray-400">Gemini Flash</Text>
                     </View>
                   </View>
                 )}
