@@ -11,7 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { UserRole } from './constants/roles';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
-import { API_URL } from './lib/api';
+import { API_URL, loadStoredApiUrl } from './lib/api';
 import { supabase } from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
@@ -81,15 +81,35 @@ function AppContent() {
     setAuthScreen('reset');
     setRecoveryLoading(true);
     setRecoveryError('');
+    setUser(null);
 
     try {
+      await AsyncStorage.removeItem('user');
+      await AsyncStorage.removeItem('token');
+
       const params = getDeepLinkParams(url);
       const code = params.get('code');
       const accessToken = params.get('access_token');
       const refreshToken = params.get('refresh_token');
+      const tokenHash = params.get('token_hash');
+      const linkError = params.get('error_description') || params.get('error');
+
+      if (linkError) {
+        setRecoveryError(linkError.replace(/\+/g, ' '));
+        return;
+      }
 
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        return;
+      }
+
+      if (tokenHash) {
+        const { error } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: 'recovery',
+        });
         if (error) throw error;
         return;
       }
@@ -111,9 +131,11 @@ function AppContent() {
     }
   }, []);
 
-  // Restore session from storage
+  // Restore server URL and session from storage
   useEffect(() => {
-    AsyncStorage.getItem('user').then((stored) => {
+    const restoreAppState = async () => {
+      await loadStoredApiUrl();
+      const stored = await AsyncStorage.getItem('user');
       if (stored) {
         let parsed = JSON.parse(stored);
         // Normalize snake_case to camelCase for legacy sessions
@@ -126,7 +148,9 @@ function AppContent() {
         setUser(parsed);
       }
       setLoading(false);
-    });
+    };
+
+    restoreAppState();
   }, []);
 
   const handleLogin = async (loggedInUser: UserInfo, token: string) => {
@@ -179,6 +203,9 @@ function AppContent() {
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
+        setUser(null);
+        AsyncStorage.removeItem('user');
+        AsyncStorage.removeItem('token');
         setAuthScreen('reset');
         setRecoveryLoading(false);
         setRecoveryError('');

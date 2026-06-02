@@ -11,8 +11,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { API_URL } from '../../lib/api';
+import { API_URL, saveApiUrl } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -31,7 +32,29 @@ export default function LoginScreen({
   const { theme, isDark } = useAppTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [serverUrl, setServerUrl] = useState(API_URL);
   const [loading, setLoading] = useState(false);
+  const [savingServerUrl, setSavingServerUrl] = useState(false);
+
+  const handleSaveServerUrl = async () => {
+    const trimmedUrl = serverUrl.trim();
+    if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
+      Alert.alert('Invalid server URL', 'Use a full URL like http://192.168.1.5:3001.');
+      return;
+    }
+
+    setSavingServerUrl(true);
+    try {
+      const savedUrl = await saveApiUrl(trimmedUrl);
+      setServerUrl(savedUrl);
+      Alert.alert('Server saved', `The app will use ${savedUrl}`);
+    } catch (err) {
+      Alert.alert('Error', 'Could not save the server URL.');
+    } finally {
+      setSavingServerUrl(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -134,16 +157,27 @@ export default function LoginScreen({
             </View>
 
             <Text className="mb-2 mt-6 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Password</Text>
-            <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+            <View className="flex-row items-center rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
               <TextInput
                 value={password}
                 onChangeText={setPassword}
                 placeholder="Enter your password"
                 placeholderTextColor={theme.textMuted}
-                secureTextEntry
-                className="h-[52px] px-4"
+                secureTextEntry={!showPassword}
+                className="h-[52px] flex-1 pl-4 pr-2"
                 style={{ color: theme.text }}
               />
+              <TouchableOpacity
+                onPress={() => setShowPassword((current) => !current)}
+                className="h-[52px] w-[52px] items-center justify-center"
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+                <Ionicons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={theme.textMuted}
+                />
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity
@@ -161,6 +195,35 @@ export default function LoginScreen({
             <TouchableOpacity onPress={onForgotPassword} className="mt-6 self-center">
               <Text className="text-[12px]" style={{ color: theme.textMuted }}>Forgot Password?</Text>
             </TouchableOpacity>
+
+            <View className="mt-8 w-full">
+              <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Server URL</Text>
+              <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+                <TextInput
+                  value={serverUrl}
+                  onChangeText={setServerUrl}
+                  placeholder="http://192.168.1.5:3001"
+                  placeholderTextColor={theme.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  className="h-[52px] px-4"
+                  style={{ color: theme.text }}
+                />
+              </View>
+
+              <TouchableOpacity
+                onPress={handleSaveServerUrl}
+                disabled={savingServerUrl}
+                className="mt-3 h-[44px] items-center justify-center rounded-xl"
+                style={{ backgroundColor: theme.input, borderColor: theme.border, borderWidth: 1 }}>
+                {savingServerUrl ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : (
+                  <Text className="text-[13px] font-semibold" style={{ color: theme.textSecondary }}>Save Server URL</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </KeyboardAwareScrollView>
