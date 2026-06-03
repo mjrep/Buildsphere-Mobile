@@ -14,7 +14,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
-import * as FileSystem from 'expo-file-system/legacy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 interface EditProfileScreenProps {

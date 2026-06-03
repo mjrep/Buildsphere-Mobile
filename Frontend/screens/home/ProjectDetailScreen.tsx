@@ -12,8 +12,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
 import InventoryScreen from './InventoryScreen';
 import SiteUpdatesScreen from './SiteUpdatesScreen';
-import ProjectTasksView from './ProjectTasksView';
-import TaskDetailScreen from './TaskDetailScreen';
 import { type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MainTab } from '../../components/BottomNavigationBar';
@@ -157,10 +155,9 @@ export default function ProjectDetailScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
-    'detail' | 'inventory' | 'siteUpdates' | 'tasks'
+    'detail' | 'inventory' | 'siteUpdates'
   >('detail');
   const [showSiteUpdates, setShowSiteUpdates] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<any>(null);
 
   const loadProject = () => {
     setLoading(true);
@@ -194,37 +191,6 @@ export default function ProjectDetailScreen({
         unreadCount={unreadCount}
         onNavigate={onNavigate}
       />
-    );
-  }
-
-  if (activeSection === 'tasks' && project) {
-    return (
-      <View className="flex-1">
-        <ProjectTasksView 
-          projectId={project.id} 
-          currentUserId={userId} 
-          onBack={() => setActiveSection('detail')}
-          onTaskSelect={(task) => setSelectedTask(task)}
-        />
-        {selectedTask && (
-          <TaskDetailScreen 
-            visible={!!selectedTask}
-            task={selectedTask}
-            onClose={() => setSelectedTask(null)}
-            userRole={userRole}
-            canViewHome={canViewHome}
-            unreadCount={unreadCount}
-            onNavigate={(tab) => {
-              setSelectedTask(null);
-              onNavigate?.(tab);
-            }}
-            onViewInventory={() => {
-              setSelectedTask(null);
-              setActiveSection('inventory');
-            }}
-          />
-        )}
-      </View>
     );
   }
 
@@ -342,14 +308,12 @@ export default function ProjectDetailScreen({
           {[
             { label: 'Inventory', key: 'inventory' },
             { label: 'Site Updates', key: 'siteUpdates' },
-            { label: 'Tasks', key: 'tasks' },
           ].map((item) => (
             <TouchableOpacity
               key={item.key}
               onPress={() => {
                 if (item.key === 'siteUpdates') setShowSiteUpdates(true);
                 else if (item.key === 'inventory') setActiveSection('inventory');
-                else if (item.key === 'tasks') setActiveSection('tasks');
               }}
               className="mb-4 flex-row items-center justify-between rounded-[20px] border px-6 py-5"
               style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.02, shadowRadius: 5, elevation: 1 }}>

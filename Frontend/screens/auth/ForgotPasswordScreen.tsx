@@ -12,17 +12,14 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import * as Linking from 'expo-linking';
 import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { PASSWORD_RESET_REDIRECT_URL } from '../../lib/passwordRecovery';
 
 interface ForgotPasswordScreenProps {
   onBackToLogin: () => void;
 }
 
-// Supabase Dashboard > Authentication > URL Configuration > Redirect URLs
-// must include this URL for password recovery links to open the app.
-export const PASSWORD_RESET_REDIRECT_URL = Linking.createURL('reset-password');
 const GENERIC_SUCCESS_MESSAGE = 'If this email exists, a password reset link has been sent.';
 
 export default function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProps) {

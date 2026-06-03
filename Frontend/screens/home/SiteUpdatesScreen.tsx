@@ -27,6 +27,13 @@ interface SiteUpdate {
   glass_count: number;
   created_at: string;
   shift: 'Morning' | 'Noon' | 'Afternoon';
+  ai_photo_counts?: PhotoCount[] | string | null;
+}
+
+interface PhotoCount {
+  photoIndex: number;
+  count: number;
+  status?: 'complete' | 'failed';
 }
 
 interface Comment {
@@ -220,6 +227,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                 <View className="mb-6">
                   {(() => {
                     let photos: string[] = [];
+                    let photoCounts: PhotoCount[] = [];
                     try {
                       if (currentUpdate?.photo_url) {
                         const parsed = JSON.parse(currentUpdate.photo_url);
@@ -228,27 +236,47 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                     } catch (e) {
                       if (currentUpdate?.photo_url) photos = [currentUpdate.photo_url];
                     }
+                    try {
+                      const rawPhotoCounts = currentUpdate?.ai_photo_counts;
+                      if (Array.isArray(rawPhotoCounts)) {
+                        photoCounts = rawPhotoCounts;
+                      } else if (typeof rawPhotoCounts === 'string') {
+                        const parsedCounts = JSON.parse(rawPhotoCounts);
+                        photoCounts = Array.isArray(parsedCounts) ? parsedCounts : [];
+                      }
+                    } catch (e) {
+                      photoCounts = [];
+                    }
 
                     if (photos.length > 0) {
                       return (
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
-                          {photos.map((p, idx) => (
-                            <View key={idx} className="relative h-[240px] w-[300px] mr-4 overflow-hidden rounded-[24px]" style={{ backgroundColor: theme.surfaceAlt }}>
-                              <Image
-                                source={{
-                                  uri: p.startsWith('http') ? p : `${API_URL}${p}`,
-                                }}
-                                className="h-full w-full"
-                                resizeMode="cover"
-                              />
-                              {/* Count Badge on the first photo or each photo? Let's show on each for clarity */}
-                              <View className="absolute bottom-4 right-4 rounded-full px-3 py-1 shadow-sm" style={{ backgroundColor: 'rgba(93, 191, 80, 0.9)' }}>
-                                <Text className="text-[10px] font-bold text-white">
-                                  {currentUpdate?.glass_count || 0} installed
-                                </Text>
+                          {photos.map((p, idx) => {
+                            const photoCount = photoCounts.find((count) => count.photoIndex === idx);
+                            const hasPerPhotoCount = Boolean(photoCount);
+                            const badgeText = photoCount?.status === 'failed'
+                              ? 'Check count'
+                              : `${hasPerPhotoCount ? photoCount?.count || 0 : currentUpdate?.glass_count || 0} installed`;
+
+                            return (
+                              <View key={idx} className="relative h-[240px] w-[300px] mr-4 overflow-hidden rounded-[24px]" style={{ backgroundColor: theme.surfaceAlt }}>
+                                <Image
+                                  source={{
+                                    uri: p.startsWith('http') ? p : `${API_URL}${p}`,
+                                  }}
+                                  className="h-full w-full"
+                                  resizeMode="cover"
+                                />
+                                <View
+                                  className="absolute bottom-4 right-4 rounded-full px-3 py-1 shadow-sm"
+                                  style={{ backgroundColor: photoCount?.status === 'failed' ? 'rgba(220, 38, 38, 0.9)' : 'rgba(93, 191, 80, 0.9)' }}>
+                                  <Text className="text-[10px] font-bold text-white">
+                                    {badgeText}
+                                  </Text>
+                                </View>
                               </View>
-                            </View>
-                          ))}
+                            );
+                          })}
                         </ScrollView>
                       );
                     }

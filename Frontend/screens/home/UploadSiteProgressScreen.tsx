@@ -23,7 +23,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
 import { hybridGlassAudit, CVDetection, CVAuditResult } from '../../lib/generative-ai';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
 
@@ -41,6 +40,19 @@ interface SelectedPhoto {
   width?: number;
   height?: number;
   fileSize?: number;
+}
+
+interface PhotoAnalysisResult {
+  photoIndex: number;
+  count: number;
+  partialPanels: number;
+  unclearPanels: number;
+  excludedPanels: number;
+  avgConfidence: number;
+  detectionMode: string;
+  hasWarnings: boolean;
+  warningMessage?: string;
+  status: 'complete' | 'failed';
 }
 
 const PRIMARY = '#7370FF';
@@ -97,6 +109,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const [aiSummary, setAiSummary] = useState<string>('');
   const [detections, setDetections] = useState<CVDetection[]>([]);
   const [annotatedImageUri, setAnnotatedImageUri] = useState<string | null>(null);
+  const [photoAnalysisResults, setPhotoAnalysisResults] = useState<PhotoAnalysisResult[]>([]);
+  const [analyzingPhotoIndex, setAnalyzingPhotoIndex] = useState<number | null>(null);
 
 
   const reset = () => {
@@ -126,6 +140,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setAiSummary('');
     setDetections([]);
     setAnnotatedImageUri(null);
+    setPhotoAnalysisResults([]);
+    setAnalyzingPhotoIndex(null);
   };
 
   const markDirty = () => {
@@ -205,6 +221,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         fileSize: asset.fileSize,
       }));
       setSelectedPhotos(prev => [...prev, ...newPhotos]);
+      setPhotoAnalysisResults([]);
+      setAnalysisStatus('idle');
+      setAiSummary('');
       markDirty();
     }
   };
@@ -228,12 +247,18 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         height: result.assets[0].height,
         fileSize: result.assets[0].fileSize,
       }]);
+      setPhotoAnalysisResults([]);
+      setAnalysisStatus('idle');
+      setAiSummary('');
       markDirty();
     }
   };
 
   const removePhoto = (index: number) => {
     setSelectedPhotos(prev => prev.filter((_, i) => i !== index));
+    setPhotoAnalysisResults([]);
+    setAnalysisStatus('idle');
+    setAiSummary('');
     markDirty();
   };
 
@@ -255,54 +280,130 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
     setAnalyzing(true);
     setAnalysisStatus('uploading');
+    setPhotoAnalysisResults([]);
+    setAnalyzingPhotoIndex(0);
+    setAiSummary('');
     setPartialPanels(0);
     setUnclearPanels(0);
     setExcludedPanels(0);
     setHasWarnings(false);
     setWarningMessage('');
     try {
-      const currentPhoto = selectedPhotos[0];
-      const filename = currentPhoto.uri.split('/').pop() || 'photo.jpg';
-      const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
-      const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-      const fileInfo = await FileSystem.getInfoAsync(currentPhoto.uri);
+      if (selectedPhotos.length > 0) {
+        const nextResults: PhotoAnalysisResult[] = [];
+        const combinedDetections: CVDetection[] = [];
+        const failedPhotoNumbers: number[] = [];
+        const detectionModes = new Set<string>();
+        let totalCount = 0;
+        let totalPartialPanels = 0;
+        let totalUnclearPanels = 0;
+        let totalExcludedPanels = 0;
+        let totalConfidence = 0;
+        let confidenceCount = 0;
 
-      console.log(
-        `DEBUG: Gemini analysis starting. Mime: ${mimeType}, ` +
-        `pickerSize=${currentPhoto.width || 'unknown'}x${currentPhoto.height || 'unknown'}, ` +
-        `pickerFileSize=${currentPhoto.fileSize || 'unknown'}, ` +
-        `uriFileSize=${fileInfo.exists && 'size' in fileInfo ? fileInfo.size : 'unknown'}, ` +
-        `uri=${currentPhoto.uri}`
-      );
-      setAnalysisStatus('analyzing');
+        for (const [index, currentPhoto] of selectedPhotos.entries()) {
+          setAnalyzingPhotoIndex(index);
+          setAnalysisStatus(index === 0 ? 'uploading' : 'analyzing');
 
-      const result: CVAuditResult = await hybridGlassAudit(currentPhoto.base64 || '', mimeType, currentPhoto.uri);
+          const filename = currentPhoto.uri.split('/').pop() || `photo_${index + 1}.jpg`;
+          const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
+          const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
 
-      console.log(`DEBUG: Gemini success! Count: ${result.count}, Mode: ${result.detectionMode}`);
-      const summaryText = `${result.count} complete glass panels were detected. Please verify the final count before saving.`;
+          console.log(
+            `DEBUG: Gemini analysis starting for photo ${index + 1}/${selectedPhotos.length}. ` +
+            `Mime: ${mimeType}, pickerSize=${currentPhoto.width || 'unknown'}x${currentPhoto.height || 'unknown'}, ` +
+            `pickerFileSize=${currentPhoto.fileSize || 'unknown'}, uri=${currentPhoto.uri}`
+          );
 
-      // ── Populate all detection state ──────────────────────────────
-      setAiDetectedCount(result.count);
-      setVerifiedPanelCount(result.count);  // default verified = AI count
-      setGlassCount(result.count);
-      setDetectionMode(result.detectionMode);
-      setAvgConfidence(result.avgConfidence);
-      setPartialPanels(result.partialPanels);
-      setUnclearPanels(result.unclearPanels);
-      setExcludedPanels(result.excludedPanels);
-      setHasWarnings(result.hasWarnings);
-      setWarningMessage(result.warningMessage || '');
-      setDetections(result.detections);
-      setAnnotatedImageUri(result.annotatedImage);
-      setAiSummary(summaryText);
+          try {
+            const result: CVAuditResult = await hybridGlassAudit(currentPhoto.base64 || '', mimeType, currentPhoto.uri);
 
-      if (result.count === 0) {
-        setAnalysisStatus('no_panels');
-      } else {
-        setAnalysisStatus('complete');
+            console.log(`DEBUG: Gemini success for photo ${index + 1}. Count: ${result.count}, Mode: ${result.detectionMode}`);
+
+            nextResults.push({
+              photoIndex: index,
+              count: result.count,
+              partialPanels: result.partialPanels,
+              unclearPanels: result.unclearPanels,
+              excludedPanels: result.excludedPanels,
+              avgConfidence: result.avgConfidence,
+              detectionMode: result.detectionMode,
+              hasWarnings: result.hasWarnings,
+              warningMessage: result.warningMessage || undefined,
+              status: 'complete',
+            });
+
+            totalCount += result.count;
+            totalPartialPanels += result.partialPanels;
+            totalUnclearPanels += result.unclearPanels;
+            totalExcludedPanels += result.excludedPanels;
+            totalConfidence += result.avgConfidence;
+            confidenceCount += 1;
+            detectionModes.add(result.detectionMode);
+            combinedDetections.push(
+              ...result.detections.map((detection) => ({
+                ...detection,
+                id: detection.id ? `P${index + 1}-${detection.id}` : undefined,
+              }))
+            );
+          } catch (photoError: any) {
+            console.error(`CV_ANALYSIS_ERROR_PHOTO_${index + 1}:`, photoError);
+            failedPhotoNumbers.push(index + 1);
+            nextResults.push({
+              photoIndex: index,
+              count: 0,
+              partialPanels: 0,
+              unclearPanels: 0,
+              excludedPanels: 0,
+              avgConfidence: 0,
+              detectionMode: 'failed',
+              hasWarnings: true,
+              warningMessage: photoError.message || 'Could not analyze this photo.',
+              status: 'failed',
+            });
+          }
+        }
+
+        setPhotoAnalysisResults(nextResults);
+
+        if (nextResults.every((result) => result.status === 'failed')) {
+          throw new Error('Could not analyze any selected photo. Please enter the total count manually.');
+        }
+
+        const breakdownText = nextResults
+          .map((result) =>
+            result.status === 'failed'
+              ? `Photo ${result.photoIndex + 1}: needs manual count`
+              : `Photo ${result.photoIndex + 1}: ${result.count} panel${result.count === 1 ? '' : 's'}`
+          )
+          .join('\n');
+        const failedText =
+          failedPhotoNumbers.length > 0
+            ? ` ${failedPhotoNumbers.length} photo${failedPhotoNumbers.length === 1 ? '' : 's'} need manual checking.`
+            : '';
+        const summaryText =
+          `${selectedPhotos.length} photo${selectedPhotos.length === 1 ? '' : 's'} analyzed.\n` +
+          `${breakdownText}\nTotal AI count: ${totalCount} panel${totalCount === 1 ? '' : 's'}.${failedText}`;
+
+        setAiDetectedCount(totalCount);
+        setVerifiedPanelCount(totalCount);
+        setGlassCount(totalCount);
+        setDetectionMode(detectionModes.size === 1 ? Array.from(detectionModes)[0] : 'gemini-multi-photo');
+        setAvgConfidence(confidenceCount > 0 ? totalConfidence / confidenceCount : 0);
+        setPartialPanels(totalPartialPanels);
+        setUnclearPanels(totalUnclearPanels);
+        setExcludedPanels(totalExcludedPanels);
+        setHasWarnings(failedPhotoNumbers.length > 0 || nextResults.some((result) => result.hasWarnings));
+        setWarningMessage(failedText.trim());
+        setDetections(combinedDetections);
+        setAnnotatedImageUri(null);
+        setAiSummary(summaryText);
+        setAnalysisStatus(totalCount === 0 ? 'no_panels' : 'complete');
+        setStep(3);
+        return;
       }
 
-      setStep(3); // Go to form for human verification
+      // ── Populate all detection state ──────────────────────────────
     } catch (error: any) {
       console.error('CV_ANALYSIS_ERROR:', error);
       setAnalysisStatus('failed');
@@ -314,6 +415,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       setStep(3); // Go to form for manual entry
     } finally {
       setAnalyzing(false);
+      setAnalyzingPhotoIndex(null);
     }
   };
 
@@ -349,6 +451,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       formData.append('avg_confidence', avgConfidence.toFixed(4));
       formData.append('detection_mode', detectionMode);
       formData.append('warning_message', warningMessage);
+      formData.append('per_photo_counts', JSON.stringify(photoAnalysisResults));
 
       if (selectedPhotos.length > 0) {
         selectedPhotos.forEach((photo, index) => {
@@ -400,6 +503,16 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     color: theme.text,
     marginBottom: 12,
   } as const;
+
+  const analysisProgressLabel =
+    analyzingPhotoIndex !== null
+      ? `Analyzing photo ${analyzingPhotoIndex + 1} of ${selectedPhotos.length}...`
+      : analysisStatus === 'uploading'
+        ? 'Uploading image...'
+        : 'Analyzing glass panels...';
+
+  const getPhotoAnalysisResult = (index: number) =>
+    photoAnalysisResults.find((result) => result.photoIndex === index);
 
   return (
     <Modal
@@ -701,7 +814,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                     <SkeletonBox width={34} height={34} borderRadius={17} style={{ marginRight: 10 }} />
                     <View className="flex-1">
                       <Text className="text-[13px] font-semibold" style={{ color: theme.primary }}>
-                        {analysisStatus === 'uploading' ? 'Uploading image...' : 'Analyzing image...'}
+                        {analysisProgressLabel}
                       </Text>
                       <SkeletonText width="72%" height={10} style={{ marginTop: 8 }} />
                     </View>
@@ -725,14 +838,14 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                 {analyzing ? (
                   <View className="flex-row items-center px-4">
                     <Text className="ml-3 text-[14px] font-semibold" style={{ color: theme.primary }}>
-                      {analysisStatus === 'uploading' ? 'Uploading image...' : 'Analyzing glass panels...'}
+                      {analysisProgressLabel}
                     </Text>
                   </View>
                 ) : (
                   <>
                     <Ionicons name="sparkles" size={20} color={PRIMARY} />
                     <Text className="ml-2 text-[16px] font-bold" style={{ color: theme.primary }}>
-                      Count Glass Panels (AI)
+                      Count All Photos (AI)
                     </Text>
                   </>
                 )}
@@ -777,14 +890,28 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   />
                 ) : (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    {selectedPhotos.map((photo, index) => (
-                      <Image
-                        key={index}
-                        source={{ uri: photo.uri }}
-                        style={{ width: 110, height: 110, borderRadius: 16, marginRight: 12 }}
-                        resizeMode="cover"
-                      />
-                    ))}
+                    {selectedPhotos.map((photo, index) => {
+                      const photoResult = getPhotoAnalysisResult(index);
+
+                      return (
+                        <View key={index} className="mr-3">
+                          <Image
+                            source={{ uri: photo.uri }}
+                            style={{ width: 110, height: 110, borderRadius: 16 }}
+                            resizeMode="cover"
+                          />
+                          {photoResult ? (
+                            <View
+                              className="absolute bottom-2 right-2 rounded-full px-2 py-1"
+                              style={{ backgroundColor: photoResult.status === 'failed' ? '#DC2626' : 'rgba(93, 191, 80, 0.92)' }}>
+                              <Text className="text-[10px] font-bold text-white">
+                                {photoResult.status === 'failed' ? 'Check' : `${photoResult.count} panels`}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                      );
+                    })}
                   </ScrollView>
                 )}
               </View>
@@ -926,6 +1053,29 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                     </Text>
                   </View>
                 )}
+
+                {photoAnalysisResults.length > 0 ? (
+                  <View className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.elevated, borderColor: theme.border }}>
+                    <View className="mb-2 flex-row items-center justify-between">
+                      <Text className="text-[10px] font-semibold" style={{ color: theme.textMuted }}>Per Photo Count</Text>
+                      <Text className="text-[11px] font-bold" style={{ color: theme.primary }}>
+                        Total: {aiDetectedCount}
+                      </Text>
+                    </View>
+                    {photoAnalysisResults.map((result) => (
+                      <View key={result.photoIndex} className="flex-row items-center justify-between py-1">
+                        <Text className="text-[12px]" style={{ color: theme.textSecondary }}>
+                          Photo {result.photoIndex + 1}
+                        </Text>
+                        <Text
+                          className="text-[12px] font-bold"
+                          style={{ color: result.status === 'failed' ? '#DC2626' : theme.text }}>
+                          {result.status === 'failed' ? 'Needs manual check' : `${result.count} panel${result.count === 1 ? '' : 's'}`}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
 
                 {/* AI Summary */}
                 {aiSummary ? (

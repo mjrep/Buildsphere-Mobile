@@ -13,7 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { API_URL, saveApiUrl } from '../../lib/api';
+import { ALLOW_RUNTIME_API_URL, API_URL, saveApiUrl } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -36,6 +36,7 @@ export default function LoginScreen({
   const [serverUrl, setServerUrl] = useState(API_URL);
   const [loading, setLoading] = useState(false);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
+  const canEditServerUrl = ALLOW_RUNTIME_API_URL;
 
   const handleSaveServerUrl = async () => {
     const trimmedUrl = serverUrl.trim();
@@ -59,6 +60,13 @@ export default function LoginScreen({
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert('Missing info', 'Please enter your email and password.');
+      return;
+    }
+    if (!API_URL) {
+      Alert.alert(
+        'Server not configured',
+        'The production API URL is missing. Set EXPO_PUBLIC_API_URL before building the app.'
+      );
       return;
     }
     setLoading(true);
@@ -87,7 +95,9 @@ export default function LoginScreen({
       Alert.alert(
         'Login Failed',
         isApiKeyError
-          ? 'Supabase is rejecting the app API key. Check EXPO_PUBLIC_SUPABASE_KEY in Frontend/.env and restart Expo with cache cleared.'
+          ? canEditServerUrl
+            ? 'Supabase is rejecting the app API key. Check EXPO_PUBLIC_SUPABASE_KEY in Frontend/.env and restart Expo with cache cleared.'
+            : 'Authentication is not configured correctly. Please contact support.'
           : authError?.message || 'Invalid email or password.'
       );
     } catch (err) {
@@ -196,50 +206,39 @@ export default function LoginScreen({
               <Text className="text-[12px]" style={{ color: theme.textMuted }}>Forgot Password?</Text>
             </TouchableOpacity>
 
-            <View className="mt-8 w-full">
-              <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Server URL</Text>
-              <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
-                <TextInput
-                  value={serverUrl}
-                  onChangeText={setServerUrl}
-                  placeholder="http://192.168.1.5:3001"
-                  placeholderTextColor={theme.textMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  className="h-[52px] px-4"
-                  style={{ color: theme.text }}
-                />
-              </View>
+            {canEditServerUrl ? (
+              <View className="mt-8 w-full">
+                <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Server URL</Text>
+                <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
+                  <TextInput
+                    value={serverUrl}
+                    onChangeText={setServerUrl}
+                    placeholder="http://192.168.1.5:3001"
+                    placeholderTextColor={theme.textMuted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    className="h-[52px] px-4"
+                    style={{ color: theme.text }}
+                  />
+                </View>
 
-              <TouchableOpacity
-                onPress={handleSaveServerUrl}
-                disabled={savingServerUrl}
-                className="mt-3 h-[44px] items-center justify-center rounded-xl"
-                style={{ backgroundColor: theme.input, borderColor: theme.border, borderWidth: 1 }}>
-                {savingServerUrl ? (
-                  <ActivityIndicator color={theme.primary} />
-                ) : (
-                  <Text className="text-[13px] font-semibold" style={{ color: theme.textSecondary }}>Save Server URL</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  onPress={handleSaveServerUrl}
+                  disabled={savingServerUrl}
+                  className="mt-3 h-[44px] items-center justify-center rounded-xl"
+                  style={{ backgroundColor: theme.input, borderColor: theme.border, borderWidth: 1 }}>
+                  {savingServerUrl ? (
+                    <ActivityIndicator color={theme.primary} />
+                  ) : (
+                    <Text className="text-[13px] font-semibold" style={{ color: theme.textSecondary }}>Save Server URL</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
         </View>
       </KeyboardAwareScrollView>
     </View>
   );
 }
-
-
-/*
-ceo@buildsphere.com         | password123!
-projeng@buildsphere.com     | password123!
-projcoor@buildsphere.com    | password123!
-sales@buildspere.com        | password123!
-accounting@buildsphere.com  | password123!
-procurement@buildsphere.com | password123!
-hr@buildsphere.com          | password123!
-staff@buildsphere.com       | password123!
-foreman@buildsphere.com     | password123!
-*/

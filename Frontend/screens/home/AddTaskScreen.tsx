@@ -45,6 +45,42 @@ interface SelectorOption {
   detail?: string;
 }
 
+interface FormLabelProps {
+  children: React.ReactNode;
+  color: string;
+}
+
+interface FieldErrorTextProps {
+  message?: string;
+  color: string;
+}
+
+interface FieldWrapProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+interface SelectFieldProps {
+  value: string;
+  placeholder: string;
+  onPress: () => void;
+  inputStyle: object;
+  textColor: string;
+  mutedColor: string;
+  disabled?: boolean;
+}
+
+interface SectionProps {
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  children: React.ReactNode;
+  cardBg: string;
+  borderColor: string;
+  iconBg: string;
+  iconColor: string;
+  labelColor: string;
+}
+
 interface AddTaskScreenProps {
   visible: boolean;
   onClose: () => void;
@@ -60,7 +96,12 @@ const PRIORITIES = [
   { value: 'urgent', label: 'Urgent' },
 ];
 
-const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
+const toDateInput = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const parseDate = (value: string) => {
   const date = value ? new Date(`${value}T12:00:00`) : new Date();
@@ -72,6 +113,67 @@ const displayDate = (value: string) => {
   const [year, month, day] = value.split('-');
   return month && day && year ? `${month}/${day}/${year}` : value;
 };
+
+const FormLabel = ({ children, color }: FormLabelProps) => (
+  <Text className="mb-2 text-[12px] font-bold" style={{ color }}>
+    {children}
+  </Text>
+);
+
+const FieldErrorText = ({ message, color }: FieldErrorTextProps) =>
+  message ? <Text className="mt-1 text-[11px]" style={{ color }}>{message}</Text> : null;
+
+const FieldWrap = ({ children, className = '' }: FieldWrapProps) => (
+  <View className={`mb-4 ${className}`}>{children}</View>
+);
+
+const SelectField = ({
+  value,
+  placeholder,
+  onPress,
+  inputStyle,
+  textColor,
+  mutedColor,
+  disabled = false,
+}: SelectFieldProps) => (
+  <TouchableOpacity
+    activeOpacity={0.82}
+    disabled={disabled}
+    onPress={onPress}
+    className="h-[48px] flex-row items-center justify-between rounded-xl border px-4"
+    style={[inputStyle, disabled ? { opacity: 0.55 } : null]}
+  >
+    <Text
+      className="mr-3 flex-1 text-[14px]"
+      numberOfLines={1}
+      style={{ color: value ? textColor : mutedColor }}
+    >
+      {value || placeholder}
+    </Text>
+    <Ionicons name="chevron-down" size={17} color={mutedColor} />
+  </TouchableOpacity>
+);
+
+const Section = ({
+  title,
+  icon,
+  children,
+  cardBg,
+  borderColor,
+  iconBg,
+  iconColor,
+  labelColor,
+}: SectionProps) => (
+  <View className="mb-3 rounded-2xl border p-3" style={{ backgroundColor: cardBg, borderColor }}>
+    <View className="mb-3 flex-row items-center">
+      <View className="mr-2 h-7 w-7 items-center justify-center rounded-lg" style={{ backgroundColor: iconBg }}>
+        <Ionicons name={icon} size={16} color={iconColor} />
+      </View>
+      <Text className="text-[14px] font-bold" style={{ color: labelColor }}>{title}</Text>
+    </View>
+    {children}
+  </View>
+);
 
 export default function AddTaskScreen({
   visible,
@@ -184,6 +286,18 @@ export default function AddTaskScreen({
     borderColor: fieldBorder,
     color: theme.text,
   };
+  const sectionStyleProps = {
+    cardBg,
+    borderColor: fieldBorder,
+    iconBg: theme.primaryLight,
+    iconColor: theme.primary,
+    labelColor,
+  };
+  const selectStyleProps = {
+    inputStyle,
+    textColor: theme.text,
+    mutedColor,
+  };
 
   const resetForm = () => {
     setProjectId('');
@@ -224,9 +338,9 @@ export default function AddTaskScreen({
     if (!assignedTo) nextErrors.assigned_to = 'Assigned user is required.';
     if (!priority) nextErrors.priority = 'Priority is required.';
     if (!startDate) nextErrors.start_date = 'Start date is required.';
-    if (!dueDate) nextErrors.due_date = 'End date is required.';
+    if (!dueDate) nextErrors.due_date = 'Finish date is required.';
     if (startDate && dueDate && dueDate < startDate) {
-      nextErrors.due_date = 'End date cannot be earlier than start date.';
+      nextErrors.due_date = 'Finish date cannot be earlier than start date.';
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -303,11 +417,17 @@ export default function AddTaskScreen({
     const formatted = toDateInput(selectedDate);
     if (field === 'start') {
       setStartDate(formatted);
-      if (dueDate && dueDate < formatted) setDueDate('');
-      setErrors((prev) => ({ ...prev, start_date: '', due_date: '' }));
+      setErrors((prev) => ({
+        ...prev,
+        start_date: '',
+        due_date: dueDate && dueDate < formatted ? 'Finish date cannot be earlier than start date.' : '',
+      }));
     } else {
       setDueDate(formatted);
-      setErrors((prev) => ({ ...prev, due_date: '' }));
+      setErrors((prev) => ({
+        ...prev,
+        due_date: startDate && formatted < startDate ? 'Finish date cannot be earlier than start date.' : '',
+      }));
     }
   };
 
@@ -362,68 +482,6 @@ export default function AddTaskScreen({
       setSubmitting(false);
     }
   };
-
-  const FieldError = ({ name }: { name: string }) =>
-    errors[name] ? <Text className="mt-1 text-[11px]" style={{ color: theme.danger }}>{errors[name]}</Text> : null;
-
-  const Label = ({ children }: { children: React.ReactNode }) => (
-    <Text className="mb-2 text-[12px] font-bold" style={{ color: labelColor }}>
-      {children}
-    </Text>
-  );
-
-  const FieldWrap = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
-    <View className={`mb-4 ${className}`}>{children}</View>
-  );
-
-  const SelectField = ({
-    value,
-    placeholder,
-    onPress,
-    disabled = false,
-  }: {
-    value: string;
-    placeholder: string;
-    onPress: () => void;
-    disabled?: boolean;
-  }) => (
-    <TouchableOpacity
-      activeOpacity={0.82}
-      disabled={disabled}
-      onPress={onPress}
-      className="h-[48px] flex-row items-center justify-between rounded-xl border px-4"
-      style={[inputStyle, disabled ? { opacity: 0.55 } : null]}
-    >
-      <Text
-        className="mr-3 flex-1 text-[14px]"
-        numberOfLines={1}
-        style={{ color: value ? theme.text : mutedColor }}
-      >
-        {value || placeholder}
-      </Text>
-      <Ionicons name="chevron-down" size={17} color={mutedColor} />
-    </TouchableOpacity>
-  );
-
-  const Section = ({
-    title,
-    icon,
-    children,
-  }: {
-    title: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    children: React.ReactNode;
-  }) => (
-    <View className="mb-3 rounded-2xl border p-3" style={{ backgroundColor: cardBg, borderColor: fieldBorder }}>
-      <View className="mb-3 flex-row items-center">
-        <View className="mr-2 h-7 w-7 items-center justify-center rounded-lg" style={{ backgroundColor: theme.primaryLight }}>
-          <Ionicons name={icon} size={16} color={theme.primary} />
-        </View>
-        <Text className="text-[14px] font-bold" style={{ color: labelColor }}>{title}</Text>
-      </View>
-      {children}
-    </View>
-  );
 
   const SelectorSheet = () => {
     if (!selectorConfig) return null;
@@ -553,21 +611,22 @@ export default function AddTaskScreen({
               </View>
             ) : (
               <>
-                <Section title="Project Details" icon="folder-open-outline">
+                <Section title="Project Details" icon="folder-open-outline" {...sectionStyleProps}>
                   <FieldWrap className="mb-0">
-                    <Label>Project *</Label>
+                    <FormLabel color={labelColor}>Project *</FormLabel>
                     <SelectField
                       value={selectedProjectLabel}
                       placeholder="Select project"
                       onPress={() => openSelector('project')}
+                      {...selectStyleProps}
                     />
-                    <FieldError name="project_id" />
+                    <FieldErrorText message={errors.project_id} color={theme.danger} />
                   </FieldWrap>
                 </Section>
 
-                <Section title="Task Information" icon="document-text-outline">
+                <Section title="Task Information" icon="document-text-outline" {...sectionStyleProps}>
                   <FieldWrap>
-                    <Label>Task Title *</Label>
+                    <FormLabel color={labelColor}>Task Title *</FormLabel>
                     <TextInput
                       value={title}
                       onChangeText={(value) => {
@@ -580,11 +639,11 @@ export default function AddTaskScreen({
                       style={inputStyle}
                       returnKeyType="next"
                     />
-                    <FieldError name="title" />
+                    <FieldErrorText message={errors.title} color={theme.danger} />
                   </FieldWrap>
 
                   <FieldWrap className="mb-0">
-                    <Label>Task Description (optional)</Label>
+                    <FormLabel color={labelColor}>Task Description (optional)</FormLabel>
                     <TextInput
                       value={description}
                       onChangeText={setDescription}
@@ -598,57 +657,77 @@ export default function AddTaskScreen({
                   </FieldWrap>
                 </Section>
 
-                <Section title="Assignment" icon="people-outline">
+                <Section title="Assignment" icon="people-outline" {...sectionStyleProps}>
                   <FieldWrap>
-                    <Label>Assigned To *</Label>
+                    <FormLabel color={labelColor}>Assigned To *</FormLabel>
                     <SelectField
                       value={selectedAssigneeLabel}
                       placeholder="Select assignee"
                       onPress={() => openSelector('assignedTo')}
+                      {...selectStyleProps}
                     />
-                    <FieldError name="assigned_to" />
+                    <FieldErrorText message={errors.assigned_to} color={theme.danger} />
                   </FieldWrap>
 
                   <FieldWrap className="mb-0">
-                    <Label>Priority Level *</Label>
+                    <FormLabel color={labelColor}>Priority Level *</FormLabel>
                     <SelectField
                       value={selectedPriorityLabel}
                       placeholder="Select priority"
                       onPress={() => openSelector('priority')}
+                      {...selectStyleProps}
                     />
-                    <FieldError name="priority" />
+                    <FieldErrorText message={errors.priority} color={theme.danger} />
                   </FieldWrap>
                 </Section>
 
-                <Section title="Schedule" icon="calendar-outline">
-                  <View className="flex-row gap-3">
-                    <FieldWrap className="flex-1 mb-0">
-                    <Label>Task Start *</Label>
+                <Section title="Schedule" icon="calendar-outline" {...sectionStyleProps}>
+                  <FieldWrap>
+                    <FormLabel color={labelColor}>Start Date *</FormLabel>
                     <TouchableOpacity
-                      onPress={() => setShowStartPicker(true)}
-                      className="h-[48px] flex-row items-center justify-between rounded-xl border px-3"
-                      style={inputStyle}>
-                      <Text className="text-[13px]" style={{ color: startDate ? theme.text : mutedColor }}>
-                        {displayDate(startDate)}
-                      </Text>
+                      onPress={() => {
+                        setShowEndPicker(false);
+                        setShowStartPicker((current) => !current);
+                      }}
+                      className="h-[52px] flex-row items-center justify-between rounded-xl border px-4"
+                      style={[
+                        inputStyle,
+                        showStartPicker ? { borderColor: theme.primary, backgroundColor: theme.primaryLight } : null,
+                      ]}>
+                      <View>
+                        <Text className="text-[10px] font-semibold uppercase" style={{ color: mutedColor }}>Starts</Text>
+                        <Text className="mt-0.5 text-[14px] font-semibold" style={{ color: startDate ? theme.text : mutedColor }}>
+                          {displayDate(startDate)}
+                        </Text>
+                      </View>
                       <Ionicons name="calendar-outline" size={16} color={mutedColor} />
                     </TouchableOpacity>
-                    <FieldError name="start_date" />
-                    </FieldWrap>
-                    <FieldWrap className="flex-1 mb-0">
-                    <Label>Task Until *</Label>
+                    <FieldErrorText message={errors.start_date} color={theme.danger} />
+                  </FieldWrap>
+
+                  <FieldWrap className="mb-0">
+                    <FormLabel color={labelColor}>Finish Date *</FormLabel>
                     <TouchableOpacity
-                      onPress={() => setShowEndPicker(true)}
-                      className="h-[48px] flex-row items-center justify-between rounded-xl border px-3"
-                      style={inputStyle}>
-                      <Text className="text-[13px]" style={{ color: dueDate ? theme.text : mutedColor }}>
-                        {displayDate(dueDate)}
-                      </Text>
+                      onPress={() => {
+                        setShowStartPicker(false);
+                        setShowEndPicker((current) => !current);
+                      }}
+                      className="h-[52px] flex-row items-center justify-between rounded-xl border px-4"
+                      style={[
+                        inputStyle,
+                        showEndPicker ? { borderColor: theme.primary, backgroundColor: theme.primaryLight } : null,
+                        errors.due_date ? { borderColor: theme.danger } : null,
+                      ]}>
+                      <View>
+                        <Text className="text-[10px] font-semibold uppercase" style={{ color: mutedColor }}>Finishes</Text>
+                        <Text className="mt-0.5 text-[14px] font-semibold" style={{ color: dueDate ? theme.text : mutedColor }}>
+                          {displayDate(dueDate)}
+                        </Text>
+                      </View>
                       <Ionicons name="calendar-outline" size={16} color={mutedColor} />
                     </TouchableOpacity>
-                    <FieldError name="due_date" />
-                    </FieldWrap>
-                  </View>
+                    <FieldErrorText message={errors.due_date} color={theme.danger} />
+                  </FieldWrap>
 
                   {showStartPicker && (
                     <DateTimePicker
@@ -661,7 +740,6 @@ export default function AddTaskScreen({
                   {showEndPicker && (
                     <DateTimePicker
                       value={parseDate(dueDate || startDate)}
-                      minimumDate={startDate ? parseDate(startDate) : undefined}
                       mode="date"
                       display={Platform.OS === 'ios' ? 'inline' : 'default'}
                       onChange={(event, date) => onDateChange(event, date, 'end')}
@@ -669,7 +747,7 @@ export default function AddTaskScreen({
                   )}
                 </Section>
 
-                <Section title="Attachments" icon="attach-outline">
+                <Section title="Attachments" icon="attach-outline" {...sectionStyleProps}>
                   <View className="flex-row items-center">
                     <TouchableOpacity
                       onPress={pickAttachment}

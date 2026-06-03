@@ -2,7 +2,7 @@ import './global.css';
 import { useCallback, useState, useEffect } from 'react';
 import HomeScreen from './screens/home/HomeScreen';
 import LoginScreen from './screens/auth/LoginScreen';
-import ForgotPasswordScreen, { PASSWORD_RESET_REDIRECT_URL } from './screens/auth/ForgotPasswordScreen';
+import ForgotPasswordScreen from './screens/auth/ForgotPasswordScreen';
 import ResetPasswordScreen from './screens/auth/ResetPasswordScreen';
 import { StatusBar } from 'expo-status-bar';
 import { View, Platform } from 'react-native';
@@ -14,6 +14,7 @@ import * as Linking from 'expo-linking';
 import { API_URL, loadStoredApiUrl } from './lib/api';
 import { supabase } from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
+import { getDeepLinkParams, isResetPasswordUrl } from './lib/passwordRecovery';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText } from './components/skeletons';
 
@@ -36,35 +37,6 @@ export interface UserInfo {
 }
 
 type AuthScreen = 'login' | 'forgot' | 'reset';
-
-function isResetPasswordUrl(url: string) {
-  if (url.startsWith(PASSWORD_RESET_REDIRECT_URL) || url.includes('reset-password')) return true;
-
-  const parsed = Linking.parse(url);
-  return parsed.hostname === 'reset-password' || parsed.path === 'reset-password';
-}
-
-function getDeepLinkParams(url: string) {
-  const params = new URLSearchParams();
-  const queryStart = url.indexOf('?');
-  const hashStart = url.indexOf('#');
-
-  const appendParams = (value: string) => {
-    new URLSearchParams(value).forEach((paramValue, key) => {
-      params.set(key, paramValue);
-    });
-  };
-
-  if (queryStart !== -1) {
-    appendParams(url.slice(queryStart + 1, hashStart === -1 ? undefined : hashStart));
-  }
-
-  if (hashStart !== -1) {
-    appendParams(url.slice(hashStart + 1));
-  }
-
-  return params;
-}
 
 function AppContent() {
   const [user, setUser] = useState<UserInfo | null>(null);
