@@ -445,7 +445,7 @@ export default function AddTaskScreen({
       formData.append('description', description.trim());
       formData.append('assigned_to', assignedTo);
       formData.append('priority', priority);
-      formData.append('status', 'todo');
+      formData.append('status', 'pending');
       formData.append('start_date', startDate);
       formData.append('due_date', dueDate);
       formData.append('created_by', String(userId));

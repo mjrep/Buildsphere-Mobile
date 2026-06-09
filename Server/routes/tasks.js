@@ -23,6 +23,32 @@ const CREATOR_ROLES = new Set([
 const attachmentDir = path.join(__dirname, '../uploads/task_attachments');
 fs.mkdirSync(attachmentDir, { recursive: true });
 
+function normalizeImageUrl(value) {
+  if (!value) return null;
+
+  if (Array.isArray(value)) {
+    return normalizeImageUrl(value[0]);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return normalizeImageUrl(parsed[0]);
+      } catch (error) {
+        return trimmed;
+      }
+    }
+
+    return trimmed;
+  }
+
+  return null;
+}
+
 const attachmentStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, attachmentDir),
   filename: (_req, file, cb) => {
@@ -40,8 +66,8 @@ const uploadTaskAttachments = multer({
 });
 
 function normalizeStatus(status) {
-  const normalized = String(status || 'todo').toLowerCase().replace('-', '_');
-  return normalized === 'pending' ? 'todo' : normalized;
+  const normalized = String(status || 'pending').toLowerCase().replace('-', '_');
+  return normalized === 'todo' ? 'pending' : normalized;
 }
 
 function mobileStatus(status) {
@@ -93,9 +119,9 @@ function validateTaskPayload(body) {
   if (!Number.isFinite(assigneeId) || assigneeId <= 0) errors.assigned_to = 'Assigned user is required.';
   if (!TASK_PRIORITIES.has(priority)) errors.priority = 'Priority must be low, medium, high, or urgent.';
   if (!startDate) errors.start_date = 'Start date is required.';
-  if (!dueDate) errors.due_date = 'End date is required.';
+  if (!dueDate) errors.due_date = 'Finish date is required.';
   if (startDate && dueDate && dueDate < startDate) {
-    errors.due_date = 'End date cannot be earlier than start date.';
+    errors.due_date = 'Finish date cannot be earlier than start date.';
   }
 
   return {
@@ -167,7 +193,7 @@ router.get('/meta', async (_req, res) => {
         { value: 'urgent', label: 'Urgent' },
       ],
       statuses: [
-        { value: 'todo', label: 'To Do' },
+        { value: 'pending', label: 'To Do' },
         { value: 'in_progress', label: 'In Progress' },
         { value: 'in_review', label: 'In Review' },
         { value: 'completed', label: 'Completed' },
@@ -196,7 +222,12 @@ router.get('/:taskId/progress', async (req, res) => {
        ORDER BY tpl.created_at DESC`,
       [taskId]
     );
-    res.json(result.rows);
+    res.json(
+      result.rows.map((row) => ({
+        ...row,
+        evidence_image_path: normalizeImageUrl(row.evidence_image_path),
+      }))
+    );
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch task progress.' });
@@ -337,19 +368,21 @@ router.post(
 
     const projectName = (await pool.query('SELECT project_name FROM projects WHERE id = $1', [values.projectId])).rows[0]?.project_name || 'this project';
 
-    // Phase 2: Use sendPushNotificationToUser which handles both Push and DB persistence
-    // This avoids duplicate entries and ensures reference_url is set.
-    await sendPushNotificationToUser(
-      values.assigneeId,
-      'New Task Assigned',
-      `You have been assigned a new task: '${values.title}' for ${projectName}.`,
-      {
-        type: 'INFO',
-        screen: 'TaskDetails',
-        task_id: String(task.id),
-        project_id: String(values.projectId),
-      }
-    );
+    try {
+      await sendPushNotificationToUser(
+        values.assigneeId,
+        'New Task Assigned',
+        `You have been assigned a new task: '${values.title}' for ${projectName}.`,
+        {
+          type: 'task_assigned',
+          screen: 'TaskDetails',
+          task_id: String(task.id),
+          project_id: String(values.projectId),
+        }
+      );
+    } catch (notificationError) {
+      console.warn('Task created, but assignment notification failed:', notificationError.message);
+    }
 
     const createdTaskResult = await pool.query(
       `SELECT
@@ -369,8 +402,11 @@ router.post(
 
     res.status(201).json(formatTask(createdTaskResult.rows[0] || task));
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create task.' });
+    console.error('CREATE_TASK_ERROR:', err);
+    res.status(500).json({
+      error: 'Failed to create task.',
+      detail: process.env.NODE_ENV === 'production' ? undefined : err.message,
+    });
   }
   }
 );
@@ -385,6 +421,14 @@ router.patch('/:id', async (req, res) => {
 
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No fields provided for update.' });
+  }
+
+  if (updates.status !== undefined) {
+    const normalizedStatus = normalizeStatus(updates.status);
+    if (!TASK_STATUSES.has(normalizedStatus)) {
+      return res.status(400).json({ error: 'Invalid task status.' });
+    }
+    updates.status = normalizedStatus;
   }
 
   const keys = Object.keys(updates);
@@ -426,7 +470,7 @@ router.patch('/:id', async (req, res) => {
         'Task Status Updated',
         `Task "${currentTask.title}" is now ${updates.status}.`,
         {
-          type: 'task_status_updated',
+          type: 'task_updated',
           screen: 'TaskDetails',
           task_id: String(updatedTask.id),
           project_id: String(updatedTask.project_id || currentTask.project_id || ''),

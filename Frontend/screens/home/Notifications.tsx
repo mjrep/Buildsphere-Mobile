@@ -43,6 +43,7 @@ interface NotificationsProps {
   onNavigateToProject?: (projectId: number) => void;
   onNavigateToSiteProgress?: (projectId?: number, taskId?: number, siteProgressId?: number) => void;
   onNavigateToTab?: (tab: 'home' | 'mywork' | 'notifications' | 'more') => void;
+  onUnreadCountChange?: (count: number) => void;
 }
 
 type NotificationRoute =
@@ -55,7 +56,7 @@ type NotificationRoute =
 
 const TYPE_GROUPS = {
   inventory: ['WARNING', 'LOW_STOCK', 'CRITICAL_STOCK', 'INVENTORY_LOW_STOCK'],
-  task: ['TASK_PROGRESS', 'PROGRESS_RECORDED', 'TASK_PROGRESS_RECORDED', 'TASK_READY_FOR_REVIEW', 'TASK_REVIEW', 'TASK_STATUS_UPDATED', 'INFO'],
+  task: ['TASK_ASSIGNED', 'TASK_UPDATED', 'TASK_PROGRESS', 'PROGRESS_RECORDED', 'TASK_PROGRESS_RECORDED', 'TASK_READY_FOR_REVIEW', 'TASK_REVIEW', 'TASK_STATUS_UPDATED', 'INFO'],
   siteProgress: ['GLASS_ANALYSIS_COMPLETE', 'GLASS_ANALYSIS_COMPLETED', 'AI_ANALYSIS', 'SITE_PROGRESS_UPLOADED', 'NEW_SITE_PROGRESS_UPDATE', 'SITE_PROGRESS_RECORDED'],
   project: ['PROJECT_UPDATE', 'MILESTONE_UPDATE', 'MILESTONE_UPDATED', 'PROJECT_DELAY_WARNING'],
   comment: ['COMMENT', 'MENTION', 'COMMENT_MENTION'],
@@ -174,6 +175,7 @@ export default function Notifications({
   onNavigateToProject,
   onNavigateToSiteProgress,
   onNavigateToTab,
+  onUnreadCountChange,
 }: NotificationsProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -217,8 +219,11 @@ export default function Notifications({
         (payload) => {
           const newNotif = payload.new as any;
           if (newNotif) {
-            setNotifications((prev) => [
-              {
+            setNotifications((prev) => {
+              if (prev.some((item) => String(item.id) === String(newNotif.id))) return prev;
+
+              return [
+                {
                 id: newNotif.id,
                 type: newNotif.type || 'INFO',
                 title: newNotif.title || '',
@@ -228,9 +233,10 @@ export default function Notifications({
                 metadata: newNotif.data || null,
                 reference_url: newNotif.reference_url || null,
                 created_at: newNotif.created_at,
-              } as any,
-              ...prev,
-            ]);
+                } as any,
+                ...prev,
+              ];
+            });
           }
         }
       )
@@ -248,8 +254,22 @@ export default function Notifications({
   }, [fetchNotifications]);
 
   const getIcon = (type: string) => {
-    const normalized: string = LEGACY_NOTIFICATION_TYPE_MAP[type] || type;
+    const normalized = normalizeType(type);
     switch (normalized) {
+      case 'TASK_ASSIGNED':
+      case 'TASK_UPDATED':
+      case 'TASK_PROGRESS':
+      case 'TASK_PROGRESS_RECORDED':
+        return 'briefcase-outline';
+      case 'INVENTORY_LOW_STOCK':
+      case 'CRITICAL_STOCK':
+      case 'LOW_STOCK':
+        return 'cube-outline';
+      case 'SITE_PROGRESS_UPLOADED':
+      case 'GLASS_ANALYSIS_COMPLETED':
+        return 'cloud-upload-outline';
+      case 'COMMENT_ADDED':
+        return 'chatbox-outline';
       case 'WARNING':
         return 'warning-outline';
       case 'SUCCESS':
@@ -272,8 +292,22 @@ export default function Notifications({
 
 
   const getColor = (type: string) => {
-    const normalized: string = LEGACY_NOTIFICATION_TYPE_MAP[type] || type;
+    const normalized = normalizeType(type);
     switch (normalized) {
+      case 'TASK_ASSIGNED':
+      case 'TASK_UPDATED':
+      case 'TASK_PROGRESS':
+      case 'TASK_PROGRESS_RECORDED':
+        return '#7370FF';
+      case 'INVENTORY_LOW_STOCK':
+      case 'CRITICAL_STOCK':
+      case 'LOW_STOCK':
+        return '#FF9F43';
+      case 'SITE_PROGRESS_UPLOADED':
+      case 'GLASS_ANALYSIS_COMPLETED':
+        return '#4DABF7';
+      case 'COMMENT_ADDED':
+        return '#4DABF7';
       case 'WARNING':
         return '#FF9F43';
       case 'SUCCESS':
@@ -297,18 +331,22 @@ export default function Notifications({
   const markAsRead = async (id: number) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
     try {
-      await fetch(`${API_URL}/notifications/${id}/read`, { method: 'PATCH' });
+      const res = await fetch(`${API_URL}/notifications/${id}/read?userId=${userId}`, { method: 'PATCH' });
+      if (!res.ok) throw new Error('Failed to mark as read.');
     } catch (err) {
       console.error('Failed to mark as read:', err);
+      await fetchNotifications();
     }
   };
 
   const markAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     try {
-      await fetch(`${API_URL}/notifications/read-all?userId=${userId}`, { method: 'PATCH' });
+      const res = await fetch(`${API_URL}/notifications/read-all?userId=${userId}`, { method: 'PATCH' });
+      if (!res.ok) throw new Error('Failed to mark all as read.');
     } catch (err) {
       console.error('Failed to mark all as read:', err);
+      await fetchNotifications();
     }
   };
 
@@ -321,9 +359,11 @@ export default function Notifications({
         onPress: async () => {
           setNotifications((prev) => prev.filter((n) => n.id !== id));
           try {
-            await fetch(`${API_URL}/notifications/${id}`, { method: 'DELETE' });
+            const res = await fetch(`${API_URL}/notifications/${id}?userId=${userId}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Failed to delete notification.');
           } catch (err) {
             console.error('Failed to delete notification:', err);
+            await fetchNotifications();
           }
         },
       },
@@ -395,6 +435,10 @@ export default function Notifications({
 
   const filtered = filter === 'unread' ? notifications.filter((n) => !n.is_read) : notifications;
   const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+  useEffect(() => {
+    onUnreadCountChange?.(unreadCount);
+  }, [onUnreadCountChange, unreadCount]);
 
   // Format the time display with relative timestamps
   const formatTime = (time: string, createdAt?: string) => {
@@ -523,7 +567,7 @@ export default function Notifications({
                   <Ionicons
                     name={getIcon(notif.type) as any}
                     size={22}
-                    color={theme.primary}
+                    color={getColor(notif.type)}
                   />
                 </View>
 

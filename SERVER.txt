@@ -1,3 +1,3 @@
-Node Backend: cd Server/npm start
-Expo Frontend: cd Frontend && npx expo start -c
-Gemini panel counting: configured in Server/.env with GEMINI_API_KEY, GEMINI_MODEL, and AI_ANALYSIS_MODE
+Node backend: cd Server && npm start
+Expo frontend: cd Frontend && npx expo start -c
+Gemini-only panel counting: mobile uploads images to Express, and Express calls Gemini with keys from Server/.env.

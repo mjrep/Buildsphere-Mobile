@@ -221,13 +221,6 @@ export default function HomeScreen({
     setPrefilledTask(null);
     setActiveTab(tab);
 
-    if (tab === 'notifications') {
-      if (unreadCount > 0) {
-        fetch(`${API_URL}/notifications/read-all?userId=${user.id}`, { method: 'PATCH' })
-          .catch((err) => console.error('Batch read error:', err));
-      }
-      setUnreadCount(0);
-    }
   };
 
   const fetchProjects = () => {
@@ -323,6 +316,11 @@ export default function HomeScreen({
                 userId={user.id}
                 canViewHome={perms.canViewDashboard}
                 unreadCount={unreadCount}
+                onViewInventory={(projectId) => {
+                  setInventoryProjectId(projectId);
+                  setHighlightInventoryItemId(null);
+                  setShowInventory(true);
+                }}
                 onBack={() => {
                   setSelectedProjectId(null);
                   fetchProjects();
@@ -434,6 +432,7 @@ export default function HomeScreen({
             onNavigateToProject={handleNotifNavigateToProject}
             onNavigateToSiteProgress={handleNotifNavigateToSiteProgress}
             onNavigateToTab={setActiveTab}
+            onUnreadCountChange={setUnreadCount}
           />
         ) : (
           <MoreScreen user={user} onLogout={onLogout} onUserUpdated={onUserUpdated} />

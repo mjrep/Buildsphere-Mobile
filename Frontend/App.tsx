@@ -1,8 +1,10 @@
 import './global.css';
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import HomeScreen from './screens/home/HomeScreen';
 import LoginScreen from './screens/auth/LoginScreen';
 import ForgotPasswordScreen from './screens/auth/ForgotPasswordScreen';
+import VerifyResetOtpScreen from './screens/auth/VerifyResetOtpScreen';
+import CreateNewPasswordScreen from './screens/auth/CreateNewPasswordScreen';
 import ResetPasswordScreen from './screens/auth/ResetPasswordScreen';
 import { StatusBar } from 'expo-status-bar';
 import { View, Platform } from 'react-native';
@@ -12,7 +14,7 @@ import type { UserRole } from './constants/roles';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
 import { API_URL, loadStoredApiUrl } from './lib/api';
-import { supabase } from './lib/supabase';
+import { clearInvalidSupabaseSession, isInvalidRefreshTokenError, supabase } from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
 import { getDeepLinkParams, isResetPasswordUrl } from './lib/passwordRecovery';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
@@ -36,7 +38,7 @@ export interface UserInfo {
   role: UserRole;
 }
 
-type AuthScreen = 'login' | 'forgot' | 'reset';
+type AuthScreen = 'login' | 'forgot' | 'verify-reset-otp' | 'create-new-password' | 'reset';
 
 function AppContent() {
   const [user, setUser] = useState<UserInfo | null>(null);
@@ -45,7 +47,19 @@ function AppContent() {
   const [authScreen, setAuthScreen] = useState<AuthScreen>('login');
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryError, setRecoveryError] = useState('');
+  const [authNotice, setAuthNotice] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
+  const otpRecoveryFlowRef = useRef(false);
   const { theme, isDark } = useAppTheme();
+
+  const clearAppSession = useCallback(async () => {
+    await AsyncStorage.multiRemove(['user', 'token']);
+    setUser(null);
+    setPendingNotificationData(null);
+    setAuthScreen('login');
+    setResetEmail('');
+    otpRecoveryFlowRef.current = false;
+  }, []);
 
   const handleRecoveryUrl = useCallback(async (url: string) => {
     if (!isResetPasswordUrl(url)) return;
@@ -67,7 +81,13 @@ function AppContent() {
       const linkError = params.get('error_description') || params.get('error');
 
       if (linkError) {
-        setRecoveryError(linkError.replace(/\+/g, ' '));
+        const readableError = linkError.replace(/\+/g, ' ');
+        const lowerError = readableError.toLowerCase();
+        setRecoveryError(
+          lowerError.includes('expired') || lowerError.includes('invalid')
+            ? 'This reset link is invalid or expired. Please request a new password reset email.'
+            : readableError
+        );
         return;
       }
 
@@ -95,9 +115,21 @@ function AppContent() {
         return;
       }
 
-      setRecoveryError('This password reset link is missing or expired. Please request a new reset link.');
+      setRecoveryError('This reset link is invalid or expired. Please request a new password reset email.');
     } catch (error) {
-      setRecoveryError(error instanceof Error ? error.message : 'Could not open password recovery link.');
+      const message = error instanceof Error ? error.message : 'Could not open password recovery link.';
+      const lowerMessage = message.toLowerCase();
+      if (isInvalidRefreshTokenError(error)) {
+        await clearInvalidSupabaseSession();
+        await AsyncStorage.multiRemove(['user', 'token']);
+      }
+      setRecoveryError(
+        isInvalidRefreshTokenError(error) ||
+          lowerMessage.includes('expired') ||
+          lowerMessage.includes('invalid')
+          ? 'This reset link is invalid or expired. Please request a new password reset email.'
+          : message
+      );
     } finally {
       setRecoveryLoading(false);
     }
@@ -106,20 +138,52 @@ function AppContent() {
   // Restore server URL and session from storage
   useEffect(() => {
     const restoreAppState = async () => {
-      await loadStoredApiUrl();
-      const stored = await AsyncStorage.getItem('user');
-      if (stored) {
-        let parsed = JSON.parse(stored);
-        // Normalize snake_case to camelCase for legacy sessions
-        if (parsed.first_name && !parsed.firstName) parsed.firstName = parsed.first_name;
-        if (parsed.middle_name && !parsed.middleName) parsed.middleName = parsed.middle_name;
-        if (parsed.last_name && !parsed.lastName) parsed.lastName = parsed.last_name;
-        if (parsed.phone_number && !parsed.phoneNumber) parsed.phoneNumber = parsed.phone_number;
-        // Default role for legacy sessions
-        if (!parsed.role) parsed.role = 'general_staff';
-        setUser(parsed);
+      try {
+        await loadStoredApiUrl();
+
+        const { data, error } = await supabase.auth.getSession();
+
+        if (error) {
+          if (isInvalidRefreshTokenError(error)) {
+            await clearInvalidSupabaseSession();
+            await AsyncStorage.multiRemove(['user', 'token']);
+            setUser(null);
+            setAuthNotice('Your session expired. Please log in again.');
+            return;
+          }
+          throw error;
+        }
+
+        if (!data.session) {
+          await AsyncStorage.multiRemove(['user', 'token']);
+          setUser(null);
+          return;
+        }
+
+        const stored = await AsyncStorage.getItem('user');
+        if (stored) {
+          let parsed = JSON.parse(stored);
+          // Normalize snake_case to camelCase for legacy sessions
+          if (parsed.first_name && !parsed.firstName) parsed.firstName = parsed.first_name;
+          if (parsed.middle_name && !parsed.middleName) parsed.middleName = parsed.middle_name;
+          if (parsed.last_name && !parsed.lastName) parsed.lastName = parsed.last_name;
+          if (parsed.phone_number && !parsed.phoneNumber) parsed.phoneNumber = parsed.phone_number;
+          // Default role for legacy sessions
+          if (!parsed.role) parsed.role = 'general_staff';
+          setUser(parsed);
+        }
+      } catch (error) {
+        if (isInvalidRefreshTokenError(error)) {
+          await clearInvalidSupabaseSession();
+          await AsyncStorage.multiRemove(['user', 'token']);
+          setUser(null);
+          setAuthNotice('Your session expired. Please log in again.');
+        } else {
+          console.warn('Could not restore auth session:', error);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     restoreAppState();
@@ -128,25 +192,47 @@ function AppContent() {
   const handleLogin = async (loggedInUser: UserInfo, token: string) => {
     await AsyncStorage.setItem('user', JSON.stringify(loggedInUser));
     await AsyncStorage.setItem('token', token);
+    setAuthNotice('');
     setUser(loggedInUser);
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    await AsyncStorage.removeItem('user');
-    await AsyncStorage.removeItem('token');
-    setUser(null);
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      if (isInvalidRefreshTokenError(error)) {
+        await clearInvalidSupabaseSession();
+      } else {
+        console.warn('Supabase signout failed:', error);
+      }
+    } finally {
+      await clearAppSession();
+    }
   };
 
   const handleBackToLogin = async () => {
-    await supabase.auth.signOut();
-    await AsyncStorage.removeItem('user');
-    await AsyncStorage.removeItem('token');
-    setUser(null);
-    setAuthScreen('login');
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      if (isInvalidRefreshTokenError(error)) {
+        await clearInvalidSupabaseSession();
+      } else {
+        console.warn('Supabase signout cleanup failed:', error);
+      }
+    } finally {
+      await clearAppSession();
+      setRecoveryLoading(false);
+      setRecoveryError('');
+      setResetEmail('');
+      otpRecoveryFlowRef.current = false;
+    }
+  };
+
+  const handleRequestNewResetLink = useCallback(() => {
     setRecoveryLoading(false);
     setRecoveryError('');
-  };
+    setAuthScreen('forgot');
+  }, []);
 
   const handleUserUpdated = async (updated: UserInfo) => {
     await AsyncStorage.setItem('user', JSON.stringify(updated));
@@ -176,11 +262,30 @@ function AppContent() {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setUser(null);
-        AsyncStorage.removeItem('user');
-        AsyncStorage.removeItem('token');
+        AsyncStorage.multiRemove(['user', 'token']);
+        if (otpRecoveryFlowRef.current) {
+          setRecoveryLoading(false);
+          setRecoveryError('');
+          return;
+        }
         setAuthScreen('reset');
         setRecoveryLoading(false);
         setRecoveryError('');
+        return;
+      }
+
+      if (event === 'SIGNED_OUT') {
+        AsyncStorage.multiRemove(['user', 'token']);
+        setUser(null);
+        setPendingNotificationData(null);
+        setAuthScreen('login');
+        setResetEmail('');
+        otpRecoveryFlowRef.current = false;
+        return;
+      }
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        setAuthNotice('');
       }
     });
 
@@ -252,6 +357,7 @@ function AppContent() {
           recoveryLoading={recoveryLoading}
           recoveryError={recoveryError}
           onBackToLogin={handleBackToLogin}
+          onRequestNewLink={handleRequestNewResetLink}
         />
       </SafeAreaProvider>
     );
@@ -277,7 +383,37 @@ function AppContent() {
     return (
       <SafeAreaProvider>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <ForgotPasswordScreen onBackToLogin={() => setAuthScreen('login')} />
+        <ForgotPasswordScreen
+          onBackToLogin={handleBackToLogin}
+          onOtpSent={(email) => {
+            setResetEmail(email);
+            otpRecoveryFlowRef.current = true;
+            setAuthScreen('verify-reset-otp');
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (authScreen === 'verify-reset-otp') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <VerifyResetOtpScreen
+          email={resetEmail}
+          onBack={() => setAuthScreen('forgot')}
+          onBackToLogin={handleBackToLogin}
+          onVerified={() => setAuthScreen('create-new-password')}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (authScreen === 'create-new-password') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <CreateNewPasswordScreen onBackToLogin={handleBackToLogin} />
       </SafeAreaProvider>
     );
   }
@@ -285,7 +421,11 @@ function AppContent() {
   return (
     <SafeAreaProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <LoginScreen onLogin={handleLogin} onForgotPassword={() => setAuthScreen('forgot')} />
+      <LoginScreen
+        onLogin={handleLogin}
+        onForgotPassword={() => setAuthScreen('forgot')}
+        authNotice={authNotice}
+      />
     </SafeAreaProvider>
   );
 }

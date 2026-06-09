@@ -104,7 +104,7 @@ export default function InventoryScreen({
   const canAdd = perms.canAddInventory;
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const headerTopPadding = Math.max(insets.top - 28, Platform.OS === 'ios' ? 20 : 12);
+  const headerTopPadding = Math.max(insets.top + 10, Platform.OS === 'ios' ? 64 : 20);
 
   const [activeTab, setActiveTab] = useState<'items' | 'logs'>('items');
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -294,18 +294,18 @@ export default function InventoryScreen({
     switch (action) {
       case 'CONSUMPTION':
         return {
-          title: 'Confirm material consumption?',
-          message: 'This will reduce stock, link to the selected task, and cannot be edited after saving.',
+          title: 'Confirm inventory log?',
+          message: 'This will permanently reduce stock and link the log to the selected task. Inventory logs cannot be edited after saving, so please check that the item, quantity, and notes are correct.',
         };
       case 'SPOILAGE':
         return {
-          title: 'Confirm spoilage transaction?',
-          message: 'This will reduce stock and cannot be edited after saving.',
+          title: 'Confirm inventory log?',
+          message: 'This will permanently reduce stock for spoilage. Inventory logs cannot be edited after saving, so please check that the item, quantity, and notes are correct.',
         };
       default:
         return {
-          title: 'Confirm receiving transaction?',
-          message: 'This will increase stock and the inventory log cannot be edited after saving.',
+          title: 'Confirm inventory log?',
+          message: 'This will permanently increase stock. Inventory logs cannot be edited after saving, so please check that the item, quantity, and notes are correct.',
         };
     }
   };
@@ -420,7 +420,7 @@ export default function InventoryScreen({
     const confirmation = getTransactionConfirmation(txnAction);
     Alert.alert(confirmation.title, confirmation.message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Confirm', onPress: submitTransaction },
+      { text: 'Confirm Save', onPress: submitTransaction },
     ]);
   };
 
@@ -490,7 +490,7 @@ export default function InventoryScreen({
     const confirmation = getTransactionConfirmation(logActionType);
     Alert.alert(confirmation.title, confirmation.message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Confirm', onPress: submitAddLog },
+      { text: 'Confirm Save', onPress: submitAddLog },
     ]);
   };
 
@@ -854,7 +854,7 @@ export default function InventoryScreen({
                 <View className="flex-1 pr-3">
                   <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Record Transaction</Text>
                   <Text className="mt-2 rounded-xl border px-3 py-2 text-[12px] leading-5" style={{ color: theme.textMuted, backgroundColor: theme.input, borderColor: theme.border }}>
-                    Inventory logs are final once saved. Please review before confirming.
+                    Inventory logs are permanent once saved and cannot be edited. Please review everything before confirming.
                   </Text>
                 </View>
                 <TouchableOpacity onPress={closeTransactionModal} className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
@@ -906,7 +906,7 @@ export default function InventoryScreen({
                 <View className="flex-1 pr-3">
                   <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Log</Text>
                   <Text className="mt-2 rounded-xl border px-3 py-2 text-[12px] leading-5" style={{ color: theme.textMuted, backgroundColor: theme.input, borderColor: theme.border }}>
-                    Inventory logs are final once saved. Please review before confirming.
+                    Inventory logs are permanent once saved and cannot be edited. Please review everything before confirming.
                   </Text>
                 </View>
                 <TouchableOpacity onPress={closeAddLogModal} className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
@@ -956,7 +956,7 @@ export default function InventoryScreen({
               <TextInput value={logNotes} onChangeText={setLogNotes} style={inputStyle} placeholder="Remarks / notes" placeholderTextColor={theme.textMuted} />
               </ScrollView>
               <TouchableOpacity onPress={handleAddLog} disabled={saving} className="h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Save Log</Text>}
+                {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Review & Save Log</Text>}
               </TouchableOpacity>
             </View>
             </TouchableWithoutFeedback>

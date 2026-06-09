@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { API_URL } from '../../lib/api';
 import { UserInfo } from '../../App';
-import { hybridGlassAudit, CVDetection, CVAuditResult } from '../../lib/generative-ai';
+import { analyzeGlassPanelsWithGemini, GeminiAuditResult } from '../../lib/generative-ai';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
 
@@ -45,9 +45,6 @@ interface SelectedPhoto {
 interface PhotoAnalysisResult {
   photoIndex: number;
   count: number;
-  partialPanels: number;
-  unclearPanels: number;
-  excludedPanels: number;
   avgConfidence: number;
   detectionMode: string;
   hasWarnings: boolean;
@@ -65,8 +62,8 @@ const PRIMARY = '#7370FF';
 // Analysis status states for user feedback
 type AnalysisStatus =
   | 'idle'              // No analysis started
-  | 'uploading'         // Sending image to CV service
-  | 'analyzing'         // CV service processing
+  | 'uploading'         // Sending image to backend
+  | 'analyzing'         // Gemini analysis in progress
   | 'complete'          // Analysis finished successfully
   | 'no_panels'         // Analysis complete but 0 panels found
   | 'failed';           // Analysis failed — manual entry needed
@@ -97,18 +94,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
   // ── AI detection state ──────────────────────────────
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle');
-  const [detectionMode, setDetectionMode] = useState<string>('gemini');
+  const [detectionMode, setDetectionMode] = useState<string>('gemini-only');
   const [avgConfidence, setAvgConfidence] = useState<number>(0);
   const [aiDetectedCount, setAiDetectedCount] = useState<number>(0);
   const [verifiedPanelCount, setVerifiedPanelCount] = useState<number>(0);
-  const [partialPanels, setPartialPanels] = useState<number>(0);
-  const [unclearPanels, setUnclearPanels] = useState<number>(0);
-  const [excludedPanels, setExcludedPanels] = useState<number>(0);
   const [hasWarnings, setHasWarnings] = useState<boolean>(false);
   const [warningMessage, setWarningMessage] = useState<string>('');
   const [aiSummary, setAiSummary] = useState<string>('');
-  const [detections, setDetections] = useState<CVDetection[]>([]);
-  const [annotatedImageUri, setAnnotatedImageUri] = useState<string | null>(null);
   const [photoAnalysisResults, setPhotoAnalysisResults] = useState<PhotoAnalysisResult[]>([]);
   const [analyzingPhotoIndex, setAnalyzingPhotoIndex] = useState<number | null>(null);
 
@@ -128,18 +120,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setRecordSaved(false);
     // Reset AI detection state
     setAnalysisStatus('idle');
-    setDetectionMode('gemini');
+    setDetectionMode('gemini-only');
     setAvgConfidence(0);
     setAiDetectedCount(0);
     setVerifiedPanelCount(0);
-    setPartialPanels(0);
-    setUnclearPanels(0);
-    setExcludedPanels(0);
     setHasWarnings(false);
     setWarningMessage('');
     setAiSummary('');
-    setDetections([]);
-    setAnnotatedImageUri(null);
     setPhotoAnalysisResults([]);
     setAnalyzingPhotoIndex(null);
   };
@@ -272,9 +259,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   };
 
   const handleCountGlass = async () => {
-    console.log('DEBUG: handleCountGlass triggered (Gemini)');
     if (selectedPhotos.length === 0) {
-      console.log('DEBUG: no photos, returning');
       return;
     }
 
@@ -283,21 +268,14 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setPhotoAnalysisResults([]);
     setAnalyzingPhotoIndex(0);
     setAiSummary('');
-    setPartialPanels(0);
-    setUnclearPanels(0);
-    setExcludedPanels(0);
     setHasWarnings(false);
     setWarningMessage('');
     try {
       if (selectedPhotos.length > 0) {
         const nextResults: PhotoAnalysisResult[] = [];
-        const combinedDetections: CVDetection[] = [];
         const failedPhotoNumbers: number[] = [];
         const detectionModes = new Set<string>();
         let totalCount = 0;
-        let totalPartialPanels = 0;
-        let totalUnclearPanels = 0;
-        let totalExcludedPanels = 0;
         let totalConfidence = 0;
         let confidenceCount = 0;
 
@@ -309,23 +287,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
           const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
           const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
 
-          console.log(
-            `DEBUG: Gemini analysis starting for photo ${index + 1}/${selectedPhotos.length}. ` +
-            `Mime: ${mimeType}, pickerSize=${currentPhoto.width || 'unknown'}x${currentPhoto.height || 'unknown'}, ` +
-            `pickerFileSize=${currentPhoto.fileSize || 'unknown'}, uri=${currentPhoto.uri}`
-          );
-
           try {
-            const result: CVAuditResult = await hybridGlassAudit(currentPhoto.base64 || '', mimeType, currentPhoto.uri);
-
-            console.log(`DEBUG: Gemini success for photo ${index + 1}. Count: ${result.count}, Mode: ${result.detectionMode}`);
+            const result: GeminiAuditResult = await analyzeGlassPanelsWithGemini(currentPhoto.base64 || '', mimeType, currentPhoto.uri);
 
             nextResults.push({
               photoIndex: index,
               count: result.count,
-              partialPanels: result.partialPanels,
-              unclearPanels: result.unclearPanels,
-              excludedPanels: result.excludedPanels,
               avgConfidence: result.avgConfidence,
               detectionMode: result.detectionMode,
               hasWarnings: result.hasWarnings,
@@ -334,27 +301,15 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             });
 
             totalCount += result.count;
-            totalPartialPanels += result.partialPanels;
-            totalUnclearPanels += result.unclearPanels;
-            totalExcludedPanels += result.excludedPanels;
             totalConfidence += result.avgConfidence;
             confidenceCount += 1;
             detectionModes.add(result.detectionMode);
-            combinedDetections.push(
-              ...result.detections.map((detection) => ({
-                ...detection,
-                id: detection.id ? `P${index + 1}-${detection.id}` : undefined,
-              }))
-            );
           } catch (photoError: any) {
-            console.error(`CV_ANALYSIS_ERROR_PHOTO_${index + 1}:`, photoError);
+            console.error(`GEMINI_ANALYSIS_ERROR_PHOTO_${index + 1}:`, photoError);
             failedPhotoNumbers.push(index + 1);
             nextResults.push({
               photoIndex: index,
               count: 0,
-              partialPanels: 0,
-              unclearPanels: 0,
-              excludedPanels: 0,
               avgConfidence: 0,
               detectionMode: 'failed',
               hasWarnings: true,
@@ -390,13 +345,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         setGlassCount(totalCount);
         setDetectionMode(detectionModes.size === 1 ? Array.from(detectionModes)[0] : 'gemini-multi-photo');
         setAvgConfidence(confidenceCount > 0 ? totalConfidence / confidenceCount : 0);
-        setPartialPanels(totalPartialPanels);
-        setUnclearPanels(totalUnclearPanels);
-        setExcludedPanels(totalExcludedPanels);
         setHasWarnings(failedPhotoNumbers.length > 0 || nextResults.some((result) => result.hasWarnings));
         setWarningMessage(failedText.trim());
-        setDetections(combinedDetections);
-        setAnnotatedImageUri(null);
         setAiSummary(summaryText);
         setAnalysisStatus(totalCount === 0 ? 'no_panels' : 'complete');
         setStep(3);
@@ -405,7 +355,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
       // ── Populate all detection state ──────────────────────────────
     } catch (error: any) {
-      console.error('CV_ANALYSIS_ERROR:', error);
+      console.error('GEMINI_ANALYSIS_ERROR:', error);
       setAnalysisStatus('failed');
       Alert.alert(
         'AI Analysis Failed',
@@ -442,12 +392,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       formData.append('notes', notes);
       formData.append('userId', user.id.toString());
 
-      // ── New CV detection fields ─────────────────────────────────
+      // Gemini-only analysis fields
       formData.append('ai_detected_count', aiDetectedCount.toString());
       formData.append('verified_panel_count', verifiedPanelCount.toString());
-      formData.append('partial_panels', partialPanels.toString());
-      formData.append('unclear_panels', unclearPanels.toString());
-      formData.append('excluded_panels', excludedPanels.toString());
       formData.append('avg_confidence', avgConfidence.toFixed(4));
       formData.append('detection_mode', detectionMode);
       formData.append('warning_message', warningMessage);
@@ -781,14 +728,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             {/* Footer Buttons */}
             <View className="border-t px-5 pb-10 pt-4" style={{ backgroundColor: theme.background, borderColor: theme.border }}>
               {/* Analysis status banner */}
-              {false && analysisStatus === 'complete' && (
+              {analysisStatus === 'complete' && (
                 <View className="mb-3 flex-row items-center rounded-xl bg-[#E8F5E9] px-4 py-3">
                   <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
                   <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#2E7D32]">
-                    {aiDetectedCount} panels detected • {
-                      false ? 'Fallback Detection' :
-                      'Analysis complete. Verify the panel count before saving.'
-                    }
+                    {aiDetectedCount} panels detected. Verify the panel count before saving.
                   </Text>
                 </View>
               )}
@@ -866,54 +810,39 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               </Text>
             </View>
 
-            {/* AI highlighted photo preview if available */}
+            {/* Photo preview with per-photo Gemini counts */}
             {selectedPhotos.length > 0 && (
               <View className="border-b px-5 py-4" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
                 <View className="mb-2 flex-row items-center justify-between">
                   <Text className="text-[12px] font-semibold" style={{ color: theme.textSecondary }}>
-                    {annotatedImageUri ? 'AI Highlighted Panels' : 'Photo Preview'}
+                    Photo Preview
                   </Text>
-                  {annotatedImageUri ? (
-                    <View className="rounded-full px-2 py-1" style={{ backgroundColor: theme.primaryLight }}>
-                      <Text className="text-[10px] font-bold" style={{ color: theme.primary }}>
-                        {detections.filter((detection) => detection.counted).length} highlighted
-                      </Text>
-                    </View>
-                  ) : null}
                 </View>
 
-                {annotatedImageUri ? (
-                  <Image
-                    source={{ uri: annotatedImageUri }}
-                    style={{ width: '100%', height: 220, borderRadius: 16 }}
-                    resizeMode="contain"
-                  />
-                ) : (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    {selectedPhotos.map((photo, index) => {
-                      const photoResult = getPhotoAnalysisResult(index);
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {selectedPhotos.map((photo, index) => {
+                    const photoResult = getPhotoAnalysisResult(index);
 
-                      return (
-                        <View key={index} className="mr-3">
-                          <Image
-                            source={{ uri: photo.uri }}
-                            style={{ width: 110, height: 110, borderRadius: 16 }}
-                            resizeMode="cover"
-                          />
-                          {photoResult ? (
-                            <View
-                              className="absolute bottom-2 right-2 rounded-full px-2 py-1"
-                              style={{ backgroundColor: photoResult.status === 'failed' ? '#DC2626' : 'rgba(93, 191, 80, 0.92)' }}>
-                              <Text className="text-[10px] font-bold text-white">
-                                {photoResult.status === 'failed' ? 'Check' : `${photoResult.count} panels`}
-                              </Text>
-                            </View>
-                          ) : null}
-                        </View>
-                      );
-                    })}
-                  </ScrollView>
-                )}
+                    return (
+                      <View key={index} className="mr-3">
+                        <Image
+                          source={{ uri: photo.uri }}
+                          style={{ width: 110, height: 110, borderRadius: 16 }}
+                          resizeMode="cover"
+                        />
+                        {photoResult ? (
+                          <View
+                            className="absolute bottom-2 right-2 rounded-full px-2 py-1"
+                            style={{ backgroundColor: photoResult.status === 'failed' ? '#DC2626' : 'rgba(93, 191, 80, 0.92)' }}>
+                            <Text className="text-[10px] font-bold text-white">
+                              {photoResult.status === 'failed' ? 'Check' : `${photoResult.count} panels`}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </ScrollView>
               </View>
             )}
 
@@ -998,18 +927,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   {/* Detection Mode Badge */}
                 </View>
 
-                {/* Gemini fallback warning */}
-                {false && detectionMode === 'gemini-fallback' && (
-                  <View className="mb-3 flex-row items-center rounded-lg bg-[#FFF8E1] px-3 py-2">
-                    <Ionicons name="warning" size={14} color="#F57C00" />
-                    <Text className="ml-2 flex-1 text-[11px] text-[#E65100]">
-                      Fallback Detection Used — please verify manually
-                    </Text>
-                  </View>
-                )}
-
                 {/* AI analysis failed — manual mode */}
-                {false && hasWarnings && (
+                {hasWarnings && analysisStatus !== 'failed' && (
                   <View className="mb-3 flex-row items-center rounded-lg bg-[#FFF3E0] px-3 py-2">
                     <Ionicons name="alert-circle" size={14} color="#F57C00" />
                     <Text className="ml-2 flex-1 text-[11px] text-[#E65100]">
@@ -1023,33 +942,6 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                     <Ionicons name="alert-circle" size={14} color="#E53935" />
                     <Text className="ml-2 flex-1 text-[11px] text-[#C62828]">
                       AI analysis failed — enter count manually
-                    </Text>
-                  </View>
-                )}
-
-                {/* Stats Row: AI Count + Detection Mode */}
-                {false && analysisStatus !== 'failed' && analysisStatus !== 'idle' && (
-                  <View className="mb-3 flex-row">
-                    <View className="flex-1 items-center rounded-xl bg-white py-2 mr-2 border border-[#E0E0E0]">
-                      <Text className="text-[10px] text-gray-400">AI Counted</Text>
-                      <Text className="text-[18px] font-bold text-[#7370FF]">{aiDetectedCount}</Text>
-                      <Text className="text-[9px] text-gray-400">complete</Text>
-                    </View>
-                    <View className="flex-1 items-center rounded-xl bg-white py-2 border border-[#E0E0E0]">
-                      <Text className="text-[10px] text-gray-400">Detection Mode</Text>
-                      <Text className="text-[14px] font-bold text-[#4CAF50]">
-                        {detectionMode === 'gemini-fallback' ? 'Fallback' : 'Box'}
-                      </Text>
-                      <Text className="text-[9px] text-gray-400">Gemini Flash</Text>
-                    </View>
-                  </View>
-                )}
-
-                {false && analysisStatus !== 'failed' && analysisStatus !== 'idle' && (
-                  <View className="mb-3 rounded-xl bg-white px-3 py-2 border border-[#E0E0E0]">
-                    <Text className="text-[10px] font-semibold text-gray-400 mb-1">Excluded Panels</Text>
-                    <Text className="text-[12px] text-[#333]">
-                      Partial: {partialPanels} | Unclear: {unclearPanels} | Total excluded: {excludedPanels}
                     </Text>
                   </View>
                 )}

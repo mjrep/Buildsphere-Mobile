@@ -3,29 +3,37 @@ const router = express.Router();
 const pool = require('../db');
 const { Expo } = require('expo-server-sdk');
 const {
+  createNotification,
   ensureNotificationTables,
-  sendPushNotificationToUser,
 } = require('../services/pushNotificationService');
+
+function mapNotificationRow(n) {
+  return {
+    ...n,
+    message: n.message || n.body || '',
+    metadata: n.metadata || n.data || null,
+    time: n.time || n.date || (n.created_at ? new Date(n.created_at).toISOString() : 'Just now'),
+    date: n.date || (n.created_at ? new Date(n.created_at).toISOString().split('T')[0] : null),
+    reference_url: n.reference_url || null,
+  };
+}
+
+function getRequestUserId(req) {
+  return req.query.userId || req.body?.userId || req.body?.user_id;
+}
 
 // GET /notifications?userId=xxx
 router.get('/', async (req, res) => {
   const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+
   try {
     await ensureNotificationTables();
     const result = await pool.query(
       'SELECT * FROM "public"."notifications" WHERE user_id = $1 ORDER BY created_at DESC',
       [userId]
     );
-    // Map fields for frontend compatibility (Phase 2)
-    const mapped = (result.rows || []).map(n => ({
-      ...n,
-      message: n.message || n.body || '',
-      metadata: n.metadata || n.data || null,
-      time: n.time || n.date || (n.created_at ? new Date(n.created_at).toISOString() : 'Just now'),
-      date: n.date || (n.created_at ? new Date(n.created_at).toISOString().split('T')[0] : null),
-      reference_url: n.reference_url || null,
-    }));
-    res.json(mapped);
+    res.json((result.rows || []).map(mapNotificationRow));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch notifications.' });
@@ -34,9 +42,16 @@ router.get('/', async (req, res) => {
 
 // PATCH /notifications/:id/read
 router.patch('/:id/read', async (req, res) => {
+  const userId = getRequestUserId(req);
+  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+
   try {
-    await pool.query('UPDATE "public"."notifications" SET is_read = true WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
+    const result = await pool.query(
+      'UPDATE "public"."notifications" SET is_read = true, updated_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING *',
+      [req.params.id, userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Notification not found.' });
+    res.json({ success: true, notification: mapNotificationRow(result.rows[0]) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to mark as read.' });
@@ -46,9 +61,14 @@ router.patch('/:id/read', async (req, res) => {
 // PATCH /notifications/read-all?userId=xxx
 router.patch('/read-all', async (req, res) => {
   const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+
   try {
-    await pool.query('UPDATE "public"."notifications" SET is_read = true WHERE user_id = $1', [userId]);
-    res.json({ success: true });
+    const result = await pool.query(
+      'UPDATE "public"."notifications" SET is_read = true, updated_at = NOW() WHERE user_id = $1 RETURNING id',
+      [userId]
+    );
+    res.json({ success: true, count: result.rowCount });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to mark all as read.' });
@@ -57,8 +77,15 @@ router.patch('/read-all', async (req, res) => {
 
 // DELETE /notifications/:id
 router.delete('/:id', async (req, res) => {
+  const userId = getRequestUserId(req);
+  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+
   try {
-    await pool.query('DELETE FROM "public"."notifications" WHERE id = $1', [req.params.id]);
+    const result = await pool.query(
+      'DELETE FROM "public"."notifications" WHERE id = $1 AND user_id = $2 RETURNING id',
+      [req.params.id, userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Notification not found.' });
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -105,15 +132,18 @@ router.post('/test', async (req, res) => {
   }
 
   try {
-    const result = await sendPushNotificationToUser(
-      user_id,
-      title || 'BuildSphere Alert',
-      message || 'This is a test notification from BuildSphere.', // eto yung notifications messages pwede palitan for testing
-      {
+    const result = await createNotification({
+      recipientId: user_id,
+      title: title || 'BuildSphere Alert',
+      message: message || 'This is a test notification from BuildSphere.',
+      type: 'test_notification',
+      referenceType: 'notifications',
+      data: {
         type: 'test_notification',
         screen: 'Notifications',
-      }
-    );
+      },
+      sendPush: true,
+    });
     res.json({ success: true, result });
   } catch (err) {
     console.error('Test notification route error:', err);

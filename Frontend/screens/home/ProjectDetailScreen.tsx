@@ -10,7 +10,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { API_URL } from '../../lib/api';
-import InventoryScreen from './InventoryScreen';
 import SiteUpdatesScreen from './SiteUpdatesScreen';
 import { type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -40,6 +39,7 @@ interface Props {
   onNavigate?: (tab: MainTab) => void;
   canViewHome?: boolean;
   unreadCount?: number;
+  onViewInventory?: (projectId: number) => void;
 }
 
 const PRIMARY = '#7370FF';
@@ -149,14 +149,12 @@ export default function ProjectDetailScreen({
   onNavigate,
   canViewHome = true,
   unreadCount = 0,
+  onViewInventory,
 }: Props) {
   const { theme } = useAppTheme();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<
-    'detail' | 'inventory' | 'siteUpdates'
-  >('detail');
   const [showSiteUpdates, setShowSiteUpdates] = useState(false);
 
   const loadProject = () => {
@@ -178,21 +176,6 @@ export default function ProjectDetailScreen({
   useEffect(() => {
     loadProject();
   }, [projectId]);
-
-  if (activeSection === 'inventory' && project) {
-    return (
-      <InventoryScreen
-        projectId={project.id}
-        userId={userId}
-        onBack={() => setActiveSection('detail')}
-        userRole={userRole}
-        activeMainTab="home"
-        canViewHome={canViewHome}
-        unreadCount={unreadCount}
-        onNavigate={onNavigate}
-      />
-    );
-  }
 
   if (loading) {
     return <ProjectDetailSkeleton onBack={onBack} />;
@@ -313,7 +296,7 @@ export default function ProjectDetailScreen({
               key={item.key}
               onPress={() => {
                 if (item.key === 'siteUpdates') setShowSiteUpdates(true);
-                else if (item.key === 'inventory') setActiveSection('inventory');
+                else if (item.key === 'inventory') onViewInventory?.(project.id);
               }}
               className="mb-4 flex-row items-center justify-between rounded-[20px] border px-6 py-5"
               style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.02, shadowRadius: 5, elevation: 1 }}>

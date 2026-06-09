@@ -10,11 +10,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
+import { getImageUrls } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
+const SHIFT_NAMES = ['Morning', 'Noon', 'Afternoon'] as const;
 
 interface SiteUpdate {
   id: number;
@@ -26,6 +28,7 @@ interface SiteUpdate {
   photo_url: string;
   glass_count: number;
   created_at: string;
+  work_date?: string;
   shift: 'Morning' | 'Noon' | 'Afternoon';
   ai_photo_counts?: PhotoCount[] | string | null;
 }
@@ -50,14 +53,18 @@ interface Props {
   projectName: string;
 }
 
+type ShiftName = typeof SHIFT_NAMES[number];
+
 export default function SiteUpdatesScreen({ visible, onClose, projectName }: Props) {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'Today' | 'Past'>('Today');
   const [activeShift, setActiveShift] = useState<'Morning' | 'Noon' | 'Afternoon'>('Noon');
-  const [selectedDate, setSelectedDate] = useState(new Date('2026-01-31')); // Match paper demo dates
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [updates, setUpdates] = useState<SiteUpdate[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
 
   const comments: Comment[] = [];
 
@@ -90,8 +97,37 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
     }
   };
 
-  // Mock filtering based on the paper's demo data
-  const currentUpdate = (Array.isArray(updates) ? updates.find(u => u.shift === activeShift) : null) || (updates && updates[0]) || null;
+  const getDateKey = (dateInput?: string | Date) => {
+    const date = dateInput ? new Date(dateInput) : new Date();
+    if (Number.isNaN(date.getTime())) return '';
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-');
+  };
+
+  const activeDateKey = getDateKey(timeRange === 'Today' ? new Date() : selectedDate);
+  const visibleUpdates = updates.filter((update) => (
+    getDateKey(update.work_date || update.created_at) === activeDateKey
+  ));
+  const updatesForDisplay = visibleUpdates.length > 0 ? visibleUpdates : updates;
+  const currentUpdate = updatesForDisplay.find(u => u.shift === activeShift) || null;
+
+  const getPhotoUri = (photoPath: string) => (
+    photoPath.startsWith('http') ? photoPath : `${API_URL}${photoPath}`
+  );
+
+  const shiftTotals = SHIFT_NAMES.reduce<Record<ShiftName, number>>((totals, shift) => {
+    totals[shift] = visibleUpdates
+      .filter((update) => update.shift === shift)
+      .reduce((sum, update) => sum + (Number(update.glass_count) || 0), 0);
+    return totals;
+  }, {
+    Morning: 0,
+    Noon: 0,
+    Afternoon: 0,
+  });
 
   const renderCalendar = () => {
     const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -170,12 +206,12 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
 
             {/* Layer 2: Shift Switcher */}
             {timeRange === 'Today' && (
-              <View className="mb-8 flex-row">
-                <View className="h-[60px] flex-1 flex-row rounded-[14px] border p-1" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
-                  {['Morning', 'Noon', 'Afternoon'].map((tab) => (
+              <View className="mb-8">
+                <View className="h-[60px] flex-row rounded-[14px] border p-1" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                  {SHIFT_NAMES.map((tab) => (
                     <TouchableOpacity
                       key={tab}
-                      onPress={() => setActiveShift(tab as any)}
+                      onPress={() => setActiveShift(tab)}
                       className={`flex-1 items-center justify-center rounded-[10px] ${activeShift === tab ? 'border' : ''}`}
                       style={{ 
                         backgroundColor: activeShift === tab ? theme.primaryLight : 'transparent',
@@ -188,6 +224,46 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                       </Text>
                     </TouchableOpacity>
                   ))}
+                </View>
+
+                <View className="mt-3 flex-row gap-2">
+                  {SHIFT_NAMES.map((shift) => {
+                    const isActive = activeShift === shift;
+                    const total = shiftTotals[shift];
+
+                    return (
+                      <TouchableOpacity
+                        key={`${shift}-total`}
+                        activeOpacity={0.85}
+                        onPress={() => setActiveShift(shift)}
+                        className="min-w-0 flex-1 rounded-[14px] border px-3 py-3"
+                        style={{
+                          backgroundColor: isActive ? theme.primaryLight : theme.surface,
+                          borderColor: isActive ? theme.primary : theme.border,
+                        }}>
+                        <Text
+                          className="text-[10px] font-bold"
+                          style={{ color: isActive ? theme.primary : theme.textMuted }}
+                          numberOfLines={1}>
+                          {shift}
+                        </Text>
+                        <View className="mt-1 flex-row items-baseline">
+                          <Text
+                            className="text-[20px] font-bold"
+                            style={{ color: theme.text }}
+                            numberOfLines={1}>
+                            {total}
+                          </Text>
+                          <Text
+                            className="ml-1 text-[10px] font-semibold"
+                            style={{ color: theme.textMuted }}
+                            numberOfLines={1}>
+                            panels
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
             )}
@@ -228,14 +304,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                   {(() => {
                     let photos: string[] = [];
                     let photoCounts: PhotoCount[] = [];
-                    try {
-                      if (currentUpdate?.photo_url) {
-                        const parsed = JSON.parse(currentUpdate.photo_url);
-                        photos = Array.isArray(parsed) ? parsed : [currentUpdate.photo_url];
-                      }
-                    } catch (e) {
-                      if (currentUpdate?.photo_url) photos = [currentUpdate.photo_url];
-                    }
+                    photos = getImageUrls(currentUpdate?.photo_url);
                     try {
                       const rawPhotoCounts = currentUpdate?.ai_photo_counts;
                       if (Array.isArray(rawPhotoCounts)) {
@@ -259,14 +328,25 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                               : `${hasPerPhotoCount ? photoCount?.count || 0 : currentUpdate?.glass_count || 0} installed`;
 
                             return (
-                              <View key={idx} className="relative h-[240px] w-[300px] mr-4 overflow-hidden rounded-[24px]" style={{ backgroundColor: theme.surfaceAlt }}>
+                              <TouchableOpacity
+                                key={idx}
+                                activeOpacity={0.9}
+                                onPress={() => {
+                                  setSelectedImage(getPhotoUri(p));
+                                  setShowImageModal(true);
+                                }}
+                                className="relative h-[240px] w-[300px] mr-4 overflow-hidden rounded-[24px]"
+                                style={{ backgroundColor: theme.surfaceAlt }}>
                                 <Image
-                                  source={{
-                                    uri: p.startsWith('http') ? p : `${API_URL}${p}`,
-                                  }}
+                                  source={{ uri: getPhotoUri(p) }}
                                   className="h-full w-full"
                                   resizeMode="cover"
                                 />
+                                <View
+                                  className="absolute left-4 top-4 h-9 w-9 items-center justify-center rounded-full"
+                                  style={{ backgroundColor: 'rgba(0, 0, 0, 0.48)' }}>
+                                  <Ionicons name="expand-outline" size={18} color="white" />
+                                </View>
                                 <View
                                   className="absolute bottom-4 right-4 rounded-full px-3 py-1 shadow-sm"
                                   style={{ backgroundColor: photoCount?.status === 'failed' ? 'rgba(220, 38, 38, 0.9)' : 'rgba(93, 191, 80, 0.9)' }}>
@@ -274,7 +354,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
                                     {badgeText}
                                   </Text>
                                 </View>
-                              </View>
+                              </TouchableOpacity>
                             );
                           })}
                         </ScrollView>
@@ -351,6 +431,28 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
           </View>
         </ScrollView>
       </View>
+
+      <Modal visible={showImageModal} transparent animationType="fade">
+        <View className="flex-1 items-center justify-center bg-black/95">
+          <TouchableOpacity
+            onPress={() => setShowImageModal(false)}
+            className="absolute right-5 z-10 h-11 w-11 items-center justify-center rounded-full"
+            style={{
+              top: Math.max(insets.top + 10, 44),
+              backgroundColor: 'rgba(255, 255, 255, 0.16)',
+            }}>
+            <Ionicons name="close" size={28} color="white" />
+          </TouchableOpacity>
+
+          {selectedImage && (
+            <Image
+              source={{ uri: selectedImage }}
+              className="h-[78%] w-full"
+              resizeMode="contain"
+            />
+          )}
+        </View>
+      </Modal>
     </Modal>
   );
 }

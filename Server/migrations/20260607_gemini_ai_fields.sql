@@ -1,0 +1,8 @@
+ALTER TABLE task_progress_logs
+  ALTER COLUMN milestone_id DROP NOT NULL,
+  ALTER COLUMN ai_verification_status SET DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS ai_detected_count INTEGER DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS verified_panel_count INTEGER DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS avg_confidence REAL DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS detection_mode VARCHAR(30) DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS ai_photo_counts JSONB DEFAULT NULL;

@@ -3,9 +3,13 @@ import * as Linking from 'expo-linking';
 export const PASSWORD_RESET_PATH = 'reset-password';
 export const PASSWORD_RESET_SCHEME = 'buildsphere';
 
+// Add this exact URL in Supabase Dashboard:
+// Authentication -> URL Configuration -> Redirect URLs
+// Site URL is only the fallback; Forgot Password passes redirectTo explicitly.
+// In Expo Go, the generated dev URL must also be allowlisted in Supabase.
 export const PASSWORD_RESET_REDIRECT_URL =
   process.env.EXPO_PUBLIC_PASSWORD_RESET_REDIRECT_URL ||
-  Linking.createURL(PASSWORD_RESET_PATH, { scheme: PASSWORD_RESET_SCHEME });
+  (__DEV__ ? Linking.createURL(PASSWORD_RESET_PATH) : `${PASSWORD_RESET_SCHEME}://${PASSWORD_RESET_PATH}`);
 
 export function isResetPasswordUrl(url: string) {
   const parsed = Linking.parse(url);

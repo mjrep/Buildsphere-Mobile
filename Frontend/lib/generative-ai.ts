@@ -29,30 +29,12 @@ export interface UncertainDetection {
   confidence: number;
 }
 
-export interface CVDetection {
-  id?: string;
-  bounding_box: number[];
-  confidence_score: number;
-  label: string;
-  status: 'full' | 'partial' | 'unclear';
-  counted: boolean;
-  visibility_percentage?: number;
-  panel_type?: GeminiPanel['panel_type'];
-  requires_manual_verification?: boolean;
-  notes?: string;
-}
-
-export interface CVAuditResult {
+export interface GeminiAuditResult {
   count: number;
-  partialPanels: number;
-  unclearPanels: number;
-  excludedPanels: number;
   hasWarnings: boolean;
   warningMessage: string | null;
   summary: string;
-  annotatedImage: string | null;
-  detections: CVDetection[];
-  detectionMode: 'gemini-only' | 'gemini' | 'box' | 'grid' | 'gemini-fallback';
+  detectionMode: 'gemini-only';
   avgConfidence: number;
   panels: GeminiPanel[];
   uncertainDetections: UncertainDetection[];
@@ -116,13 +98,11 @@ export const countGlassPanels = async (
   });
 };
 
-export const hybridGlassAudit = async (
+export const analyzeGlassPanelsWithGemini = async (
   base64Image: string,
   mimeType: string,
   photoUri?: string
-): Promise<CVAuditResult> => {
-  console.log('DEBUG: Backend Gemini glass audit commencing');
-
+): Promise<GeminiAuditResult> => {
   try {
     const analysis = await countGlassPanels(base64Image, mimeType, photoUri);
     const panels = Array.isArray(analysis.panels) ? analysis.panels : [];
@@ -131,38 +111,20 @@ export const hybridGlassAudit = async (
       : [];
     const count = Number(analysis.total_valid_panels || analysis.ai_detected_count || panels.length || 0);
 
-    const detections: CVDetection[] = panels.map((panel) => ({
-      id: panel.id,
-      bounding_box: panel.bbox,
-      confidence_score: panel.confidence,
-      label: panel.panel_type,
-      status: panel.requires_manual_verification ? 'unclear' : 'full',
-      counted: true,
-      visibility_percentage: panel.visibility_percentage,
-      panel_type: panel.panel_type,
-      requires_manual_verification: panel.requires_manual_verification,
-      notes: panel.notes,
-    }));
-
     const avgConfidence =
       typeof analysis.avg_confidence === 'number'
         ? analysis.avg_confidence
         : typeof analysis.detection_confidence === 'number'
           ? analysis.detection_confidence
-          : detections.length > 0
-        ? detections.reduce((sum, detection) => sum + detection.confidence_score, 0) / detections.length
+          : panels.length > 0
+        ? panels.reduce((sum, panel) => sum + panel.confidence, 0) / panels.length
         : 0;
 
     return {
       count,
-      partialPanels: 0,
-      unclearPanels: uncertainDetections.length,
-      excludedPanels: 0,
       hasWarnings: Boolean(analysis.has_warnings),
       warningMessage: analysis.warning_message || null,
       summary: analysis.summary,
-      annotatedImage: null,
-      detections,
       detectionMode: analysis.detection_mode || 'gemini-only',
       avgConfidence,
       panels,
@@ -172,12 +134,4 @@ export const hybridGlassAudit = async (
     console.error('GEMINI_BACKEND_AUDIT_ERROR:', error);
     throw new Error(`Gemini Audit Failed: ${error.message || 'Unknown Error'}`);
   }
-};
-
-export const getBuildsphereAI = async (p: string) => {
-  throw new Error(`Text Gemini calls must go through the backend. Prompt was not sent: ${p.slice(0, 40)}`);
-};
-
-export const analyzeBuildsphereImage = async (p: string, _b: string, _m: string) => {
-  throw new Error(`Image Gemini calls must go through the backend. Prompt was not sent: ${p.slice(0, 40)}`);
 };

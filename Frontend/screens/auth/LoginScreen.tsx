@@ -5,15 +5,13 @@ import {
   TextInput,
   TouchableOpacity,
   Image,
-  Keyboard,
-  TouchableWithoutFeedback,
   Alert,
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { ALLOW_RUNTIME_API_URL, API_URL, saveApiUrl } from '../../lib/api';
+import { API_URL } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -21,6 +19,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 interface LoginScreenProps {
   onLogin: (user: UserInfo, token: string) => void;
   onForgotPassword?: () => void;
+  authNotice?: string;
 }
 
 const PRIMARY = '#7370FF';
@@ -28,34 +27,13 @@ const PRIMARY = '#7370FF';
 export default function LoginScreen({
   onLogin,
   onForgotPassword,
+  authNotice,
 }: LoginScreenProps) {
   const { theme, isDark } = useAppTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [serverUrl, setServerUrl] = useState(API_URL);
   const [loading, setLoading] = useState(false);
-  const [savingServerUrl, setSavingServerUrl] = useState(false);
-  const canEditServerUrl = ALLOW_RUNTIME_API_URL;
-
-  const handleSaveServerUrl = async () => {
-    const trimmedUrl = serverUrl.trim();
-    if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
-      Alert.alert('Invalid server URL', 'Use a full URL like http://192.168.1.5:3001.');
-      return;
-    }
-
-    setSavingServerUrl(true);
-    try {
-      const savedUrl = await saveApiUrl(trimmedUrl);
-      setServerUrl(savedUrl);
-      Alert.alert('Server saved', `The app will use ${savedUrl}`);
-    } catch (err) {
-      Alert.alert('Error', 'Could not save the server URL.');
-    } finally {
-      setSavingServerUrl(false);
-    }
-  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -65,7 +43,7 @@ export default function LoginScreen({
     if (!API_URL) {
       Alert.alert(
         'Server not configured',
-        'The production API URL is missing. Set EXPO_PUBLIC_API_URL before building the app.'
+        'Set EXPO_PUBLIC_API_URL in Frontend/.env to your backend URL, then restart Expo.'
       );
       return;
     }
@@ -95,9 +73,7 @@ export default function LoginScreen({
       Alert.alert(
         'Login Failed',
         isApiKeyError
-          ? canEditServerUrl
-            ? 'Supabase is rejecting the app API key. Check EXPO_PUBLIC_SUPABASE_KEY in Frontend/.env and restart Expo with cache cleared.'
-            : 'Authentication is not configured correctly. Please contact support.'
+          ? 'Authentication is not configured correctly. Please contact support.'
           : authError?.message || 'Invalid email or password.'
       );
     } catch (err) {
@@ -206,36 +182,12 @@ export default function LoginScreen({
               <Text className="text-[12px]" style={{ color: theme.textMuted }}>Forgot Password?</Text>
             </TouchableOpacity>
 
-            {canEditServerUrl ? (
-              <View className="mt-8 w-full">
-                <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Server URL</Text>
-                <View className="rounded-xl" style={[inputBoxStyle, { backgroundColor: theme.input }]}>
-                  <TextInput
-                    value={serverUrl}
-                    onChangeText={setServerUrl}
-                    placeholder="http://192.168.1.5:3001"
-                    placeholderTextColor={theme.textMuted}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="url"
-                    className="h-[52px] px-4"
-                    style={{ color: theme.text }}
-                  />
-                </View>
-
-                <TouchableOpacity
-                  onPress={handleSaveServerUrl}
-                  disabled={savingServerUrl}
-                  className="mt-3 h-[44px] items-center justify-center rounded-xl"
-                  style={{ backgroundColor: theme.input, borderColor: theme.border, borderWidth: 1 }}>
-                  {savingServerUrl ? (
-                    <ActivityIndicator color={theme.primary} />
-                  ) : (
-                    <Text className="text-[13px] font-semibold" style={{ color: theme.textSecondary }}>Save Server URL</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+            {authNotice ? (
+              <Text className="mt-5 text-center text-[13px] leading-5" style={{ color: theme.textSecondary }}>
+                {authNotice}
+              </Text>
             ) : null}
+
           </View>
         </View>
       </KeyboardAwareScrollView>

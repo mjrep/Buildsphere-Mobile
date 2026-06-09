@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { API_URL } from '../../lib/api';
+import { normalizeImageUrl } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
@@ -392,24 +393,29 @@ export default function TaskDetailScreen({
                         {item.remarks || "Site update recorded successfully."}
                       </Text>
 
-                      {item.evidence_image_path && (
-                        <TouchableOpacity
-                          onPress={() => {
-                            setSelectedImage(item.evidence_image_path);
-                            setShowImageModal(true);
-                          }}
-                          className="flex-row items-center rounded-lg p-1.5 self-start pr-4"
-                          style={{ backgroundColor: theme.primaryLight }}>
-                          <Image
-                            source={{ uri: item.evidence_image_path }}
-                            className="h-10 w-10 rounded-md mr-2"
-                            style={{ backgroundColor: theme.border }}
-                            resizeMode="cover"
-                          />
-                          <Ionicons name="image-outline" size={14} color={theme.primary} />
-                          <Text className="ml-1 text-[11px] font-bold" style={{ color: theme.primary }}>View Photo</Text>
-                        </TouchableOpacity>
-                      )}
+                      {(() => {
+                        const imageUrl = normalizeImageUrl(item.evidence_image_path);
+                        if (!imageUrl) return null;
+
+                        return (
+                          <TouchableOpacity
+                            onPress={() => {
+                              setSelectedImage(imageUrl);
+                              setShowImageModal(true);
+                            }}
+                            className="flex-row items-center rounded-lg p-1.5 self-start pr-4"
+                            style={{ backgroundColor: theme.primaryLight }}>
+                            <Image
+                              source={{ uri: imageUrl }}
+                              className="h-10 w-10 rounded-md mr-2"
+                              style={{ backgroundColor: theme.border }}
+                              resizeMode="cover"
+                            />
+                            <Ionicons name="image-outline" size={14} color={theme.primary} />
+                            <Text className="ml-1 text-[11px] font-bold" style={{ color: theme.primary }}>View Photo</Text>
+                          </TouchableOpacity>
+                        );
+                      })()}
 
                     </View>
                   </View>
