@@ -9,13 +9,19 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { API_URL } from '../../lib/api';
+import { API_URL, getServerConnectionErrorMessage } from '../../lib/api';
 import SiteUpdatesScreen from './SiteUpdatesScreen';
-import { type UserRole } from '../../constants/roles';
+import { getPermissions, type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
+import {
+  BudgetValue,
+  formatBudgetPercent,
+  formatCurrencyPHP,
+  getProjectBudgetOverview,
+} from '../../utils/budget';
 
 interface Project {
   id: number;
@@ -24,10 +30,27 @@ interface Project {
   color: string;
   status: string;
   engineer?: string;
+  project_engineer?: string;
+  project_in_charge_name?: string;
+  client_name?: string;
+  clientName?: string;
   start_date?: string;
   end_date?: string;
-  budget?: number;
+  budget?: BudgetValue;
+  budget_for_materials?: BudgetValue;
+  total_budget?: BudgetValue;
+  used_budget?: BudgetValue;
+  actual_cost?: BudgetValue;
+  remaining_budget?: BudgetValue;
+  budget_utilization?: BudgetValue;
   progress?: number;
+}
+
+interface ProjectActivity {
+  id: number | string;
+  action?: string;
+  description?: string;
+  created_at?: string;
 }
 
 interface Props {
@@ -39,6 +62,7 @@ interface Props {
   canViewHome?: boolean;
   unreadCount?: number;
   onViewInventory?: (projectId: number) => void;
+  canViewInventory?: boolean;
 }
 
 const PRIMARY = '#7370FF';
@@ -126,7 +150,7 @@ function statusBadge(status: string) {
 }
 
 function fmt(date?: string) {
-  if (!date) return '01/01/2026'; // Fallback to match screenshot style
+  if (!date) return 'Not set';
   try {
     return new Date(date).toLocaleDateString('en-US', {
       month: '2-digit',
@@ -134,14 +158,38 @@ function fmt(date?: string) {
       year: 'numeric',
     });
   } catch {
-    return '01/01/2026';
+    return 'Not set';
   }
 }
 
 function daysLeft(end?: string) {
-  if (!end) return 128; // Dummy for UI demo matching screenshot
+  if (!end) return null;
   const diff = Math.ceil((new Date(end).getTime() - Date.now()) / 86400000);
   return diff > 0 ? diff : 0;
+}
+
+function BudgetOverviewRow({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  const { theme } = useAppTheme();
+  return (
+    <View className="mb-3 flex-row items-center justify-between">
+      <Text className="mr-3 flex-1 text-[12px]" style={{ color: theme.textMuted }}>{label}</Text>
+      <Text
+        className={accent ? 'text-[14px] font-extrabold' : 'text-[13px] font-bold'}
+        style={{ color: accent ? theme.primary : theme.text }}
+        numberOfLines={1}
+      >
+        {value}
+      </Text>
+    </View>
+  );
 }
 
 export default function ProjectDetailScreen({
@@ -153,29 +201,44 @@ export default function ProjectDetailScreen({
   canViewHome = true,
   unreadCount = 0,
   onViewInventory,
+  canViewInventory,
 }: Props) {
   const { theme } = useAppTheme();
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
   const [project, setProject] = useState<Project | null>(null);
+  const [activities, setActivities] = useState<ProjectActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSiteUpdates, setShowSiteUpdates] = useState(false);
+  const perms = getPermissions(userRole);
+  const mayViewInventory = canViewInventory ?? perms.canViewInventory;
 
-  const loadProject = () => {
+  const loadProject = async () => {
     setLoading(true);
     setError(null);
-    fetch(`${API_URL}/projects/${projectId}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setProject(d);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error('ProjectDetail Fetch Error:', err);
-        setError('Unable to load project details.');
-        setLoading(false);
-      });
+    try {
+      const projectResponse = await fetch(`${API_URL}/projects/${projectId}`);
+      const projectData = await projectResponse.json().catch(() => null);
+      if (!projectResponse.ok) {
+        throw new Error(projectData?.error || 'Could not load projects.');
+      }
+      setProject(projectData);
+
+      try {
+        const activityResponse = await fetch(`${API_URL}/projects/${projectId}/activity`);
+        const activityData = await activityResponse.json().catch(() => []);
+        setActivities(Array.isArray(activityData) ? activityData : []);
+      } catch (activityError) {
+        console.warn('Project activity unavailable:', activityError);
+        setActivities([]);
+      }
+    } catch (err) {
+      console.error('ProjectDetail Fetch Error:', err);
+      setError(getServerConnectionErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -200,6 +263,10 @@ export default function ProjectDetailScreen({
   const badge = statusBadge(project.status);
   const days = daysLeft(project.end_date);
   const progress = project.progress || 0;
+  const budgetOverview = getProjectBudgetOverview(project);
+  const budgetUtilizationText = formatBudgetPercent(budgetOverview.budgetUtilization);
+  const engineerName = project.engineer || project.project_engineer || project.project_in_charge_name || 'Unassigned';
+  const clientName = project.client_name || project.clientName || 'Not set';
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
@@ -231,7 +298,9 @@ export default function ProjectDetailScreen({
           <View className="mb-6 flex-row items-center">
             <View className="flex-row items-center rounded-lg border px-3 py-1.5" style={{ backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
               <Ionicons name="time-outline" size={14} color={theme.primary} />
-              <Text className="ml-1.5 text-[12px] font-bold" style={{ color: theme.primary }}>{days} days left</Text>
+              <Text className="ml-1.5 text-[12px] font-bold" style={{ color: theme.primary }}>
+                {days === null ? 'End date not set' : `${days} days left`}
+              </Text>
             </View>
           </View>
 
@@ -239,7 +308,7 @@ export default function ProjectDetailScreen({
             <View className="flex-1">
               <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Project Engineer</Text>
               <Text className="text-[13px] font-bold" style={{ color: theme.text }}>
-                {project.engineer || 'Michael Replan'}
+                {engineerName}
               </Text>
             </View>
             <View className="flex-1">
@@ -252,9 +321,9 @@ export default function ProjectDetailScreen({
 
           <View className="flex-row">
             <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Budget</Text>
-              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>
-                ₱{project.budget?.toLocaleString()}
+              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Client / Company</Text>
+              <Text className="text-[13px] font-bold" style={{ color: theme.text }} numberOfLines={2}>
+                {clientName}
               </Text>
             </View>
             <View className="flex-1">
@@ -262,7 +331,40 @@ export default function ProjectDetailScreen({
               <Text className="text-[13px] font-bold" style={{ color: theme.text }}>{fmt(project.end_date)}</Text>
             </View>
           </View>
+          <View className="mt-5">
+            <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Location</Text>
+            <Text className="text-[13px] font-bold" style={{ color: theme.text }} numberOfLines={2}>
+              {project.location || 'Unknown Location'}
+            </Text>
+          </View>
         </View>
+
+        {perms.canViewBudget ? (
+          <View
+            className="mb-4 rounded-[24px] border p-6"
+            style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
+            <View className="mb-4 flex-row items-center">
+              <View className="mr-3 h-9 w-9 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primaryLight }}>
+                <Ionicons name="wallet-outline" size={18} color={theme.primary} />
+              </View>
+              <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Budget Overview</Text>
+            </View>
+            <BudgetOverviewRow
+              label="Total Budget"
+              value={formatCurrencyPHP(budgetOverview.totalBudget)}
+              accent={budgetOverview.totalBudget !== null}
+            />
+            {budgetOverview.usedBudget !== null ? (
+              <BudgetOverviewRow label="Used" value={formatCurrencyPHP(budgetOverview.usedBudget)} />
+            ) : null}
+            {budgetOverview.remainingBudget !== null ? (
+              <BudgetOverviewRow label="Remaining" value={formatCurrencyPHP(budgetOverview.remainingBudget)} />
+            ) : null}
+            {budgetUtilizationText ? (
+              <BudgetOverviewRow label="Utilization" value={budgetUtilizationText} />
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Progress Card */}
         <View
@@ -270,7 +372,9 @@ export default function ProjectDetailScreen({
           style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
           <View className="mb-4 flex-row items-center justify-between">
             <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Project Progress</Text>
-            <Text className="text-[11px]" style={{ color: theme.textMuted }}>as of 01/31/26</Text>
+            <Text className="text-[11px]" style={{ color: theme.textMuted }}>
+              as of {new Date().toLocaleDateString()}
+            </Text>
           </View>
 
           <View className="mb-6 flex-row items-center">
@@ -295,13 +399,15 @@ export default function ProjectDetailScreen({
         {/* Navigation List */}
         <View className="mt-8">
           {[
-            { label: 'Inventory', key: 'inventory' },
+            { label: 'Tasks', key: 'tasks' },
+            ...(mayViewInventory ? [{ label: 'Inventory', key: 'inventory' }] : []),
             { label: 'Site Updates', key: 'siteUpdates' },
           ].map((item) => (
             <TouchableOpacity
               key={item.key}
               onPress={() => {
-                if (item.key === 'siteUpdates') setShowSiteUpdates(true);
+                if (item.key === 'tasks') onNavigate?.('mywork');
+                else if (item.key === 'siteUpdates') setShowSiteUpdates(true);
                 else if (item.key === 'inventory') onViewInventory?.(project.id);
               }}
               className="mb-4 flex-row items-center justify-between rounded-[20px] border px-6 py-5"
@@ -311,6 +417,34 @@ export default function ProjectDetailScreen({
             </TouchableOpacity>
           ))}
         </View>
+
+        {activities.length > 0 ? (
+          <View
+            className="mb-4 rounded-[24px] border p-6"
+            style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
+            <View className="mb-4 flex-row items-center">
+              <View className="mr-3 h-9 w-9 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primaryLight }}>
+                <Ionicons name="time-outline" size={18} color={theme.primary} />
+              </View>
+              <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Recent Activity</Text>
+            </View>
+            {activities.slice(0, 5).map((activity) => (
+              <View key={activity.id} className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
+                <Text className="text-[12px] font-bold" style={{ color: theme.text }} numberOfLines={1}>
+                  {activity.action || 'Activity'}
+                </Text>
+                <Text className="mt-1 text-[12px]" style={{ color: theme.textSecondary }} numberOfLines={2}>
+                  {activity.description || 'Project activity recorded.'}
+                </Text>
+                {activity.created_at ? (
+                  <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>
+                    {new Date(activity.created_at).toLocaleString()}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
         </View>
       </ScrollView>
 

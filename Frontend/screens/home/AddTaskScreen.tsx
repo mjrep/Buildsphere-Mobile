@@ -17,13 +17,24 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { API_URL } from '../../lib/api';
+import { API_URL, getServerConnectionErrorMessage } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 
 interface ProjectOption {
   id: number;
   name: string;
+}
+
+interface MilestoneOption {
+  id: number;
+  name: string;
+}
+
+interface PhaseOption {
+  id: number;
+  name: string;
+  milestones: MilestoneOption[];
 }
 
 interface UserOption {
@@ -39,7 +50,7 @@ interface PickedAttachment {
   type: string;
 }
 
-type SelectorKind = 'project' | 'assignedTo' | 'priority';
+type SelectorKind = 'project' | 'phase' | 'milestone' | 'assignedTo' | 'priority';
 
 interface SelectorOption {
   value: string;
@@ -95,7 +106,6 @@ const PRIORITIES = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
-  { value: 'urgent', label: 'Urgent' },
 ];
 
 const toDateInput = (date: Date) => {
@@ -116,6 +126,23 @@ const displayDate = (value: string) => {
   return month && day && year ? `${month}/${day}/${year}` : value;
 };
 
+const normalizeMilestones = (milestones: any[] = []): MilestoneOption[] =>
+  milestones
+    .map((milestone) => ({
+      id: Number(milestone.id),
+      name: milestone.name || milestone.milestone_name || `Milestone ${milestone.sequence_no || milestone.id}`,
+    }))
+    .filter((milestone) => Number.isFinite(milestone.id) && milestone.id > 0);
+
+const normalizePhases = (phases: any[] = []): PhaseOption[] =>
+  phases
+    .map((phase) => ({
+      id: Number(phase.id),
+      name: phase.name || phase.phase_title || phase.phase_name || phase.phase_key || `Phase ${phase.sequence_no || phase.id}`,
+      milestones: normalizeMilestones(Array.isArray(phase.milestones) ? phase.milestones : []),
+    }))
+    .filter((phase) => Number.isFinite(phase.id) && phase.id > 0);
+
 const FormLabel = ({ children, color }: FormLabelProps) => (
   <Text className="mb-2 text-[12px] font-bold" style={{ color }}>
     {children}
@@ -123,6 +150,9 @@ const FormLabel = ({ children, color }: FormLabelProps) => (
 );
 
 const FieldErrorText = ({ message, color }: FieldErrorTextProps) =>
+  message ? <Text className="mt-1 text-[11px]" style={{ color }}>{message}</Text> : null;
+
+const FieldStatusText = ({ message, color }: FieldErrorTextProps) =>
   message ? <Text className="mt-1 text-[11px]" style={{ color }}>{message}</Text> : null;
 
 const FieldWrap = ({ children, className = '' }: FieldWrapProps) => (
@@ -189,14 +219,22 @@ export default function AddTaskScreen({
   const { width } = useWindowDimensions();
   const formContentStyle = centeredContent(width, FORM_CONTENT_MAX_WIDTH);
   const [loadingMeta, setLoadingMeta] = useState(false);
+  const [loadingPhases, setLoadingPhases] = useState(false);
+  const [loadingMilestones, setLoadingMilestones] = useState(false);
+  const [phaseLoadError, setPhaseLoadError] = useState('');
+  const [milestoneLoadError, setMilestoneLoadError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [dbProjects, setDbProjects] = useState<ProjectOption[]>(projects);
+  const [phases, setPhases] = useState<PhaseOption[]>([]);
+  const [milestones, setMilestones] = useState<MilestoneOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [selector, setSelector] = useState<SelectorKind | null>(null);
 
   const [projectId, setProjectId] = useState('');
+  const [phaseId, setPhaseId] = useState('');
+  const [milestoneId, setMilestoneId] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
@@ -206,11 +244,21 @@ export default function AddTaskScreen({
   const [attachment, setAttachment] = useState<PickedAttachment | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const projectOptions = dbProjects.length > 0 ? dbProjects : projects;
+  const projectOptions = projects.length > 0 ? projects : dbProjects;
 
   const selectedProjectLabel = useMemo(
     () => projectOptions.find((project) => String(project.id) === projectId)?.name || '',
     [projectId, projectOptions]
+  );
+
+  const selectedPhaseLabel = useMemo(
+    () => phases.find((phase) => String(phase.id) === phaseId)?.name || '',
+    [phaseId, phases]
+  );
+
+  const selectedMilestoneLabel = useMemo(
+    () => milestones.find((milestone) => String(milestone.id) === milestoneId)?.name || '',
+    [milestoneId, milestones]
   );
 
   const selectedAssigneeLabel = useMemo(() => {
@@ -233,6 +281,38 @@ export default function AddTaskScreen({
           value: String(project.id),
           label: project.name,
         })),
+      };
+    }
+
+    if (selector === 'phase') {
+      return {
+        title: 'Select Phase',
+        selectedValue: phaseId,
+        emptyText: loadingPhases
+          ? 'Loading phases...'
+          : phaseLoadError || 'No phases found for this project.',
+        options: loadingPhases || phaseLoadError
+          ? []
+          : phases.map((phase) => ({
+              value: String(phase.id),
+              label: phase.name,
+            })),
+      };
+    }
+
+    if (selector === 'milestone') {
+      return {
+        title: 'Select Milestone',
+        selectedValue: milestoneId,
+        emptyText: loadingMilestones
+          ? 'Loading milestones...'
+          : milestoneLoadError || 'No milestones found for this phase.',
+        options: loadingMilestones || milestoneLoadError
+          ? []
+          : milestones.map((milestone) => ({
+              value: String(milestone.id),
+              label: milestone.name,
+            })),
       };
     }
 
@@ -260,6 +340,14 @@ export default function AddTaskScreen({
     };
   }, [
     assignedTo,
+    loadingMilestones,
+    loadingPhases,
+    milestoneId,
+    milestoneLoadError,
+    milestones,
+    phaseId,
+    phaseLoadError,
+    phases,
     priority,
     projectId,
     projectOptions,
@@ -269,6 +357,8 @@ export default function AddTaskScreen({
 
   const isDirty = Boolean(
     projectId ||
+      phaseId ||
+      milestoneId ||
       title.trim() ||
       description.trim() ||
       assignedTo ||
@@ -302,9 +392,39 @@ export default function AddTaskScreen({
     textColor: theme.text,
     mutedColor,
   };
+  const phaseStatusText = !projectId
+    ? ''
+    : loadingPhases
+      ? 'Loading phases...'
+      : phaseLoadError || (phases.length === 0 ? 'No phases found for this project.' : '');
+  const milestoneStatusText = !phaseId
+    ? ''
+    : loadingMilestones
+      ? 'Loading milestones...'
+      : milestoneLoadError || (milestones.length === 0 ? 'No milestones found for this phase.' : '');
+  const requiredFieldsComplete = Boolean(
+    projectId &&
+      phaseId &&
+      milestoneId &&
+      title.trim() &&
+      assignedTo &&
+      priority &&
+      startDate &&
+      dueDate &&
+      (!startDate || !dueDate || dueDate >= startDate)
+  );
+  const submitDisabled = submitting || loadingMeta || loadingPhases || loadingMilestones || !requiredFieldsComplete;
 
   const resetForm = () => {
     setProjectId('');
+    setPhaseId('');
+    setMilestoneId('');
+    setPhases([]);
+    setMilestones([]);
+    setPhaseLoadError('');
+    setMilestoneLoadError('');
+    setLoadingPhases(false);
+    setLoadingMilestones(false);
     setTitle('');
     setDescription('');
     setAssignedTo('');
@@ -323,21 +443,84 @@ export default function AddTaskScreen({
     setDbProjects(projects);
     setLoadingMeta(true);
     fetch(`${API_URL}/tasks/meta`)
-      .then((res) => res.json())
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not load task form options.');
+        return data;
+      })
       .then((data) => {
         if (Array.isArray(data.projects)) setDbProjects(data.projects);
         if (Array.isArray(data.users)) setUsers(data.users);
       })
       .catch((err) => {
         console.error('Failed to fetch task metadata:', err);
-        Alert.alert('Error', 'Could not load task form options.');
+        Alert.alert('Error', getServerConnectionErrorMessage(err));
       })
       .finally(() => setLoadingMeta(false));
   }, [projects, visible]);
 
+  useEffect(() => {
+    if (!visible || !projectId) {
+      setPhases([]);
+      setMilestones([]);
+      setPhaseLoadError('');
+      setMilestoneLoadError('');
+      setLoadingPhases(false);
+      setLoadingMilestones(false);
+      return;
+    }
+
+    let isCurrent = true;
+    setLoadingPhases(true);
+    setPhaseLoadError('');
+    setPhases([]);
+    setMilestones([]);
+
+    fetch(`${API_URL}/projects/${projectId}/milestone-plan`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to fetch milestone plan.');
+        return data;
+      })
+      .then((data) => {
+        if (!isCurrent) return;
+        setPhases(normalizePhases(Array.isArray(data.phases) ? data.phases : []));
+      })
+      .catch((err) => {
+        if (!isCurrent) return;
+        console.error('Failed to fetch project phases:', err);
+        setPhaseLoadError('Could not load phases. Please try again.');
+      })
+      .finally(() => {
+        if (isCurrent) setLoadingPhases(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [projectId, visible]);
+
+  useEffect(() => {
+    if (!phaseId) {
+      setMilestones([]);
+      setMilestoneLoadError('');
+      setLoadingMilestones(false);
+      return;
+    }
+
+    setLoadingMilestones(true);
+    setMilestoneLoadError('');
+
+    const selectedPhase = phases.find((phase) => String(phase.id) === phaseId);
+    setMilestones(selectedPhase?.milestones || []);
+    setLoadingMilestones(false);
+  }, [phaseId, phases]);
+
   const validate = () => {
     const nextErrors: Record<string, string> = {};
     if (!projectId) nextErrors.project_id = 'Project is required.';
+    if (!phaseId) nextErrors.phase_id = 'Phase is required.';
+    if (!milestoneId) nextErrors.milestone_id = 'Milestone is required.';
     if (!title.trim()) nextErrors.title = 'Task title is required.';
     if (!assignedTo) nextErrors.assigned_to = 'Assigned user is required.';
     if (!priority) nextErrors.priority = 'Priority is required.';
@@ -359,8 +542,27 @@ export default function AddTaskScreen({
     if (!selector) return;
 
     if (selector === 'project') {
+      if (value !== projectId) {
+        setPhaseId('');
+        setMilestoneId('');
+        setPhases([]);
+        setMilestones([]);
+        setPhaseLoadError('');
+        setMilestoneLoadError('');
+      }
       setProjectId(value);
-      setErrors((prev) => ({ ...prev, project_id: '' }));
+      setErrors((prev) => ({ ...prev, project_id: '', phase_id: '', milestone_id: '' }));
+    } else if (selector === 'phase') {
+      if (value !== phaseId) {
+        setMilestoneId('');
+        setMilestones([]);
+        setMilestoneLoadError('');
+      }
+      setPhaseId(value);
+      setErrors((prev) => ({ ...prev, phase_id: '', milestone_id: '' }));
+    } else if (selector === 'milestone') {
+      setMilestoneId(value);
+      setErrors((prev) => ({ ...prev, milestone_id: '' }));
     } else if (selector === 'assignedTo') {
       setAssignedTo(value);
       setErrors((prev) => ({ ...prev, assigned_to: '' }));
@@ -446,6 +648,8 @@ export default function AddTaskScreen({
       const formData = new FormData();
       formData.append('title', title.trim());
       formData.append('project_id', projectId);
+      formData.append('phase_id', phaseId);
+      formData.append('milestone_id', milestoneId);
       formData.append('description', description.trim());
       formData.append('assigned_to', assignedTo);
       formData.append('priority', priority);
@@ -481,7 +685,7 @@ export default function AddTaskScreen({
       onClose();
     } catch (error) {
       console.error('Error adding task:', error);
-      Alert.alert('Connection Error', 'Could not reach the server.');
+      Alert.alert('Connection Error', getServerConnectionErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
@@ -616,7 +820,7 @@ export default function AddTaskScreen({
             ) : (
               <>
                 <Section title="Project Details" icon="folder-open-outline" {...sectionStyleProps}>
-                  <FieldWrap className="mb-0">
+                  <FieldWrap>
                     <FormLabel color={labelColor}>Project *</FormLabel>
                     <SelectField
                       value={selectedProjectLabel}
@@ -625,6 +829,32 @@ export default function AddTaskScreen({
                       {...selectStyleProps}
                     />
                     <FieldErrorText message={errors.project_id} color={theme.danger} />
+                  </FieldWrap>
+
+                  <FieldWrap>
+                    <FormLabel color={labelColor}>Phase *</FormLabel>
+                    <SelectField
+                      value={selectedPhaseLabel}
+                      placeholder={projectId ? 'Select phase' : 'Select project first'}
+                      onPress={() => openSelector('phase')}
+                      disabled={!projectId || loadingPhases || Boolean(phaseLoadError)}
+                      {...selectStyleProps}
+                    />
+                    <FieldStatusText message={phaseStatusText} color={phaseLoadError ? theme.danger : mutedColor} />
+                    <FieldErrorText message={errors.phase_id} color={theme.danger} />
+                  </FieldWrap>
+
+                  <FieldWrap className="mb-0">
+                    <FormLabel color={labelColor}>Milestone *</FormLabel>
+                    <SelectField
+                      value={selectedMilestoneLabel}
+                      placeholder={phaseId ? 'Select milestone' : 'Select phase first'}
+                      onPress={() => openSelector('milestone')}
+                      disabled={!phaseId || loadingMilestones || Boolean(milestoneLoadError)}
+                      {...selectStyleProps}
+                    />
+                    <FieldStatusText message={milestoneStatusText} color={milestoneLoadError ? theme.danger : mutedColor} />
+                    <FieldErrorText message={errors.milestone_id} color={theme.danger} />
                   </FieldWrap>
                 </Section>
 
@@ -781,9 +1011,9 @@ export default function AddTaskScreen({
           <View style={formContentStyle}>
             <TouchableOpacity
               onPress={submit}
-              disabled={submitting || loadingMeta}
+              disabled={submitDisabled}
               className="h-14 items-center justify-center rounded-2xl"
-              style={{ backgroundColor: submitting || loadingMeta ? theme.primaryPressed : theme.primary, opacity: submitting || loadingMeta ? 0.78 : 1 }}
+              style={{ backgroundColor: submitDisabled ? theme.primaryPressed : theme.primary, opacity: submitDisabled ? 0.72 : 1 }}
             >
               {submitting ? (
                 <ActivityIndicator color="white" />
@@ -791,6 +1021,11 @@ export default function AddTaskScreen({
                 <Text className="text-[15px] font-bold text-white">Create Task</Text>
               )}
             </TouchableOpacity>
+            {!requiredFieldsComplete && !loadingMeta ? (
+              <Text className="mt-2 text-center text-[11px]" style={{ color: mutedColor }}>
+                Complete all required fields before creating the task.
+              </Text>
+            ) : null}
           </View>
         </View>
         <SelectorSheet />

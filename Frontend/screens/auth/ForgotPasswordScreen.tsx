@@ -82,9 +82,9 @@ export default function ForgotPasswordScreen({ onBackToLogin, onOtpSent }: Forgo
     setMessage('');
 
     try {
-      console.log('Forgot password normalized email:', trimmedEmail);
+      if (__DEV__) console.log('Forgot password normalized email:', trimmedEmail);
       const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
-      console.log('resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
+      if (__DEV__) console.log('resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
 
       if (error) throw error;
 

@@ -2,6 +2,13 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { sendPushNotificationToUser } = require('../services/pushNotificationService');
+const { logProjectActivity } = require('../services/activityLogService');
+const {
+  VIEW_ONLY_INVENTORY_MESSAGE,
+  NO_INVENTORY_ACCESS_MESSAGE,
+  getInventoryAccessLevel,
+  normalizeRole,
+} = require('../rbac');
 
 // ── Phase 2 Constants ───────────────────────────────────────────────────
 const VALID_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE', 'ADJUSTMENT'];
@@ -17,10 +24,111 @@ async function ensureInventoryColumns() {
   inventorySchemaReady = true;
 }
 
-// GET /inventory?projectId=1
+async function getUserRole(userId) {
+  const parsedUserId = Number(userId);
+  if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) return '';
+
+  const result = await pool.query('SELECT role FROM users WHERE id = $1', [parsedUserId]);
+  return normalizeRole(result.rows[0]?.role);
+}
+
+function getActorId(req) {
+  return (
+    req.query?.userId ||
+    req.query?.user_id ||
+    req.body?.userId ||
+    req.body?.user_id ||
+    req.body?.createdBy ||
+    req.body?.created_by ||
+    req.body?.updatedBy ||
+    req.body?.updated_by ||
+    req.body?.deletedBy ||
+    req.body?.deleted_by
+  );
+}
+
+function rejectInventoryAccess(res, accessLevel) {
+  if (accessLevel === 'VIEW_ONLY') {
+    res.status(403).json({ message: VIEW_ONLY_INVENTORY_MESSAGE });
+    return true;
+  }
+
+  if (accessLevel === 'NO_ACCESS') {
+    res.status(403).json({ message: NO_INVENTORY_ACCESS_MESSAGE });
+    return true;
+  }
+
+  return false;
+}
+
+async function getActorInventoryAccess(userId) {
+  const role = await getUserRole(userId);
+  return {
+    role,
+    accessLevel: getInventoryAccessLevel(role),
+  };
+}
+
+function canViewAllInventoryProjects(role) {
+  return ['ceo', 'coo', 'accounting', 'procurement'].includes(normalizeRole(role));
+}
+
+async function canAccessProjectInventory(userId, role, projectId) {
+  const parsedUserId = Number(userId);
+  const parsedProjectId = Number(projectId);
+  if (!Number.isFinite(parsedProjectId) || parsedProjectId <= 0) return false;
+  if (canViewAllInventoryProjects(role)) return true;
+  if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) return false;
+
+  const result = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM projects p
+       WHERE p.id = $1
+         AND p.project_in_charge_id = $2
+     ) OR EXISTS (
+       SELECT 1
+       FROM tasks t
+       WHERE t.project_id = $1
+         AND (t.assigned_to = $2 OR t.assigned_by = $2 OR t.created_by = $2)
+         AND (t.deleted_at IS NULL OR t.deleted_at IS NOT DISTINCT FROM NULL)
+     ) AS allowed`,
+    [parsedProjectId, parsedUserId]
+  );
+
+  return Boolean(result.rows[0]?.allowed);
+}
+
+async function rejectInventoryProjectAccess(req, res, projectId, context) {
+  const actorId = getActorId(req);
+  if (await canAccessProjectInventory(actorId, context.role, projectId)) return false;
+  res.status(403).json({ message: NO_INVENTORY_ACCESS_MESSAGE });
+  return true;
+}
+
+async function rejectInventoryRead(req, res) {
+  const actorId = getActorId(req);
+  const context = await getActorInventoryAccess(actorId);
+  const { projectId } = req.query;
+  if (context.accessLevel === 'NO_ACCESS') {
+    res.status(403).json({ message: NO_INVENTORY_ACCESS_MESSAGE });
+    return true;
+  }
+  return rejectInventoryProjectAccess(req, res, projectId, context);
+}
+
+async function rejectInventoryWrite(req, res) {
+  const actorId = getActorId(req);
+  const context = await getActorInventoryAccess(actorId);
+  const rejected = rejectInventoryAccess(res, context.accessLevel);
+  return rejected ? null : context;
+}
+
+// GET /inventory?projectId=1&userId=1
 router.get('/', async (req, res) => {
   const { projectId } = req.query;
   try {
+    if (await rejectInventoryRead(req, res)) return;
     await ensureInventoryColumns();
     const result = await pool.query(
       `SELECT id, project_id, item_name, category, current_stock AS quantity, critical_level, price, unit, created_at, updated_at
@@ -36,10 +144,11 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /inventory/logs?projectId=1&search=&actionType=
+// GET /inventory/logs?projectId=1&userId=1&search=&actionType=
 router.get('/logs', async (req, res) => {
   const { projectId, search = '', actionType = 'all' } = req.query;
   try {
+    if (await rejectInventoryRead(req, res)) return;
     await ensureInventoryColumns();
     const params = [projectId];
     let where = 'WHERE i.project_id = $1';
@@ -99,6 +208,9 @@ router.post('/:itemId/transaction', async (req, res) => {
   const { itemId } = req.params;
   const { action_type, quantity, reference_task_id, notes, created_by } = req.body;
 
+  const inventoryContext = await rejectInventoryWrite(req, res);
+  if (!inventoryContext) return;
+
   // ── Validate action_type ──
   if (!action_type || !VALID_ACTION_TYPES.includes(action_type)) {
     return res.status(400).json({
@@ -129,6 +241,7 @@ router.post('/:itemId/transaction', async (req, res) => {
       return res.status(404).json({ error: 'Inventory item not found.' });
     }
     const item = itemCheck.rows[0];
+    if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
 
     // Insert the transaction log — the DB trigger handles stock update
     const logResult = await pool.query(
@@ -144,6 +257,18 @@ router.post('/:itemId/transaction', async (req, res) => {
       [itemId]
     );
     const refreshedItem = updatedItem.rows[0];
+    await logProjectActivity(pool, {
+      projectId: item.project_id,
+      userId: created_by,
+      action: 'inventory_transaction_saved',
+      description: `${action_type} recorded for ${item.item_name}.`,
+      metadata: {
+        inventory_item_id: Number(itemId),
+        action_type,
+        quantity: numQty,
+        reference_task_id: reference_task_id || null,
+      },
+    });
 
     // ── Low Stock Alert ──
     if (refreshedItem && Number(refreshedItem.quantity) <= Number(refreshedItem.critical_level)) {
@@ -169,6 +294,17 @@ router.post('/:itemId/transaction', async (req, res) => {
               item_id: String(itemId),
             }
           );
+          await logProjectActivity(pool, {
+            projectId: item.project_id,
+            userId: created_by,
+            action: 'low_stock_alert_generated',
+            description: `${item.item_name} reached low stock level.`,
+            metadata: {
+              inventory_item_id: Number(itemId),
+              current_stock: refreshedItem.quantity,
+              critical_level: refreshedItem.critical_level,
+            },
+          });
         }
       }
     }
@@ -186,6 +322,10 @@ router.post('/:itemId/transaction', async (req, res) => {
 // POST /inventory  — Add new inventory item (unchanged, still allowed)
 router.post('/', async (req, res) => {
   const { projectId, itemName, category, quantity, criticalLevel, price, unit, createdBy } = req.body;
+  const inventoryContext = await rejectInventoryWrite(req, res);
+  if (!inventoryContext) return;
+  if (await rejectInventoryProjectAccess(req, res, projectId, inventoryContext)) return;
+
   
   // Parse numbers from strings (e.g. "P100 per bag" -> 100)
   const numQty = parseFloat(String(quantity).replace(/[^0-9.]/g, '')) || 0;
@@ -207,6 +347,17 @@ router.post('/', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, NOW())`,
       [item.id, 'RECEIVING', numQty, 'Initial stock — item added via mobile inventory.', createdBy || 1]
     );
+    await logProjectActivity(pool, {
+      projectId,
+      userId: createdBy,
+      action: 'inventory_item_added',
+      description: `${item.item_name} was added to inventory.`,
+      metadata: {
+        inventory_item_id: item.id,
+        quantity: numQty,
+        critical_level: numCrit,
+      },
+    });
     res.json(item);
   } catch (err) {
     console.error('Fetch POST error:', err);
@@ -217,6 +368,26 @@ router.post('/', async (req, res) => {
 // PATCH /inventory/:id  — Update item metadata ONLY (name, category, etc.)
 // NOTE: Stock quantity updates are NO LONGER allowed here. Use POST /:itemId/transaction.
 router.patch('/:id', async (req, res) => {
+  const inventoryContext = await rejectInventoryWrite(req, res);
+  if (!inventoryContext) return;
+
+  const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
+  const item = itemResult.rows[0];
+  if (item && (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext))) return;
+
+  res.status(405).json({
+    error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
+  });
+});
+
+router.put('/:id', async (req, res) => {
+  const inventoryContext = await rejectInventoryWrite(req, res);
+  if (!inventoryContext) return;
+
+  const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
+  const item = itemResult.rows[0];
+  if (item && (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext))) return;
+
   res.status(405).json({
     error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
   });
@@ -225,16 +396,30 @@ router.patch('/:id', async (req, res) => {
 // DELETE /inventory/:id
 router.delete('/:id', async (req, res) => {
   const { deletedBy } = req.body || {};
+  const inventoryContext = await rejectInventoryWrite(req, res);
+  if (!inventoryContext) return;
+
   try {
-    const itemResult = await pool.query('SELECT id, current_stock FROM project_inventory_items WHERE id = $1', [req.params.id]);
+    const itemResult = await pool.query('SELECT id, project_id, current_stock FROM project_inventory_items WHERE id = $1', [req.params.id]);
     const item = itemResult.rows[0];
 
     if (item) {
+      if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
       await pool.query(
         `INSERT INTO project_inventory_logs (item_id, action_type, quantity, notes, created_by, created_at)
          VALUES ($1, $2, $3, $4, $5, NOW())`,
         [item.id, 'ADJUSTMENT', item.current_stock || 0, 'Item deleted from inventory.', deletedBy || 1]
       );
+      await logProjectActivity(pool, {
+        projectId: item.project_id,
+        userId: deletedBy,
+        action: 'inventory_item_deleted',
+        description: 'Inventory item was deleted.',
+        metadata: {
+          inventory_item_id: item.id,
+          quantity: item.current_stock || 0,
+        },
+      });
     }
 
     await pool.query('DELETE FROM project_inventory_items WHERE id=$1', [req.params.id]);

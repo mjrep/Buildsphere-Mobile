@@ -11,7 +11,13 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { API_URL } from '../../lib/api';
+import {
+  API_URL,
+  SERVER_UNREACHABLE_MESSAGE,
+  checkApiHealth,
+  getApiConfigurationError,
+  getServerConnectionErrorMessage,
+} from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -40,30 +46,81 @@ export default function LoginScreen({
       Alert.alert('Missing info', 'Please enter your email and password.');
       return;
     }
-    if (!API_URL) {
-      Alert.alert(
-        'Server not configured',
-        'Set EXPO_PUBLIC_API_URL in Frontend/.env to your backend URL, then restart Expo.'
-      );
+    const apiConfigurationError = getApiConfigurationError();
+    if (apiConfigurationError) {
+      Alert.alert('Server not configured', apiConfigurationError);
       return;
     }
     setLoading(true);
     try {
       const trimmedEmail = email.trim().toLowerCase();
-      console.log('Login method: Supabase Auth signInWithPassword');
-      console.log('Login normalized email:', trimmedEmail);
+
+      const loginWithBackend = async () => {
+        const authRes = await fetch(`${API_URL}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: trimmedEmail, password }),
+        });
+        const authData = await authRes.json().catch(() => null);
+        if (!authRes.ok) {
+          throw new Error(authData?.error || 'Invalid email or password.');
+        }
+
+        const profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
+        const profileData = await profileRes.json().catch(() => null);
+        if (!profileRes.ok) {
+          throw new Error(profileData?.error || 'No app profile is linked to this account.');
+        }
+
+        onLogin(profileData, authData.token);
+      };
+
+      if (__DEV__) {
+        console.log('Login method: Supabase Auth signInWithPassword');
+        console.log('Login normalized email:', trimmedEmail);
+      }
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password,
       });
 
       if (!authError && authData.session) {
-        const profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
-        const profileData = await profileRes.json();
+        let profileRes: Response;
+
+        try {
+          profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
+        } catch (profileError) {
+          const backendHealthy = await checkApiHealth();
+          await supabase.auth.signOut();
+          Alert.alert(
+            'Backend unreachable',
+            backendHealthy
+              ? 'Login succeeded, but BuildSphere could not load your profile from the backend.'
+              : `Login succeeded, but ${SERVER_UNREACHABLE_MESSAGE}`
+          );
+          return;
+        }
+
+        let profileData: any = null;
+        try {
+          profileData = await profileRes.json();
+        } catch (parseError) {
+          profileData = null;
+        }
 
         if (!profileRes.ok) {
           await supabase.auth.signOut();
-          Alert.alert('Login Failed', profileData.error || 'No app profile is linked to this Supabase account.');
+          if (profileRes.status >= 500) {
+            Alert.alert(
+              'Profile unavailable',
+              'Login succeeded, but BuildSphere could not load your profile because the backend returned an error.'
+            );
+          } else {
+            Alert.alert(
+              'Login Failed',
+              profileData?.error || 'No app profile is linked to this Supabase account.'
+            );
+          }
           return;
         }
 
@@ -72,17 +129,19 @@ export default function LoginScreen({
       }
 
       const isApiKeyError = authError?.message?.toLowerCase().includes('api key');
+      if (isApiKeyError) {
+        console.warn('Supabase anon key is invalid. Falling back to backend auth login.');
+        await loginWithBackend();
+        return;
+      }
+
       Alert.alert(
         'Login Failed',
-        isApiKeyError
-          ? 'Authentication is not configured correctly. Please contact support.'
-          : authError?.message || 'Invalid email or password.'
+        authError?.message || 'Invalid email or password.'
       );
     } catch (err) {
-      Alert.alert(
-        'Connection Error',
-        'Could not complete login. Make sure the backend is running.'
-      );
+      const message = err instanceof Error ? err.message : '';
+      Alert.alert(message ? 'Login Failed' : 'BuildSphere server is unreachable', message || getServerConnectionErrorMessage(err));
     } finally {
       setLoading(false);
     }

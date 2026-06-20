@@ -24,7 +24,7 @@ function signAuthToken(user) {
 }
 
 function logDevResetOtp(email, otp) {
-  if (process.env.LOG_RESET_OTP !== 'true') return;
+  if (process.env.LOG_RESET_OTP !== 'true' || process.env.NODE_ENV === 'production') return;
   console.log(`[DEV] Password reset OTP generated for ${email}: ${otp}`);
 }
 

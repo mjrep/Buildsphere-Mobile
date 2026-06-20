@@ -29,7 +29,6 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
     ex.autolinkLibrariesFromCommand(expoAutolinking.rnConfigCommand)
   }
 }
-expoAutolinking.projectRoot = file('..')
 expoAutolinking.useExpoModules()
 
 rootProject.name = 'Buildsphere'

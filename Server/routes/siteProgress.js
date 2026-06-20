@@ -7,6 +7,7 @@ const pool = require('../db');
 const { createClient } = require('@supabase/supabase-js');
 const { createNotification, sendPushNotificationToUser } = require('../services/pushNotificationService');
 const { hasQuantityTracking, syncTaskQuantityStatus } = require('../services/taskStatusService');
+const { logProjectActivity } = require('../services/activityLogService');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -71,7 +72,7 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
     // AI detection fields from Gemini-only backend analysis
     ai_detected_count, verified_panel_count,
     avg_confidence, detection_mode,
-    per_photo_counts,
+    per_photo_counts, warning_message,
   } = req.body;
   let photoUrls = []; 
 
@@ -159,6 +160,54 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
         progress.target_quantity = syncedProgress.target_quantity;
         progress.task_status = syncedProgress.task_status;
       }
+    }
+
+    await logProjectActivity(pool, {
+      projectId,
+      userId,
+      action: 'site_progress_uploaded',
+      description: `Site progress uploaded for task #${taskId}.`,
+      metadata: {
+        task_id: Number(taskId),
+        milestone_id: milestoneId,
+        site_progress_id: progress.id,
+        image_url: finalPhotoPath,
+        ai_detected_count: ai_detected_count != null ? parseInt(ai_detected_count) : null,
+        verified_panel_count: savedQuantity,
+        avg_confidence: avg_confidence != null ? parseFloat(avg_confidence) : null,
+        detection_mode: detection_mode || null,
+        warning_message: warning_message || null,
+      },
+    });
+
+    await logProjectActivity(pool, {
+      projectId,
+      userId,
+      action: 'verified_panel_count_saved',
+      description: `Verified panel count saved as ${savedQuantity} for task #${taskId}.`,
+      metadata: {
+        task_id: Number(taskId),
+        milestone_id: milestoneId,
+        site_progress_id: progress.id,
+        verified_panel_count: savedQuantity,
+      },
+    });
+
+    if (ai_detected_count != null) {
+      await logProjectActivity(pool, {
+        projectId,
+        userId,
+        action: 'ai_analysis_completed',
+        description: `AI analysis detected ${parseInt(ai_detected_count) || 0} glass panels for task #${taskId}.`,
+        metadata: {
+          task_id: Number(taskId),
+          site_progress_id: progress.id,
+          ai_detected_count: parseInt(ai_detected_count) || 0,
+          verified_panel_count: savedQuantity,
+          avg_confidence: avg_confidence != null ? parseFloat(avg_confidence) : null,
+          detection_mode: detection_mode || null,
+        },
+      });
     }
 
     const notifTitle = 'Task Progress Recorded';

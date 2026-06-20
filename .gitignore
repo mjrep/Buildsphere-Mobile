@@ -1,9 +1,15 @@
 node_modules/
 .expo/
 .env
+.env.local
+.env.development
+.env.production
+.env*.local
 .DS_Store
 *.apk
 *.log
+*.brotli.txt
+*.inflateRaw.txt
 Devign-Document.pdf
 
 # Mobile Frontend

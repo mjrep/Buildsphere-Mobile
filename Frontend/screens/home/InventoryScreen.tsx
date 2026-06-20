@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { ACTION_TYPE_LABELS, ACTION_TYPE_COLORS } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -33,6 +34,17 @@ interface InventoryItem {
   price: number | string;
   unit?: string;
 }
+
+const fetchProjectTasksFromSupabase = async (projectId: number) => {
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('id,title')
+    .eq('project_id', projectId)
+    .order('id', { ascending: false });
+
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+};
 
 interface InventoryLog {
   id: number;
@@ -89,6 +101,9 @@ const ACTION_LABELS: Record<string, string> = {
 const MOBILE_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE'] as const;
 type MobileActionType = (typeof MOBILE_ACTION_TYPES)[number];
 
+const INVENTORY_VIEW_ONLY_MESSAGE = 'You have view-only access to Inventory.';
+const INVENTORY_NO_ACCESS_MESSAGE = 'You do not have permission to access Inventory.';
+
 export default function InventoryScreen({
   projectId,
   userId,
@@ -102,8 +117,10 @@ export default function InventoryScreen({
   highlightItemId = null,
 }: Props) {
   const perms = getPermissions(userRole);
+  const canView = perms.canViewInventory;
   const canEdit = perms.canEditInventory;
   const canAdd = perms.canAddInventory;
+  const canWriteInventory = canEdit || canAdd;
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -148,24 +165,35 @@ export default function InventoryScreen({
   const categories = ['All', 'Materials', 'Equipment', 'Tools'];
   const actionTypes = ['all', ...MOBILE_ACTION_TYPES];
 
+  const readErrorMessage = async (response: Response, fallback: string) => {
+    const data = await response.json().catch(() => null);
+    return data?.message || data?.error || fallback;
+  };
+
   const fetchItems = async () => {
-    const response = await fetch(`${API_URL}/inventory?projectId=${projectId}`);
-    if (!response.ok) throw new Error('Failed to load inventory items.');
+    const q = new URLSearchParams({
+      projectId: String(projectId),
+      userId: String(userId),
+    });
+    const response = await fetch(`${API_URL}/inventory?${q.toString()}`);
+    if (!response.ok) throw new Error(await readErrorMessage(response, 'Failed to load inventory items.'));
     return response.json();
   };
 
   const fetchLogs = async () => {
     const q = new URLSearchParams({
       projectId: String(projectId),
+      userId: String(userId),
       search: search.trim(),
       actionType: selectedAction,
     });
     const response = await fetch(`${API_URL}/inventory/logs?${q.toString()}`);
-    if (!response.ok) throw new Error('Failed to load inventory logs.');
+    if (!response.ok) throw new Error(await readErrorMessage(response, 'Failed to load inventory logs.'));
     return response.json();
   };
 
   const load = async (showSkeleton = true) => {
+    if (!canView) return;
     setError(null);
     if (showSkeleton) setLoading(true);
     try {
@@ -180,6 +208,7 @@ export default function InventoryScreen({
   };
 
   const refresh = async () => {
+    if (!canView) return;
     setRefreshing(true);
     try {
       await load(false);
@@ -188,23 +217,46 @@ export default function InventoryScreen({
     }
   };
 
+  const safeProjectTasks = Array.isArray(projectTasks) ? projectTasks : [];
+
   // Fetch tasks for CONSUMPTION task-linking
   const fetchTasks = async () => {
+    if (!canView) return;
     try {
-      const res = await fetch(`${API_URL}/tasks/project/${projectId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProjectTasks(Array.isArray(data) ? data : []);
+      let nextTasks: { id: number; title: string }[] = [];
+
+      try {
+        const res = await fetch(`${API_URL}/tasks/project/${projectId}`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to fetch project tasks.');
+        }
+        nextTasks = Array.isArray(data) ? data : [];
+      } catch (backendError) {
+        console.warn('Backend project tasks unavailable, using Supabase fallback:', backendError);
+        nextTasks = await fetchProjectTasksFromSupabase(projectId);
       }
+
+      setProjectTasks(Array.isArray(nextTasks) ? nextTasks : []);
     } catch (err) {
-      console.error('Failed to fetch tasks for linking:', err);
+      console.warn('Failed to fetch tasks for linking:', err);
+      setProjectTasks([]);
     }
   };
 
   useEffect(() => {
+    if (!canView) return;
     load();
     fetchTasks();
-  }, [projectId, selectedAction]);
+  }, [canView, projectId, selectedAction]);
+
+  useEffect(() => {
+    if (!canView) {
+      Alert.alert('Access denied', INVENTORY_NO_ACCESS_MESSAGE, [
+        { text: 'OK', onPress: onBack },
+      ]);
+    }
+  }, [canView, onBack]);
 
   useEffect(() => {
     if (highlightItemId) {
@@ -270,6 +322,18 @@ export default function InventoryScreen({
     );
   };
 
+  const showViewOnlyMessage = () => {
+    Alert.alert('View only', INVENTORY_VIEW_ONLY_MESSAGE);
+  };
+
+  const blockInventoryWrite = () => {
+    Alert.alert('Access denied', canView ? INVENTORY_VIEW_ONLY_MESSAGE : INVENTORY_NO_ACCESS_MESSAGE);
+    return false;
+  };
+
+  const ensureCanAddInventory = () => (canAdd ? true : blockInventoryWrite());
+  const ensureCanEditInventory = () => (canEdit ? true : blockInventoryWrite());
+
   const closeAddItemModal = () => {
     confirmDiscard(hasAddItemDraft(), () => {
       setShowAdd(false);
@@ -312,6 +376,7 @@ export default function InventoryScreen({
   };
 
   const submitAdd = async () => {
+    if (!ensureCanAddInventory()) return;
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/inventory`, {
@@ -328,7 +393,7 @@ export default function InventoryScreen({
           createdBy: userId,
         }),
       });
-      if (!res.ok) throw new Error('Unable to add inventory item.');
+      if (!res.ok) throw new Error(await readErrorMessage(res, 'Unable to add inventory item.'));
       Alert.alert('Success', 'Inventory item added.');
       setShowAdd(false);
       resetAddItemForm();
@@ -341,6 +406,7 @@ export default function InventoryScreen({
   };
 
   const handleAdd = async () => {
+    if (!ensureCanAddInventory()) return;
     if (!addName.trim()) return Alert.alert('Required', 'Item name is required.');
     const qty = Number(addQty);
     if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
@@ -358,6 +424,7 @@ export default function InventoryScreen({
 
   // ── Phase 2: Record Transaction (replaces direct stock edits) ──
   const submitTransaction = async () => {
+    if (!ensureCanEditInventory()) return;
     if (!txnItem) return;
     setSaving(true);
     try {
@@ -374,7 +441,7 @@ export default function InventoryScreen({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Transaction failed.');
+        throw new Error(err.message || err.error || 'Transaction failed.');
       }
       Alert.alert('Success', `${ACTION_TYPE_LABELS[txnAction]} recorded.`);
       setShowTransaction(false);
@@ -388,6 +455,7 @@ export default function InventoryScreen({
   };
 
   const handleTransaction = async () => {
+    if (!ensureCanEditInventory()) return;
     if (!txnItem) return;
     const qty = Number(txnQty);
     if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
@@ -403,6 +471,7 @@ export default function InventoryScreen({
   };
 
   const handleDelete = (id: number) => {
+    if (!ensureCanEditInventory()) return;
     Alert.alert('Delete Item', 'Delete this inventory item?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -415,7 +484,7 @@ export default function InventoryScreen({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ deletedBy: userId }),
             });
-            if (!res.ok) throw new Error('Delete failed.');
+            if (!res.ok) throw new Error(await readErrorMessage(res, 'Delete failed.'));
             Alert.alert('Success', 'Inventory item deleted.');
             await load();
           } catch (err: any) {
@@ -427,6 +496,7 @@ export default function InventoryScreen({
   };
 
   const submitAddLog = async () => {
+    if (!ensureCanEditInventory()) return;
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/inventory/${logItemId}/transaction`, {
@@ -442,7 +512,7 @@ export default function InventoryScreen({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Transaction failed.');
+        throw new Error(err.message || err.error || 'Transaction failed.');
       }
       Alert.alert('Success', `${ACTION_TYPE_LABELS[logActionType]} recorded.`);
       setShowAddLog(false);
@@ -456,6 +526,7 @@ export default function InventoryScreen({
   };
 
   const handleAddLog = async () => {
+    if (!ensureCanEditInventory()) return;
     if (!logItemId || !logQty) {
       return Alert.alert('Required', 'Please select item and quantity.');
     }
@@ -507,6 +578,20 @@ export default function InventoryScreen({
     marginBottom: 10,
   } as const;
 
+  if (!canView) {
+    return (
+      <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: theme.background }}>
+        <Ionicons name="lock-closed-outline" size={42} color={theme.textMuted} />
+        <Text className="mt-4 text-center text-[16px] font-semibold" style={{ color: theme.text }}>
+          {INVENTORY_NO_ACCESS_MESSAGE}
+        </Text>
+        <TouchableOpacity onPress={onBack} className="mt-5 rounded-xl px-5 py-3" style={{ backgroundColor: theme.primary }}>
+          <Text className="font-semibold text-white">Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <View
@@ -516,6 +601,11 @@ export default function InventoryScreen({
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
         <Text className="text-[28px] font-bold" style={{ color: theme.primary }}>Inventory</Text>
+        {!canWriteInventory && (
+          <View className="ml-3 rounded-full px-2.5 py-1" style={{ backgroundColor: theme.primaryLight }}>
+            <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }}>View only</Text>
+          </View>
+        )}
       </View>
 
       <View className="pb-3" style={screenContentStyle}>
@@ -586,14 +676,14 @@ export default function InventoryScreen({
 
       {canAdd && activeTab === 'items' && (
         <View style={screenContentStyle}>
-          <TouchableOpacity onPress={() => setShowAdd(true)} className="mb-3 h-[48px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primary }}>
+          <TouchableOpacity onPress={() => { if (ensureCanAddInventory()) setShowAdd(true); }} className="mb-3 h-[48px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primary }}>
             <Text className="text-[15px] font-bold text-white">Add Inventory Item</Text>
           </TouchableOpacity>
         </View>
       )}
       {canEdit && activeTab === 'logs' && (
         <View style={screenContentStyle}>
-          <TouchableOpacity onPress={() => setShowAddLog(true)} className="mb-3 h-[44px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primaryPressed }}>
+          <TouchableOpacity onPress={() => { if (ensureCanEditInventory()) setShowAddLog(true); }} className="mb-3 h-[44px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primaryPressed }}>
             <Text className="text-[14px] font-bold text-white">Add Log Entry</Text>
           </TouchableOpacity>
         </View>
@@ -645,7 +735,10 @@ export default function InventoryScreen({
                       elevation: 2,
                     }}
                     onPress={() => {
-                      if (!canEdit) return;
+                      if (!canEdit) {
+                        if (!canWriteInventory) showViewOnlyMessage();
+                        return;
+                      }
                       Alert.alert(item.item_name, 'Choose action', [
                         { text: 'Record Transaction', onPress: () => { setTxnItem(item); setTxnAction('RECEIVING'); setTxnQty(''); setTxnNotes(''); setTxnTaskId(''); setShowTransaction(true); } },
                         { text: 'Delete', style: 'destructive', onPress: () => handleDelete(item.id) },
@@ -776,7 +869,7 @@ export default function InventoryScreen({
           </View>
         </ScrollView>
       )}
-        <Modal visible={showAdd} transparent animationType="slide" onRequestClose={closeAddItemModal}>
+        <Modal visible={showAdd && canAdd} transparent animationType="slide" onRequestClose={closeAddItemModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeAddItemModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
@@ -817,7 +910,7 @@ export default function InventoryScreen({
           </KeyboardAvoidingView>
         </Modal>
 
-        <Modal visible={showTransaction} transparent animationType="slide" onRequestClose={closeTransactionModal}>
+        <Modal visible={showTransaction && canEdit} transparent animationType="slide" onRequestClose={closeTransactionModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeTransactionModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
@@ -849,14 +942,14 @@ export default function InventoryScreen({
                 <View className="mb-3">
                   <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.warning }}>⚠ Task Required for Consumption</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    {projectTasks.map((t) => (
+                    {safeProjectTasks.map((t) => (
                       <TouchableOpacity key={t.id} onPress={() => setTxnTaskId(String(t.id))}
                         className="mr-2 rounded-full px-3 py-2"
                         style={{ backgroundColor: txnTaskId === String(t.id) ? theme.primaryLight : theme.input }}>
                         <Text className="text-[12px]" style={{ color: txnTaskId === String(t.id) ? theme.primary : theme.textSecondary }}>{t.title}</Text>
                       </TouchableOpacity>
                     ))}
-                    {projectTasks.length === 0 && <Text className="text-[12px]" style={{ color: theme.textMuted }}>No tasks found for this project.</Text>}
+                    {safeProjectTasks.length === 0 && <Text className="text-[12px]" style={{ color: theme.textMuted }}>No tasks found for this project.</Text>}
                   </ScrollView>
                 </View>
               )}
@@ -869,7 +962,7 @@ export default function InventoryScreen({
           </KeyboardAvoidingView>
         </Modal>
 
-        <Modal visible={showAddLog} transparent animationType="fade" onRequestClose={closeAddLogModal}>
+        <Modal visible={showAddLog && canEdit} transparent animationType="fade" onRequestClose={closeAddLogModal}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 items-center justify-center px-6" style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeAddLogModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
@@ -914,7 +1007,7 @@ export default function InventoryScreen({
                 <View className="mb-2">
                   <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.warning }}>⚠ Select Task</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    {projectTasks.map((t) => (
+                    {safeProjectTasks.map((t) => (
                       <TouchableOpacity key={t.id} onPress={() => setLogTaskId(String(t.id))}
                         className="mr-2 rounded-full px-3 py-2"
                         style={{ backgroundColor: logTaskId === String(t.id) ? theme.primaryLight : theme.input }}>

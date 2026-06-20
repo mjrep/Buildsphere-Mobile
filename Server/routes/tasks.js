@@ -6,8 +6,10 @@ const fs = require('fs');
 const pool = require('../db');
 const { sendPushNotificationToUser } = require('../services/pushNotificationService');
 const { calculateTaskStatus, hasQuantityTracking } = require('../services/taskStatusService');
+const { logProjectActivity } = require('../services/activityLogService');
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
-const TASK_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
+const TASK_PRIORITIES = new Set(['low', 'medium', 'high']);
 const TASK_STATUSES = new Set(['todo', 'pending', 'in_progress', 'in-progress', 'in_review', 'in-review', 'completed']);
 const CREATOR_ROLES = new Set([
   'ceo',
@@ -125,7 +127,7 @@ function validateTaskPayload(body) {
     if (!hasMilestoneId) errors.milestone_id = 'Milestone is required when a phase is selected.';
   }
   if (!Number.isFinite(assigneeId) || assigneeId <= 0) errors.assigned_to = 'Assigned user is required.';
-  if (!TASK_PRIORITIES.has(priority)) errors.priority = 'Priority must be low, medium, high, or urgent.';
+  if (!TASK_PRIORITIES.has(priority)) errors.priority = 'Priority must be low, medium, or high.';
   if (!startDate) errors.start_date = 'Start date is required.';
   if (!dueDate) errors.due_date = 'Finish date is required.';
   if (startDate && dueDate && dueDate < startDate) {
@@ -145,12 +147,9 @@ async function canCreateTasks(actorId) {
   return CREATOR_ROLES.has(role);
 }
 
-// GET /tasks?userId=xxx
-router.get('/', async (req, res) => {
-  const { userId } = req.query;
+async function fetchAssignedTasks(userId) {
   try {
-    // In the screenshot, tasks has 'project' (text) and 'user_id' directly.
-    const result = await pool.query(
+    return await pool.query(
       `SELECT
          t.*,
          p.project_name as project,
@@ -170,6 +169,53 @@ router.get('/', async (req, res) => {
        ORDER BY t.created_at DESC`,
       [userId]
     );
+  } catch (joinError) {
+    console.warn('TASKS_JOIN_QUERY_FAILED:', joinError.message);
+  }
+
+  try {
+    return await pool.query(
+      `SELECT
+         t.*,
+         p.project_name as project,
+         u.first_name || ' ' || u.last_name as assigned_to_name
+       FROM "public"."tasks" t
+       LEFT JOIN "public"."projects" p ON t.project_id = p.id
+       LEFT JOIN "public"."users" u ON t.assigned_to = u.id
+       WHERE t.assigned_to = $1 AND (t.deleted_at IS NULL OR t.deleted_at IS NOT DISTINCT FROM NULL)
+       ORDER BY t.created_at DESC`,
+      [userId]
+    );
+  } catch (basicJoinError) {
+    console.warn('TASKS_BASIC_JOIN_QUERY_FAILED:', basicJoinError.message);
+  }
+
+  try {
+    return await pool.query(
+      `SELECT *
+       FROM "public"."tasks"
+       WHERE assigned_to = $1
+       ORDER BY id DESC`,
+      [userId]
+    );
+  } catch (assignedToError) {
+    console.warn('TASKS_ASSIGNED_TO_QUERY_FAILED:', assignedToError.message);
+  }
+
+  return pool.query(
+    `SELECT *
+     FROM "public"."tasks"
+     WHERE user_id = $1
+     ORDER BY id DESC`,
+    [userId]
+  );
+}
+
+// GET /tasks?userId=xxx
+router.get('/', async (req, res) => {
+  const { userId } = req.query;
+  try {
+    const result = await fetchAssignedTasks(userId);
 
     res.json(result.rows.map(formatTask));
   } catch (err) {
@@ -202,7 +248,6 @@ router.get('/meta', async (_req, res) => {
         { value: 'low', label: 'Low' },
         { value: 'medium', label: 'Medium' },
         { value: 'high', label: 'High' },
-        { value: 'urgent', label: 'Urgent' },
       ],
       statuses: [
         { value: 'pending', label: 'To Do' },
@@ -220,7 +265,7 @@ router.get('/meta', async (_req, res) => {
 // GET /tasks/:taskId/progress
 router.get('/:taskId/progress', async (req, res) => {
   const { taskId } = req.params;
-  console.log(`FETCHING PROGRESS FOR TASK: ${taskId}`);
+  if (isDevelopment) console.log(`FETCHING PROGRESS FOR TASK: ${taskId}`);
   try {
     const result = await pool.query(
       `SELECT 
@@ -375,6 +420,20 @@ router.post(
       ]
     );
     const task = result.rows[0];
+    await logProjectActivity(pool, {
+      projectId: values.projectId,
+      taskId: task.id,
+      userId: actorId,
+      action: 'task_created',
+      description: `Task "${values.title}" was created and assigned.`,
+      metadata: {
+        task_id: task.id,
+        assigned_to: values.assigneeId,
+        phase_id: values.phaseId,
+        milestone_id: values.milestoneId,
+        priority: values.priority,
+      },
+    });
     const files = [
       ...((req.files && req.files.attachments) || []),
       ...((req.files && req.files['attachments[]']) || []),
@@ -453,7 +512,7 @@ router.patch('/:id', async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
   
-  console.log(`UPDATING TASK ${id}:`, updates);
+  if (isDevelopment) console.log(`UPDATING TASK ${id}:`, updates);
 
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No fields provided for update.' });
@@ -501,14 +560,33 @@ router.patch('/:id', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      console.log(`TASK ${id} NOT FOUND`);
+      if (isDevelopment) console.log(`TASK ${id} NOT FOUND`);
       return res.status(404).json({ error: 'Task not found.' });
     }
     
-    console.log(`TASK ${id} UPDATED SUCCESSFULLY`);
+    if (isDevelopment) console.log(`TASK ${id} UPDATED SUCCESSFULLY`);
 
     const updatedTask = result.rows[0];
     const actorId = updates.updated_by || currentTask?.updated_by;
+
+    if (
+      currentTask &&
+      updates.status &&
+      String(updates.status).toLowerCase() !== String(currentTask.status || '').toLowerCase()
+    ) {
+      await logProjectActivity(pool, {
+        projectId: updatedTask.project_id || currentTask.project_id,
+        taskId: updatedTask.id,
+        userId: actorId,
+        action: 'task_status_changed',
+        description: `Task "${currentTask.title}" status changed to ${updates.status}.`,
+        metadata: {
+          task_id: updatedTask.id,
+          from_status: currentTask.status,
+          to_status: updates.status,
+        },
+      });
+    }
 
     if (
       currentTask &&

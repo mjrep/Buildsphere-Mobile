@@ -183,7 +183,7 @@ export default function TaskDetailScreen({
     }
 
     if (!perms.canViewInventory) {
-      Alert.alert('Access limited', 'Your role does not have permission to view project inventory.');
+      Alert.alert('Access denied', 'You do not have permission to access Inventory.');
       return;
     }
 
@@ -483,22 +483,25 @@ export default function TaskDetailScreen({
 
 
 
-          <View className="mb-8">
-            <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Project Oversight</Text>
-            <TouchableOpacity
-              onPress={handleInventoryPress}
-              disabled={!perms.canViewInventory}
-              className="h-[60px] w-full flex-row items-center justify-center rounded-[16px]"
-              style={{ backgroundColor: perms.canViewInventory ? theme.primary : theme.textMuted }}>
-              <Ionicons name="cube-outline" size={24} color="white" />
-              <Text className="ml-3 font-bold text-white">Audit Project Inventory</Text>
-            </TouchableOpacity>
-            <Text className="mt-2 text-center text-[12px] italic" style={{ color: theme.textMuted }}>
-              {perms.canViewInventory
-                ? 'Verification access for project materials & budgets.'
-                : 'Your role does not have inventory audit access.'}
-            </Text>
-          </View>
+          {perms.canViewInventory && (
+            <View className="mb-8">
+              <Text className="mb-4 text-[18px] font-bold" style={{ color: theme.text }}>Project Oversight</Text>
+              <TouchableOpacity
+                onPress={handleInventoryPress}
+                className="h-[60px] w-full flex-row items-center justify-center rounded-[16px]"
+                style={{ backgroundColor: theme.primary }}>
+                <Ionicons name="cube-outline" size={24} color="white" />
+                <Text className="ml-3 font-bold text-white">
+                  {perms.canEditInventory ? 'Audit Project Inventory' : 'View Project Inventory'}
+                </Text>
+              </TouchableOpacity>
+              <Text className="mt-2 text-center text-[12px] italic" style={{ color: theme.textMuted }}>
+                {perms.canEditInventory
+                  ? 'Verification access for project materials & budgets.'
+                  : 'Read-only access for project materials & stock history.'}
+              </Text>
+            </View>
+          )}
 
           {/* Comments Section */}
           <View className="mb-10 rounded-[24px] border p-6" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>

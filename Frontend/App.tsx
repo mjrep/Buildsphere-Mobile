@@ -157,6 +157,22 @@ function AppContent() {
         }
 
         if (!data.session) {
+          const [storedUser, storedToken] = await Promise.all([
+            AsyncStorage.getItem('user'),
+            AsyncStorage.getItem('token'),
+          ]);
+
+          if (storedUser && storedToken) {
+            let parsed = JSON.parse(storedUser);
+            if (parsed.first_name && !parsed.firstName) parsed.firstName = parsed.first_name;
+            if (parsed.middle_name && !parsed.middleName) parsed.middleName = parsed.middle_name;
+            if (parsed.last_name && !parsed.lastName) parsed.lastName = parsed.last_name;
+            if (parsed.phone_number && !parsed.phoneNumber) parsed.phoneNumber = parsed.phone_number;
+            if (!parsed.role) parsed.role = 'general_staff';
+            setUser(parsed);
+            return;
+          }
+
           await AsyncStorage.multiRemove(['user', 'token']);
           setUser(null);
           return;

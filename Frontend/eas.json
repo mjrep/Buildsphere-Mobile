@@ -10,12 +10,22 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://buildsphere-mobile-server.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://gadhovevmzmzesiqgubb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "YOUR_SUPABASE_ANON_KEY"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://buildsphere-mobile-server.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://gadhovevmzmzesiqgubb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "YOUR_SUPABASE_ANON_KEY"
+      }
     }
   },
   "submit": {

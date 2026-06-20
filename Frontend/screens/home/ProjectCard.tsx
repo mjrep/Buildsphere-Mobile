@@ -2,13 +2,18 @@ import { View, Text, TouchableOpacity, Image, ImageSourcePropType, useWindowDime
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { softCardShadow } from '../../constants/theme';
+import { BudgetValue, formatCurrencyPHP } from '../../utils/budget';
 
 interface ProjectCardProps {
   name: string;
   location: string;
+  clientName?: string;
   color: string;
+  status?: string;
   progress?: number;
   daysLeft?: number;
+  totalBudget?: BudgetValue;
+  canViewBudget?: boolean;
   image?: ImageSourcePropType;
   onAction?: () => void;
 }
@@ -16,9 +21,13 @@ interface ProjectCardProps {
 export default function ProjectCard({
   name,
   location,
+  clientName,
   color,
+  status,
   progress = 0,
   daysLeft,
+  totalBudget,
+  canViewBudget = false,
   image,
   onAction,
 }: ProjectCardProps) {
@@ -82,6 +91,23 @@ export default function ProjectCard({
               )}
             </View>
             <Text className="mt-2 text-[11px]" style={{ color: theme.textMuted }} numberOfLines={2}>{location}</Text>
+            {clientName ? (
+              <Text className="mt-1 text-[11px]" style={{ color: theme.textMuted }} numberOfLines={1}>
+                Client: {clientName}
+              </Text>
+            ) : null}
+            {status ? (
+              <View className="mt-2 self-start rounded-full px-2 py-0.5" style={{ backgroundColor: theme.primaryLight }}>
+                <Text className="text-[9px] font-bold uppercase" style={{ color: theme.primary }} numberOfLines={1}>
+                  {status}
+                </Text>
+              </View>
+            ) : null}
+            {canViewBudget ? (
+              <Text className="mt-1 text-[11px] font-semibold" style={{ color: theme.textSecondary }} numberOfLines={1}>
+                Total Budget: {formatCurrencyPHP(totalBudget)}
+              </Text>
+            ) : null}
           </View>
         </View>
 

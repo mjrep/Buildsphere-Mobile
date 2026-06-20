@@ -3,37 +3,80 @@ const router = express.Router();
 const pool = require('../db');
 const { sendPushNotificationToUser } = require('../services/pushNotificationService');
 
+function firstPresent(...values) {
+  return values.find((value) => value !== null && value !== undefined && String(value).trim() !== '');
+}
+
+function projectBudgetFields(project) {
+  const totalBudget = firstPresent(
+    project.total_budget,
+    project.budget_for_materials,
+    project.project_budget,
+    project.budget
+  );
+
+  return {
+    budget_for_materials: project.budget_for_materials ?? totalBudget ?? null,
+    total_budget: totalBudget ?? null,
+    budget: totalBudget ?? null,
+  };
+}
+
+async function fetchBasicProjects() {
+  try {
+    const result = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
+    return result.rows;
+  } catch (error) {
+    const result = await pool.query('SELECT * FROM projects ORDER BY id DESC');
+    return result.rows;
+  }
+}
+
+function mapProjectForMobile(row, progress = row.progress) {
+  return {
+    ...row,
+    name: row.name || row.project_name || 'Unnamed Project',
+    location: row.location || row.address || 'Unknown Location',
+    color: row.color || '#FFDFF2',
+    progress: parseInt(progress) || 0,
+    ...projectBudgetFields(row),
+  };
+}
+
 // GET /projects
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        p.*,
-        COALESCE(
-          (SELECT 
-            CASE 
-              WHEN COUNT(*) = 0 THEN 0 
-              ELSE ROUND((COUNT(*) FILTER (WHERE 
-                (pm.has_quantity = true AND pm.current_quantity >= pm.target_quantity) OR
-                (pm.has_quantity = false AND EXISTS (SELECT 1 FROM tasks t WHERE t.milestone_id = pm.id AND t.status = 'completed'))
-              )::numeric / COUNT(*)) * 100) 
-            END
-           FROM project_milestones pm 
-           WHERE pm.project_id = p.id),
-          0
-        ) as progress
-      FROM projects p
-      ORDER BY p.created_at DESC
-    `);
-    
-    // Map DB fields to frontend expected fields
-    const mapped = result.rows.map(row => ({
-      ...row,
-      name: row.name || row.project_name || 'Unnamed Project',
-      location: row.location || row.address || 'Unknown Location',
-      color: row.color || '#FFDFF2',
-      progress: parseInt(row.progress) || 0
-    }));
+    let rows;
+
+    try {
+      const result = await pool.query(`
+        SELECT
+          p.*,
+          TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS project_in_charge_name,
+          COALESCE(
+            (SELECT
+              CASE
+                WHEN COUNT(*) = 0 THEN 0
+                ELSE ROUND((COUNT(*) FILTER (WHERE
+                  (pm.has_quantity = true AND pm.current_quantity >= pm.target_quantity) OR
+                  (pm.has_quantity = false AND EXISTS (SELECT 1 FROM tasks t WHERE t.milestone_id = pm.id AND t.status = 'completed'))
+                )::numeric / COUNT(*)) * 100)
+              END
+             FROM project_milestones pm
+             WHERE pm.project_id = p.id),
+            0
+          ) as progress
+        FROM projects p
+        LEFT JOIN users u ON u.id = p.project_in_charge_id
+        ORDER BY p.created_at DESC
+      `);
+      rows = result.rows;
+    } catch (progressError) {
+      console.warn('PROJECT_PROGRESS_QUERY_FAILED:', progressError.message);
+      rows = await fetchBasicProjects();
+    }
+
+    const mapped = rows.map((row) => mapProjectForMobile(row));
     
     res.json(mapped);
   } catch (err) {
@@ -42,37 +85,70 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /projects/:id/activity
+router.get('/:id/activity', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, project_id, user_id, action, description, metadata, created_at
+       FROM project_activity_logs
+       WHERE project_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.warn('PROJECT_ACTIVITY_FETCH_FAILED:', err.message);
+    res.json([]);
+  }
+});
+
 // GET /projects/:id
 router.get('/:id', async (req, res) => {
   try {
-    const projectResult = await pool.query('SELECT * FROM projects WHERE id=$1', [req.params.id]);
+    const projectResult = await pool.query(
+      `SELECT
+         p.*,
+         TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS project_in_charge_name
+       FROM projects p
+       LEFT JOIN users u ON u.id = p.project_in_charge_id
+       WHERE p.id = $1`,
+      [req.params.id]
+    );
     if (projectResult.rows.length === 0) return res.status(404).json({ error: 'Project not found.' });
     
     const project = projectResult.rows[0];
 
     // Calculate Progress dynamically from Milestones (matching web logic)
-    const milestoneStats = await pool.query(
-      `SELECT 
-        COUNT(*) as total, 
-        COUNT(*) FILTER (WHERE 
-          (has_quantity = true AND current_quantity >= target_quantity) OR
-          (has_quantity = false AND EXISTS (SELECT 1 FROM tasks t WHERE t.milestone_id = project_milestones.id AND t.status = 'completed'))
-        ) as completed 
-       FROM project_milestones 
-       WHERE project_id = $1`,
-      [req.params.id]
-    );
+    let progress = 0;
+    try {
+      const milestoneStats = await pool.query(
+        `SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE
+            (has_quantity = true AND current_quantity >= target_quantity) OR
+            (has_quantity = false AND EXISTS (SELECT 1 FROM tasks t WHERE t.milestone_id = project_milestones.id AND t.status = 'completed'))
+          ) as completed
+         FROM project_milestones
+         WHERE project_id = $1`,
+        [req.params.id]
+      );
 
-    const totalMilestones = parseInt(milestoneStats.rows[0].total) || 0;
-    const completedMilestones = parseInt(milestoneStats.rows[0].completed) || 0;
-    const progress = totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0;
+      const totalMilestones = parseInt(milestoneStats.rows[0].total) || 0;
+      const completedMilestones = parseInt(milestoneStats.rows[0].completed) || 0;
+      progress = totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0;
+    } catch (progressError) {
+      console.warn('PROJECT_DETAIL_PROGRESS_QUERY_FAILED:', progressError.message);
+    }
 
 
     res.json({
       ...project,
       name: project.name || project.project_name,
       location: project.location || project.address,
-      progress: progress 
+      color: project.color || '#FFDFF2',
+      progress,
+      ...projectBudgetFields(project),
     });
   } catch (err) {
     console.error(err);
@@ -186,7 +262,10 @@ router.put('/:id', async (req, res) => {
       );
     }
 
-    res.json(result.rows[0]);
+    res.json({
+      ...result.rows[0],
+      ...projectBudgetFields(result.rows[0]),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update project.' });

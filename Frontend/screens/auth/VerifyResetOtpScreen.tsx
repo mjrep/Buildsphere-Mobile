@@ -68,7 +68,7 @@ export default function VerifyResetOtpScreen({
   const [otpFocused, setOtpFocused] = useState(false);
 
   useEffect(() => {
-    console.log('OTP screen received email:', normalizedEmail ? 'yes' : 'no');
+    if (__DEV__) console.log('OTP screen received email:', normalizedEmail ? 'yes' : 'no');
   }, [normalizedEmail]);
 
   useEffect(() => {
@@ -94,7 +94,7 @@ export default function VerifyResetOtpScreen({
     }
 
     const cleanedOtp = otp.replace(/\s/g, '').trim();
-    console.log('Clean OTP length:', cleanedOtp.length);
+    if (__DEV__) console.log('Clean OTP length:', cleanedOtp.length);
     if (!cleanedOtp) {
       setErrorMessage('Enter the OTP code sent to your email.');
       return;
@@ -110,7 +110,7 @@ export default function VerifyResetOtpScreen({
         token: cleanedOtp,
         type: 'recovery',
       });
-      console.log('verifyOtp recovery result:', error ? `error: ${error.message}` : 'success');
+      if (__DEV__) console.log('verifyOtp recovery result:', error ? `error: ${error.message}` : 'success');
 
       if (error) throw error;
 
@@ -134,9 +134,9 @@ export default function VerifyResetOtpScreen({
     setMessage('');
 
     try {
-      console.log('Resend password reset normalized email:', normalizedEmail);
+      if (__DEV__) console.log('Resend password reset normalized email:', normalizedEmail);
       const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail);
-      console.log('resend resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
+      if (__DEV__) console.log('resend resetPasswordForEmail result:', error ? `error: ${error.message}` : 'success');
 
       if (error) throw error;
 

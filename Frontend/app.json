@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Buildsphere",
-    "slug": "Buildsphere",
+    "slug": "buildsphere",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/Buildspherelogo4x.png",
@@ -55,7 +55,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "1f3079d4-e842-4c45-9313-6f10f24b34c3"
+        "projectId": "1c2ed9d9-6d4c-4b8a-9052-af1100d2cf29"
       }
     },
     "owner": "icecandyyy"

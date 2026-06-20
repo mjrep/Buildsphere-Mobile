@@ -21,8 +21,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 
 import * as ImagePicker from 'expo-image-picker';
 
-import { API_URL } from '../../lib/api';
+import { API_URL, getServerConnectionErrorMessage } from '../../lib/api';
 import { UserInfo } from '../../App';
+import { supabase } from '../../lib/supabase';
 import { analyzeGlassPanelsWithGemini, GeminiAuditResult } from '../../lib/generative-ai';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
@@ -52,6 +53,8 @@ interface PhotoAnalysisResult {
   detectionMode: string;
   hasWarnings: boolean;
   warningMessage?: string;
+  summary?: string;
+  uncertainCount?: number;
   status: 'complete' | 'failed';
 }
 
@@ -72,6 +75,25 @@ type AnalysisStatus =
   | 'failed';           // Analysis failed — manual entry needed
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const fetchAssignedTasksFromSupabase = async (userId: number) => {
+  const byAssignedTo = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('assigned_to', userId)
+    .order('id', { ascending: false });
+
+  if (!byAssignedTo.error) return Array.isArray(byAssignedTo.data) ? byAssignedTo.data : [];
+
+  const byUserId = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('user_id', userId)
+    .order('id', { ascending: false });
+
+  if (byUserId.error) throw byUserId.error;
+  return Array.isArray(byUserId.data) ? byUserId.data : [];
+};
 
 export default function UploadSiteProgressScreen({ visible, user, onClose, projects, initialTask }: Props) {
   const { theme } = useAppTheme();
@@ -142,29 +164,41 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setRecordSaved(false);
   };
 
-  const loadUserTasks = () => {
+  const loadUserTasks = async () => {
     setLoadingTasks(true);
     setTasksError(null);
-    fetch(`${API_URL}/tasks?userId=${user.id}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setUserTasks(data);
-        // Only auto-select first task if no initialTask was provided
-        if (!initialTask && data.length > 0) {
-          setTaskId(data[0].id);
-          setProjectId(data[0].project_id);
+    try {
+      let tasks: any[] = [];
+
+      try {
+        const res = await fetch(`${API_URL}/tasks?userId=${user.id}`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Could not load assigned tasks.');
         }
-      })
-      .catch((err) => {
-        console.error('Error fetching user tasks:', err);
+        tasks = Array.isArray(data) ? data : [];
+      } catch (backendError) {
+        console.warn('Backend tasks unavailable, using Supabase fallback:', backendError);
+        tasks = await fetchAssignedTasksFromSupabase(user.id);
+      }
+
+      setUserTasks(tasks);
+      if (!initialTask && tasks.length > 0) {
+        setTaskId(tasks[0].id);
+        setProjectId(tasks[0].project_id);
+      }
+    } catch (err) {
+        console.warn('Error fetching user tasks:', err);
+        setUserTasks([]);
         setTasksError('Could not load assigned tasks.');
-      })
-      .finally(() => setLoadingTasks(false));
+    } finally {
+      setLoadingTasks(false);
+    }
   };
 
   React.useEffect(() => {
     loadUserTasks();
-  }, [user.id, initialTask]);
+  }, [user.id, initialTask, visible]);
 
   const handleClose = () => {
     if (step === 4 || recordSaved || !hasUnsavedChanges) {
@@ -303,6 +337,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               detectionMode: result.detectionMode,
               hasWarnings: result.hasWarnings,
               warningMessage: result.warningMessage || undefined,
+              summary: result.summary,
+              uncertainCount: result.uncertainDetections?.length || 0,
               status: 'complete',
             });
 
@@ -319,7 +355,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               avgConfidence: 0,
               detectionMode: 'failed',
               hasWarnings: true,
-              warningMessage: photoError.message || 'Could not analyze this photo.',
+              warningMessage: photoError.message || 'Image analysis failed. Please try again.',
+              summary: 'Please upload a clearer image or enter the verified count manually.',
+              uncertainCount: 0,
               status: 'failed',
             });
           }
@@ -342,9 +380,13 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
           failedPhotoNumbers.length > 0
             ? ` ${failedPhotoNumbers.length} photo${failedPhotoNumbers.length === 1 ? '' : 's'} need manual checking.`
             : '';
+        const uncertainCount = nextResults.reduce((sum, result) => sum + (result.uncertainCount || 0), 0);
+        const qualityText = uncertainCount > 0
+          ? `\nUncertain detections: ${uncertainCount}. Poor lighting or obstruction may reduce accuracy.`
+          : '';
         const summaryText =
           `${selectedPhotos.length} photo${selectedPhotos.length === 1 ? '' : 's'} analyzed.\n` +
-          `${breakdownText}\nTotal AI count: ${totalCount} panel${totalCount === 1 ? '' : 's'}.${failedText}`;
+          `${breakdownText}\nTotal AI count: ${totalCount} panel${totalCount === 1 ? '' : 's'}.${failedText}${qualityText}`;
 
         setAiDetectedCount(totalCount);
         setVerifiedPanelCount(totalCount);
@@ -352,7 +394,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         setDetectionMode(detectionModes.size === 1 ? Array.from(detectionModes)[0] : 'gemini-multi-photo');
         setAvgConfidence(confidenceCount > 0 ? totalConfidence / confidenceCount : 0);
         setHasWarnings(failedPhotoNumbers.length > 0 || nextResults.some((result) => result.hasWarnings));
-        setWarningMessage(failedText.trim());
+        setWarningMessage(
+          totalCount === 0
+            ? 'No clear glass panels detected. Please upload a clearer image.'
+            : failedText.trim() || (uncertainCount > 0 ? 'Poor lighting or obstruction may reduce accuracy.' : '')
+        );
         setAiSummary(summaryText);
         setAnalysisStatus(totalCount === 0 ? 'no_panels' : 'complete');
         setStep(3);
@@ -364,9 +410,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       console.error('GEMINI_ANALYSIS_ERROR:', error);
       setAnalysisStatus('failed');
       Alert.alert(
-        'AI Analysis Failed',
-        'Could not analyze the image. Please enter the glass panel count manually.\n\n' +
-        `Detail: ${error.message || 'Unknown error'}`
+        'Image analysis failed. Please try again.',
+        'Please upload a clearer image, or enter the verified count manually.'
       );
       setStep(3); // Go to form for manual entry
     } finally {
@@ -378,6 +423,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const handleSave = async () => {
     if (!projectId || !taskId) {
       Alert.alert('Missing info', 'Please select a project and a task.');
+      return;
+    }
+    if (selectedPhotos.length > 0 && analysisStatus === 'idle') {
+      Alert.alert('Verification required', 'AI result must be verified before saving.');
       return;
     }
     setSaving(true);
@@ -404,6 +453,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       formData.append('avg_confidence', avgConfidence.toFixed(4));
       formData.append('detection_mode', detectionMode);
       formData.append('warning_message', warningMessage);
+      formData.append('ai_summary', aiSummary);
       formData.append('per_photo_counts', JSON.stringify(photoAnalysisResults));
 
       if (selectedPhotos.length > 0) {
@@ -439,7 +489,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       setStep(4);
     } catch (error) {
       console.error('SAVE_ERROR:', error);
-      Alert.alert('Error', 'Could not reach the server.');
+      Alert.alert('Connection Error', getServerConnectionErrorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -466,6 +516,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
 
   const getPhotoAnalysisResult = (index: number) =>
     photoAnalysisResults.find((result) => result.photoIndex === index);
+
+  const safeUserTasks = Array.isArray(userTasks) ? userTasks : [];
 
   return (
     <Modal
@@ -541,7 +593,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   <SkeletonText width="58%" height={13} />
                 ) : (
                   <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
-                    {userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task'}
+                    {safeUserTasks.find((t) => String(t.id) === String(taskId))?.title || initialTask?.title || 'Select a task'}
                   </Text>
                 )}
                 <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
@@ -863,7 +915,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   <SkeletonText width="58%" height={13} />
                 ) : (
                   <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
-                    {userTasks.find(t => String(t.id) === String(taskId))?.title || 'Select a task'}
+                    {safeUserTasks.find((t) => String(t.id) === String(taskId))?.title || initialTask?.title || 'Select a task'}
                   </Text>
                 )}
                 <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
@@ -1106,11 +1158,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
                   <Text className="text-[12px] font-semibold text-white">Retry</Text>
                 </TouchableOpacity>
               </View>
-            ) : userTasks.length === 0 ? (
+            ) : safeUserTasks.length === 0 ? (
               <Text className="text-center py-10" style={{ color: theme.textMuted }}>No tasks assigned to you yet.</Text>
             ) : (
               <ScrollView>
-                {userTasks.map((t) => (
+                {safeUserTasks.map((t) => (
                   <TouchableOpacity
                     key={t.id}
                     onPress={() => {

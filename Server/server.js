@@ -16,7 +16,21 @@ const inventoryRoutes = require('./routes/inventory');
 const aiRoutes = require('./routes/ai');
 
 const app = express();
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked origin: ${origin}`));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && 'body' in err) {
@@ -26,7 +40,9 @@ app.use((err, req, res, next) => {
   next(err);
 });
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  }
   next();
 });
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -48,9 +64,17 @@ app.use('/api/projects/:projectId/inventory', (req, res, next) => {
   next();
 }, inventoryRoutes);
 
-app.get('/', (req, res) => res.send('BuildSphere API is running ✅'));
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'BuildSphere API',
+    timestamp: new Date().toISOString(),
+  });
+});
 
-const PORT = process.env.PORT || 3001;
+app.get('/', (req, res) => res.send('BuildSphere API is running'));
+
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ BuildSphere API running at http://0.0.0.0:${PORT}`);
+  console.log(`BuildSphere API running at http://0.0.0.0:${PORT}`);
 });

@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { TaskCardSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +31,17 @@ interface ProjectTasksViewProps {
   onBack: () => void;
 }
 
+const fetchProjectTasksFromSupabase = async (projectId: number) => {
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('id', { ascending: false });
+
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+};
+
 export default function ProjectTasksView({ projectId, currentUserId, onTaskSelect, onBack }: ProjectTasksViewProps) {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -42,13 +54,24 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
   const fetchProjectTasks = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/tasks/project/${projectId}`);
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setTasks(data);
+      let nextTasks: Task[] = [];
+
+      try {
+        const res = await fetch(`${API_URL}/tasks/project/${projectId}`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to fetch project tasks.');
+        }
+        nextTasks = Array.isArray(data) ? data : [];
+      } catch (backendError) {
+        console.warn('Backend project tasks unavailable, using Supabase fallback:', backendError);
+        nextTasks = await fetchProjectTasksFromSupabase(projectId);
       }
+
+      setTasks(Array.isArray(nextTasks) ? nextTasks : []);
     } catch (err) {
-      console.error('Failed to fetch project tasks:', err);
+      console.warn('Failed to fetch project tasks:', err);
+      setTasks([]);
     } finally {
       setLoading(false);
     }
@@ -58,7 +81,8 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
     fetchProjectTasks();
   }, [projectId]);
 
-  const filteredTasks = tasks.filter(task => {
+  const safeTasks = Array.isArray(tasks) ? tasks : [];
+  const filteredTasks = safeTasks.filter(task => {
     const matchesFilter = activeFilter === 'all' || task.status === activeFilter;
     const matchesUser = !showOnlyMine || String(task.assigned_to) === String(currentUserId);
     const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase());

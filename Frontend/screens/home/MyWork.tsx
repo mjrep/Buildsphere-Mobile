@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, TaskCardSkeleton } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
@@ -55,6 +56,25 @@ const STATUS_MAP: Record<Tab, string> = {
   Completed: 'completed',
 };
 
+const fetchAssignedTasksFromSupabase = async (userId: number) => {
+  const byAssignedTo = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('assigned_to', userId)
+    .order('id', { ascending: false });
+
+  if (!byAssignedTo.error) return Array.isArray(byAssignedTo.data) ? byAssignedTo.data : [];
+
+  const byUserId = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('user_id', userId)
+    .order('id', { ascending: false });
+
+  if (byUserId.error) throw byUserId.error;
+  return Array.isArray(byUserId.data) ? byUserId.data : [];
+};
+
 export default function MyWork({
   userId,
   onTaskSelect,
@@ -83,21 +103,32 @@ export default function MyWork({
     { label: 'Completed', color: '#4CAF50' },
   ];
 
-  const loadTasks = () => {
+  const loadTasks = async () => {
     setLoading(true);
     setError(null);
-    fetch(`${API_URL}/tasks?userId=${userId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setTasks(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error('Tasks fetch failed:', err);
-        setError('Could not load tasks.');
-        setTasks([]);
-        setLoading(false);
-      });
+    try {
+      let nextTasks: Task[] = [];
+
+      try {
+        const res = await fetch(`${API_URL}/tasks?userId=${userId}`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to fetch tasks.');
+        }
+        nextTasks = Array.isArray(data) ? data : [];
+      } catch (backendError) {
+        console.warn('Backend tasks unavailable, using Supabase fallback:', backendError);
+        nextTasks = await fetchAssignedTasksFromSupabase(userId);
+      }
+
+      setTasks(Array.isArray(nextTasks) ? nextTasks : []);
+    } catch (err) {
+      console.warn('Tasks fetch failed:', err);
+      setError('Could not load tasks.');
+      setTasks([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -108,7 +139,10 @@ export default function MyWork({
     const byId = new Map<number, ProjectFilterOption>();
     const byName = new Map<string, ProjectFilterOption>();
 
-    projects.forEach((project) => {
+    const safeProjects = Array.isArray(projects) ? projects : [];
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
+
+    safeProjects.forEach((project) => {
       if (!project?.name) return;
       if (Number.isFinite(Number(project.id))) {
         byId.set(Number(project.id), project);
@@ -117,7 +151,7 @@ export default function MyWork({
       }
     });
 
-    tasks.forEach((task) => {
+    safeTasks.forEach((task) => {
       if (!task.project) return;
       const taskProjectId = Number(task.project_id);
       if (Number.isFinite(taskProjectId) && taskProjectId > 0) {
@@ -135,17 +169,16 @@ export default function MyWork({
   }, [projects, tasks]);
 
   const getTabCount = (tab: Tab) => {
-    if (!Array.isArray(tasks)) return 0;
-    let filtered = tasks.filter((t) => t.status === STATUS_MAP[tab]);
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
+    let filtered = safeTasks.filter((t) => t.status === STATUS_MAP[tab]);
     if (selectedProject !== 'All') {
       filtered = filtered.filter(t => t.project === selectedProject);
     }
     return filtered.length;
   };
 
-  let processedTasks = Array.isArray(tasks)
-    ? tasks.filter((t) => t.status === STATUS_MAP[activeTab])
-    : [];
+  const safeTasks = Array.isArray(tasks) ? tasks : [];
+  let processedTasks = safeTasks.filter((t) => t.status === STATUS_MAP[activeTab]);
 
   // Filter by Project
   if (selectedProject !== 'All') {

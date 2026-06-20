@@ -111,7 +111,7 @@ export default function CreateNewPasswordScreen({ email, otp, onBackToLogin }: C
       const { error } = await supabase.auth.updateUser({
         password: newPassword,
       });
-      console.log('updateUser password result:', error ? `error: ${error.message}` : 'success');
+      if (__DEV__) console.log('updateUser password result:', error ? `error: ${error.message}` : 'success');
 
       if (error) throw error;
 
