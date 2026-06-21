@@ -57,7 +57,11 @@ export default function Notifications({
     try {
       setError(null);
       const res = await fetch(`${API_URL}/notifications?userId=${userId}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to fetch notifications.');
+      }
+
       if (Array.isArray(data)) {
         setNotifications(data);
       } else {

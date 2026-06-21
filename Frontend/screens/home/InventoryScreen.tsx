@@ -23,6 +23,7 @@ import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationB
 import { InventoryItemSkeleton, InventoryLogSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent } from '../../utils/responsive';
+import { formatCurrencyPHP } from '../../utils/budget';
 
 interface InventoryItem {
   id: number;
@@ -73,9 +74,30 @@ interface Props {
   highlightItemId?: number | null;
 }
 
+function parseInventoryNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : Number(String(value).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function inventoryNumberInput(value: string) {
+  const sanitized = value.replace(/[^0-9.]/g, '');
+  const [whole, ...decimalParts] = sanitized.split('.');
+  return decimalParts.length > 0 ? `${whole}.${decimalParts.join('')}` : whole;
+}
+
+function displayInventoryNumber(value: number | string | null | undefined, fallback = '0') {
+  const parsed = parseInventoryNumber(value);
+  if (parsed === null) return fallback;
+  return Number.isInteger(parsed) ? String(parsed) : parsed.toFixed(2);
+}
+
 function stockStatus(qty: number | string, critical: number | string): { label: string; bg: string } {
-  const q = Number(qty) || 0;
-  const c = Number(critical) || 0;
+  const q = parseInventoryNumber(qty) ?? 0;
+  const c = parseInventoryNumber(critical) ?? 0;
   if (q <= 0) return { label: 'Out of Stock', bg: '#FF6B6B' };
   if (q <= c) return { label: 'Low Stock', bg: '#FF9F43' };
   return { label: 'In Stock', bg: '#5DBF50' };
@@ -229,7 +251,7 @@ export default function InventoryScreen({
         const res = await fetch(`${API_URL}/tasks/project/${projectId}`);
         const data = await res.json().catch(() => null);
         if (!res.ok) {
-          throw new Error(data?.error || 'Failed to fetch project tasks.');
+          throw new Error(data?.message || data?.error || 'Failed to fetch project tasks.');
         }
         nextTasks = Array.isArray(data) ? data : [];
       } catch (backendError) {
@@ -386,9 +408,9 @@ export default function InventoryScreen({
           projectId,
           itemName: addName,
           category: addCategory,
-          quantity: addQty,
-          criticalLevel: addCritical,
-          price: addPrice,
+          quantity: parseInventoryNumber(addQty) ?? 0,
+          criticalLevel: parseInventoryNumber(addCritical) ?? 0,
+          price: parseInventoryNumber(addPrice) ?? 0,
           unit: addUnit,
           createdBy: userId,
         }),
@@ -408,7 +430,7 @@ export default function InventoryScreen({
   const handleAdd = async () => {
     if (!ensureCanAddInventory()) return;
     if (!addName.trim()) return Alert.alert('Required', 'Item name is required.');
-    const qty = Number(addQty);
+    const qty = parseInventoryNumber(addQty);
     if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
     if (!addUnit.trim()) return Alert.alert('Required', 'Unit is required.');
 
@@ -433,7 +455,7 @@ export default function InventoryScreen({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action_type: txnAction,
-          quantity: Number(txnQty),
+          quantity: parseInventoryNumber(txnQty) ?? 0,
           reference_task_id: txnAction === 'CONSUMPTION' ? txnTaskId : undefined,
           notes: txnNotes || undefined,
           created_by: userId,
@@ -457,7 +479,7 @@ export default function InventoryScreen({
   const handleTransaction = async () => {
     if (!ensureCanEditInventory()) return;
     if (!txnItem) return;
-    const qty = Number(txnQty);
+    const qty = parseInventoryNumber(txnQty);
     if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
     if (txnAction === 'CONSUMPTION' && !txnTaskId) {
       return Alert.alert('Task Required', 'You must select a task for material consumption.');
@@ -504,7 +526,7 @@ export default function InventoryScreen({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action_type: logActionType,
-          quantity: Number(logQty),
+          quantity: parseInventoryNumber(logQty) ?? 0,
           reference_task_id: logActionType === 'CONSUMPTION' ? logTaskId : undefined,
           notes: logNotes || undefined,
           created_by: userId,
@@ -530,7 +552,7 @@ export default function InventoryScreen({
     if (!logItemId || !logQty) {
       return Alert.alert('Required', 'Please select item and quantity.');
     }
-    const qty = Number(logQty);
+    const qty = parseInventoryNumber(logQty);
     if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
     if (logActionType === 'CONSUMPTION' && !logTaskId) {
       return Alert.alert('Task Required', 'You must select a task for material consumption.');
@@ -753,10 +775,10 @@ export default function InventoryScreen({
                     </View>
                     <Text className="text-[12px]" style={{ color: theme.textMuted }}>{item.category}</Text>
                     <View className="mt-2 flex-row justify-between">
-                      <Text className="text-[13px]" style={{ color: theme.textSecondary }}>Qty: <Text className="font-semibold">{item.quantity} {item.unit || 'pcs'}</Text></Text>
-                      <Text className="text-[13px]" style={{ color: theme.textSecondary }}>Critical: <Text className="font-semibold">{item.critical_level}</Text></Text>
+                      <Text className="text-[13px]" style={{ color: theme.textSecondary }}>Qty: <Text className="font-semibold">{displayInventoryNumber(item.quantity)} {item.unit || 'pcs'}</Text></Text>
+                      <Text className="text-[13px]" style={{ color: theme.textSecondary }}>Critical: <Text className="font-semibold">{displayInventoryNumber(item.critical_level)}</Text></Text>
                     </View>
-                    <Text className="mt-1 text-[13px]" style={{ color: theme.textSecondary }}>Price: <Text className="font-semibold">PHP {item.price}</Text></Text>
+                    <Text className="mt-1 text-[13px]" style={{ color: theme.textSecondary }}>Price: <Text className="font-semibold">{formatCurrencyPHP(item.price)}</Text></Text>
                   </TouchableOpacity>
                 );
               })
@@ -811,7 +833,7 @@ export default function InventoryScreen({
                             </Text>
                             <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: meta.bg }}>
                               <Text className="text-[10px] font-bold" style={{ color: meta.color }}>
-                                {meta.prefix}{log.quantity} {log.unit || 'pcs'}
+                                {meta.prefix}{displayInventoryNumber(log.quantity)} {log.unit || 'pcs'}
                               </Text>
                             </View>
                           </View>
@@ -896,9 +918,9 @@ export default function InventoryScreen({
                   )}
                   <TextInput value={addCategory} onChangeText={setAddCategory} style={inputStyle} placeholder="Category" placeholderTextColor={theme.textMuted} />
                   <TextInput value={addUnit} onChangeText={setAddUnit} style={inputStyle} placeholder="Unit (e.g. pcs, bag)" placeholderTextColor={theme.textMuted} />
-                  <TextInput value={addPrice} onChangeText={setAddPrice} style={inputStyle} placeholder="Price" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
-                  <TextInput value={addCritical} onChangeText={setAddCritical} style={inputStyle} placeholder="Critical level" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
-                  <TextInput value={addQty} onChangeText={setAddQty} style={inputStyle} placeholder="Current stock" keyboardType="numeric" placeholderTextColor={theme.textMuted} />
+                  <TextInput value={addPrice} onChangeText={(value) => setAddPrice(inventoryNumberInput(value))} style={inputStyle} placeholder="Price" keyboardType="decimal-pad" placeholderTextColor={theme.textMuted} />
+                  <TextInput value={addCritical} onChangeText={(value) => setAddCritical(inventoryNumberInput(value))} style={inputStyle} placeholder="Critical level" keyboardType="decimal-pad" placeholderTextColor={theme.textMuted} />
+                  <TextInput value={addQty} onChangeText={(value) => setAddQty(inventoryNumberInput(value))} style={inputStyle} placeholder="Current stock" keyboardType="decimal-pad" placeholderTextColor={theme.textMuted} />
                 </ScrollView>
                 <View className="border-t px-6 pb-6 pt-4" style={{ borderColor: theme.border }}>
                   <TouchableOpacity onPress={handleAdd} disabled={saving} className="h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>
@@ -937,7 +959,7 @@ export default function InventoryScreen({
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-              <TextInput value={txnQty} onChangeText={setTxnQty} style={inputStyle} keyboardType="numeric" placeholder="Quantity (must be > 0)" placeholderTextColor={theme.textMuted} />
+              <TextInput value={txnQty} onChangeText={(value) => setTxnQty(inventoryNumberInput(value))} style={inputStyle} keyboardType="decimal-pad" placeholder="Quantity (must be > 0)" placeholderTextColor={theme.textMuted} />
               {txnAction === 'CONSUMPTION' && (
                 <View className="mb-3">
                   <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.warning }}>⚠ Task Required for Consumption</Text>
@@ -1017,7 +1039,7 @@ export default function InventoryScreen({
                   </ScrollView>
                 </View>
               )}
-              <TextInput value={logQty} onChangeText={setLogQty} style={inputStyle} keyboardType="numeric" placeholder="Quantity" placeholderTextColor={theme.textMuted} />
+              <TextInput value={logQty} onChangeText={(value) => setLogQty(inventoryNumberInput(value))} style={inputStyle} keyboardType="decimal-pad" placeholder="Quantity" placeholderTextColor={theme.textMuted} />
               <TextInput value={logNotes} onChangeText={setLogNotes} style={inputStyle} placeholder="Remarks / notes" placeholderTextColor={theme.textMuted} />
               </ScrollView>
               <TouchableOpacity onPress={handleAddLog} disabled={saving} className="h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>

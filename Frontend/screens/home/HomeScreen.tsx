@@ -55,6 +55,7 @@ interface Project {
   daysLeft?: number;
   progress?: number;
   total_budget?: BudgetValue;
+  contract_price?: BudgetValue;
   budget_for_materials?: BudgetValue;
   budget?: BudgetValue;
   image?: any;

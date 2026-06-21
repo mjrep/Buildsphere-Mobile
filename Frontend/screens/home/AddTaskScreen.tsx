@@ -535,6 +535,8 @@ export default function AddTaskScreen({
 
   const openSelector = (kind: SelectorKind) => {
     Keyboard.dismiss();
+    if (kind === 'phase' && !projectId) return;
+    if (kind === 'milestone' && !phaseId) return;
     setSelector(kind);
   };
 

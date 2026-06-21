@@ -14,7 +14,7 @@ const isDevelopmentRuntime = () =>
 
 const configuredApiUrl = normalizeUrl(process.env.EXPO_PUBLIC_API_URL || '');
 export const API_URL =
-  isDevelopmentRuntime() && (!configuredApiUrl || PLACEHOLDER_API_URL_PATTERN.test(configuredApiUrl))
+  !configuredApiUrl || PLACEHOLDER_API_URL_PATTERN.test(configuredApiUrl)
     ? DEPLOYED_API_URL
     : configuredApiUrl;
 

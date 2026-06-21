@@ -120,7 +120,9 @@ const callGemini = async ({ imageBuffer, mimeType }) => {
   const modelPath = model.startsWith('models/') ? model : `models/${model}`;
 
   if (!apiKey) {
-    throw new Error('Missing GEMINI_API_KEY in Server/.env');
+    const error = new Error('Gemini image analysis is not configured.');
+    error.status = 503;
+    throw error;
   }
 
   const response = await fetch(
@@ -152,8 +154,10 @@ const callGemini = async ({ imageBuffer, mimeType }) => {
   );
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${body.substring(0, 500)}`);
+    console.error('GEMINI_API_ERROR_STATUS:', response.status);
+    const error = new Error('Gemini image analysis is temporarily unavailable.');
+    error.status = response.status >= 500 ? 502 : 400;
+    throw error;
   }
 
   const data = await response.json();
@@ -163,7 +167,13 @@ const callGemini = async ({ imageBuffer, mimeType }) => {
     throw new Error('Gemini returned an empty analysis response.');
   }
 
-  return JSON.parse(stripJsonFences(text));
+  try {
+    return JSON.parse(stripJsonFences(text));
+  } catch (error) {
+    const parseError = new Error('Gemini returned an unreadable analysis response.');
+    parseError.status = 502;
+    throw parseError;
+  }
 };
 
 router.post('/glass-analysis', upload.single('image'), async (req, res) => {
@@ -183,10 +193,12 @@ router.post('/glass-analysis', upload.single('image'), async (req, res) => {
 
     res.json(normalizeGeminiResult(rawGeminiResult));
   } catch (error) {
-    console.error('GEMINI_GLASS_ANALYSIS_ERROR:', error);
-    res.status(500).json({
-      error: 'Gemini glass analysis failed.',
-      detail: error.message || 'Unknown error',
+    console.error('GEMINI_GLASS_ANALYSIS_ERROR:', error.message || error);
+    res.status(error.status || 500).json({
+      message:
+        error.status && error.status < 500
+          ? error.message
+          : 'Gemini glass analysis failed. Please try again or enter the panel count manually.',
     });
   }
 });

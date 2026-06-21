@@ -37,6 +37,7 @@ interface Project {
   start_date?: string;
   end_date?: string;
   budget?: BudgetValue;
+  contract_price?: BudgetValue;
   budget_for_materials?: BudgetValue;
   total_budget?: BudgetValue;
   used_budget?: BudgetValue;

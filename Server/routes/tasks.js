@@ -11,6 +11,22 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
 
 const TASK_PRIORITIES = new Set(['low', 'medium', 'high']);
 const TASK_STATUSES = new Set(['todo', 'pending', 'in_progress', 'in-progress', 'in_review', 'in-review', 'completed']);
+const TASK_UPDATE_FIELDS = new Set([
+  'title',
+  'description',
+  'project_id',
+  'phase_id',
+  'milestone_id',
+  'assigned_by',
+  'assigned_to',
+  'priority',
+  'status',
+  'start_date',
+  'due_date',
+  'shift',
+  'visibility_scope',
+  'updated_by',
+]);
 const CREATOR_ROLES = new Set([
   'ceo',
   'coo',
@@ -510,7 +526,9 @@ router.post(
 // PATCH /tasks/:id
 router.patch('/:id', async (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
+  const updates = Object.fromEntries(
+    Object.entries(req.body || {}).filter(([key]) => TASK_UPDATE_FIELDS.has(key))
+  );
   
   if (isDevelopment) console.log(`UPDATING TASK ${id}:`, updates);
 
@@ -524,6 +542,14 @@ router.patch('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Invalid task status.' });
     }
     updates.status = normalizedStatus;
+  }
+
+  if (updates.priority !== undefined) {
+    const normalizedPriority = String(updates.priority || '').toLowerCase();
+    if (!TASK_PRIORITIES.has(normalizedPriority)) {
+      return res.status(400).json({ error: 'Priority must be low, medium, or high.' });
+    }
+    updates.priority = normalizedPriority;
   }
 
   const keys = Object.keys(updates);
@@ -634,7 +660,7 @@ router.patch('/:id', async (req, res) => {
     res.json(formatTask(formattedTaskResult.rows[0] || updatedTask));
   } catch (err) {
     console.error('DATABASE UPDATE ERROR:', err.message);
-    res.status(500).json({ error: 'Failed to update task: ' + err.message });
+    res.status(500).json({ message: 'Failed to update task.' });
   }
 });
 

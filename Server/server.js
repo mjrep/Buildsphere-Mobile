@@ -31,10 +31,28 @@ app.use(cors({
   },
   credentials: true,
 }));
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+
+  res.json = (body) => {
+    if (res.statusCode >= 400 && body && typeof body === 'object' && !Array.isArray(body)) {
+      const message = body.message || body.error || 'Request failed.';
+      return originalJson({
+        success: false,
+        ...body,
+        message,
+      });
+    }
+
+    return originalJson(body);
+  };
+
+  next();
+});
 app.use(express.json());
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && 'body' in err) {
-    return res.status(400).json({ error: 'Invalid JSON request body.' });
+    return res.status(400).json({ message: 'Invalid JSON request body.' });
   }
 
   next(err);
@@ -73,6 +91,17 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/', (req, res) => res.send('BuildSphere API is running'));
+
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found.' });
+});
+
+app.use((err, req, res, _next) => {
+  console.error('UNHANDLED_SERVER_ERROR:', err.message || err);
+  res.status(err.status || 500).json({
+    message: err.status && err.status < 500 ? err.message : 'Server error. Please try again later.',
+  });
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {

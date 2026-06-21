@@ -113,7 +113,7 @@ export default function MyWork({
         const res = await fetch(`${API_URL}/tasks?userId=${userId}`);
         const data = await res.json().catch(() => null);
         if (!res.ok) {
-          throw new Error(data?.error || 'Failed to fetch tasks.');
+          throw new Error(data?.message || data?.error || 'Failed to fetch tasks.');
         }
         nextTasks = Array.isArray(data) ? data : [];
       } catch (backendError) {

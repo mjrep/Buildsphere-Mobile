@@ -174,7 +174,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         const res = await fetch(`${API_URL}/tasks?userId=${user.id}`);
         const data = await res.json().catch(() => null);
         if (!res.ok) {
-          throw new Error(data?.error || 'Could not load assigned tasks.');
+          throw new Error(data?.message || data?.error || 'Could not load assigned tasks.');
         }
         tasks = Array.isArray(data) ? data : [];
       } catch (backendError) {
@@ -479,8 +479,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       });
 
       if (!response.ok) {
-        const d = await response.json();
-        Alert.alert('Error', d.error || 'Failed to save record.');
+        const d = await response.json().catch(() => null);
+        Alert.alert('Error', d?.message || d?.error || 'Failed to save record.');
         return;
       }
 

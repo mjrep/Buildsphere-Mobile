@@ -60,7 +60,7 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
         const res = await fetch(`${API_URL}/tasks/project/${projectId}`);
         const data = await res.json().catch(() => null);
         if (!res.ok) {
-          throw new Error(data?.error || 'Failed to fetch project tasks.');
+          throw new Error(data?.message || data?.error || 'Failed to fetch project tasks.');
         }
         nextTasks = Array.isArray(data) ? data : [];
       } catch (backendError) {

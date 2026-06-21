@@ -15,6 +15,47 @@ const VALID_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE', 'ADJUSTMENT'
 
 let inventorySchemaReady = false;
 
+function parseNumeric(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : Number(String(value).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parsePositiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function mapInventoryItem(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    id: Number(row.id),
+    project_id: Number(row.project_id),
+    quantity: parseNumeric(row.quantity),
+    current_stock: parseNumeric(row.current_stock ?? row.quantity),
+    critical_level: parseNumeric(row.critical_level),
+    critical_stock: parseNumeric(row.critical_stock ?? row.critical_level),
+    minimum_stock: parseNumeric(row.minimum_stock ?? row.critical_level),
+    price: parseNumeric(row.price),
+  };
+}
+
+function mapInventoryLog(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    id: Number(row.id),
+    item_id: Number(row.item_id),
+    project_id: row.project_id == null ? null : Number(row.project_id),
+    quantity: parseNumeric(row.quantity),
+    reference_task_id: row.reference_task_id == null ? null : Number(row.reference_task_id),
+  };
+}
+
 async function ensureInventoryColumns() {
   if (inventorySchemaReady) return;
   await pool.query(`
@@ -128,6 +169,11 @@ async function rejectInventoryWrite(req, res) {
 router.get('/', async (req, res) => {
   const { projectId } = req.query;
   try {
+    const parsedProjectId = parsePositiveInteger(projectId);
+    if (!parsedProjectId) {
+      return res.status(400).json({ message: 'A valid projectId is required.' });
+    }
+
     if (await rejectInventoryRead(req, res)) return;
     await ensureInventoryColumns();
     const result = await pool.query(
@@ -135,9 +181,9 @@ router.get('/', async (req, res) => {
        FROM project_inventory_items
        WHERE project_id = $1
        ORDER BY created_at DESC`,
-      [projectId]
+      [parsedProjectId]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(mapInventoryItem));
   } catch (err) {
     console.error('Fetch GET error:', err);
     res.status(500).json({ error: 'Failed to fetch inventory.' });
@@ -148,9 +194,14 @@ router.get('/', async (req, res) => {
 router.get('/logs', async (req, res) => {
   const { projectId, search = '', actionType = 'all' } = req.query;
   try {
+    const parsedProjectId = parsePositiveInteger(projectId);
+    if (!parsedProjectId) {
+      return res.status(400).json({ message: 'A valid projectId is required.' });
+    }
+
     if (await rejectInventoryRead(req, res)) return;
     await ensureInventoryColumns();
-    const params = [projectId];
+    const params = [parsedProjectId];
     let where = 'WHERE i.project_id = $1';
 
     if (search) {
@@ -191,7 +242,7 @@ router.get('/logs', async (req, res) => {
       params
     );
 
-    res.json(result.rows);
+    res.json(result.rows.map(mapInventoryLog));
   } catch (err) {
     console.error('Fetch logs error:', err);
     res.status(500).json({ error: 'Failed to fetch inventory logs.' });
@@ -207,6 +258,11 @@ router.get('/logs', async (req, res) => {
 router.post('/:itemId/transaction', async (req, res) => {
   const { itemId } = req.params;
   const { action_type, quantity, reference_task_id, notes, created_by } = req.body;
+  const parsedItemId = parsePositiveInteger(itemId);
+
+  if (!parsedItemId) {
+    return res.status(400).json({ message: 'A valid inventory item id is required.' });
+  }
 
   const inventoryContext = await rejectInventoryWrite(req, res);
   if (!inventoryContext) return;
@@ -219,7 +275,7 @@ router.post('/:itemId/transaction', async (req, res) => {
   }
 
   // ── Validate quantity ──
-  const numQty = Number(quantity);
+  const numQty = parseNumeric(quantity);
   if (!numQty || numQty <= 0) {
     return res.status(400).json({ error: 'quantity must be a positive number.' });
   }
@@ -235,7 +291,7 @@ router.post('/:itemId/transaction', async (req, res) => {
     // Verify item exists
     const itemCheck = await pool.query(
       'SELECT id, item_name, project_id, current_stock, critical_level FROM project_inventory_items WHERE id = $1',
-      [itemId]
+      [parsedItemId]
     );
     if (itemCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Inventory item not found.' });
@@ -248,22 +304,22 @@ router.post('/:itemId/transaction', async (req, res) => {
       `INSERT INTO project_inventory_logs (item_id, action_type, quantity, reference_task_id, notes, created_by, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING *`,
-      [itemId, action_type, numQty, reference_task_id || null, notes || null, created_by || 1]
+      [parsedItemId, action_type, numQty, reference_task_id || null, notes || null, created_by || 1]
     );
 
     // Refetch updated item to get the new stock level (updated by trigger)
     const updatedItem = await pool.query(
       'SELECT id, item_name, current_stock AS quantity, critical_level, unit FROM project_inventory_items WHERE id = $1',
-      [itemId]
+      [parsedItemId]
     );
-    const refreshedItem = updatedItem.rows[0];
+    const refreshedItem = mapInventoryItem(updatedItem.rows[0]);
     await logProjectActivity(pool, {
       projectId: item.project_id,
       userId: created_by,
       action: 'inventory_transaction_saved',
       description: `${action_type} recorded for ${item.item_name}.`,
       metadata: {
-        inventory_item_id: Number(itemId),
+        inventory_item_id: parsedItemId,
         action_type,
         quantity: numQty,
         reference_task_id: reference_task_id || null,
@@ -287,11 +343,11 @@ router.post('/:itemId/transaction', async (req, res) => {
             {
               type: 'inventory_low_stock',
               reference_type: 'inventory',
-              reference_id: String(itemId),
+              reference_id: String(parsedItemId),
               screen: 'Inventory',
               project_id: String(item.project_id),
-              inventory_item_id: String(itemId),
-              item_id: String(itemId),
+              inventory_item_id: String(parsedItemId),
+              item_id: String(parsedItemId),
             }
           );
           await logProjectActivity(pool, {
@@ -300,7 +356,7 @@ router.post('/:itemId/transaction', async (req, res) => {
             action: 'low_stock_alert_generated',
             description: `${item.item_name} reached low stock level.`,
             metadata: {
-              inventory_item_id: Number(itemId),
+              inventory_item_id: parsedItemId,
               current_stock: refreshedItem.quantity,
               critical_level: refreshedItem.critical_level,
             },
@@ -315,31 +371,49 @@ router.post('/:itemId/transaction', async (req, res) => {
     });
   } catch (err) {
     console.error('Transaction error:', err);
-    res.status(500).json({ error: 'Failed to process inventory transaction.', detail: err.message });
+    res.status(500).json({ message: 'Failed to process inventory transaction.' });
   }
 });
 
 // POST /inventory  — Add new inventory item (unchanged, still allowed)
 router.post('/', async (req, res) => {
   const { projectId, itemName, category, quantity, criticalLevel, price, unit, createdBy } = req.body;
+  const parsedProjectId = parsePositiveInteger(projectId);
+
+  if (!parsedProjectId) {
+    return res.status(400).json({ message: 'A valid projectId is required.' });
+  }
+
+  if (!String(itemName || '').trim()) {
+    return res.status(400).json({ message: 'Item name is required.' });
+  }
+
   const inventoryContext = await rejectInventoryWrite(req, res);
   if (!inventoryContext) return;
-  if (await rejectInventoryProjectAccess(req, res, projectId, inventoryContext)) return;
+  if (await rejectInventoryProjectAccess(req, res, parsedProjectId, inventoryContext)) return;
 
   
   // Parse numbers from strings (e.g. "P100 per bag" -> 100)
-  const numQty = parseFloat(String(quantity).replace(/[^0-9.]/g, '')) || 0;
-  const numCrit = parseFloat(String(criticalLevel).replace(/[^0-9.]/g, '')) || 0;
-  const numPrice = parseFloat(String(price).replace(/[^0-9.]/g, '')) || 0;
+  const numQty = parseNumeric(quantity);
+  const numCrit = parseNumeric(criticalLevel);
+  const numPrice = parseNumeric(price);
+
+  if (numQty <= 0) {
+    return res.status(400).json({ message: 'Quantity must be greater than 0.' });
+  }
+
+  if (numCrit < 0 || numPrice < 0) {
+    return res.status(400).json({ message: 'Critical level and price cannot be negative.' });
+  }
 
   try {
     await ensureInventoryColumns();
     const result = await pool.query(
       `INSERT INTO project_inventory_items (project_id, item_name, category, current_stock, critical_level, price, unit, created_by, updated_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *, current_stock AS quantity`,
-      [projectId, itemName, category, numQty, numCrit, numPrice, unit || 'pcs', createdBy || 1]
+      [parsedProjectId, itemName.trim(), category, numQty, numCrit, numPrice, unit || 'pcs', createdBy || 1]
     );
-    const item = result.rows[0];
+    const item = mapInventoryItem(result.rows[0]);
 
     // Log the initial stock as a RECEIVING transaction
     await pool.query(
@@ -348,7 +422,7 @@ router.post('/', async (req, res) => {
       [item.id, 'RECEIVING', numQty, 'Initial stock — item added via mobile inventory.', createdBy || 1]
     );
     await logProjectActivity(pool, {
-      projectId,
+      projectId: parsedProjectId,
       userId: createdBy,
       action: 'inventory_item_added',
       description: `${item.item_name} was added to inventory.`,

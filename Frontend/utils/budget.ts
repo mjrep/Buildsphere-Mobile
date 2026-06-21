@@ -1,4 +1,4 @@
-export const BUDGET_NOT_SET = 'Budget not set.';
+export const BUDGET_NOT_SET = 'Budget not set';
 
 export type BudgetValue = number | string | null | undefined;
 
@@ -27,9 +27,14 @@ export function getProjectTotalBudget(project: Record<string, any> | null | unde
   return parseBudgetNumber(
     firstPresent(
       project.total_budget,
+      project.contract_price,
+      project.approved_budget,
+      project.estimated_budget,
+      project.project_cost,
       project.budget_for_materials,
       project.project_budget,
-      project.budget
+      project.budget,
+      project.amount
     )
   );
 }

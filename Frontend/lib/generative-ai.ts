@@ -78,23 +78,25 @@ export const countGlassPanels = async (
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 90000);
 
-    const response = await fetch(`${API_URL}/api/ai/glass-analysis`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-      },
-      body: formData,
-      signal: controller.signal,
-    });
+    try {
+      const response = await fetch(`${API_URL}/api/ai/glass-analysis`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+        },
+        body: formData,
+        signal: controller.signal,
+      });
 
-    clearTimeout(timeoutId);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.message || `AI analysis failed (${response.status}).`);
+      }
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`AI analysis failed (${response.status}): ${body.substring(0, 300)}`);
+      return response.json();
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return response.json();
   });
 };
 

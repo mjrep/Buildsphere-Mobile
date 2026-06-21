@@ -10,12 +10,18 @@ function firstPresent(...values) {
 function projectBudgetFields(project) {
   const totalBudget = firstPresent(
     project.total_budget,
+    project.contract_price,
+    project.approved_budget,
+    project.estimated_budget,
+    project.project_cost,
     project.budget_for_materials,
     project.project_budget,
-    project.budget
+    project.budget,
+    project.amount
   );
 
   return {
+    contract_price: project.contract_price ?? null,
     budget_for_materials: project.budget_for_materials ?? totalBudget ?? null,
     total_budget: totalBudget ?? null,
     budget: totalBudget ?? null,
@@ -272,15 +278,36 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// PATCH /projects/all/color
+router.patch('/all/color', async (req, res) => {
+  const { color } = req.body;
+  if (!/^#[0-9A-Fa-f]{6}$/i.test(color || '')) {
+    return res.status(400).json({ error: 'Invalid HEX color format.' });
+  }
+
+  try {
+    await pool.query('UPDATE projects SET color = $1', [color]);
+    res.json({ success: true, color });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update all project colors.' });
+  }
+});
+
 // PATCH /projects/:id/color
 router.patch('/:id/color', async (req, res) => {
   const { id } = req.params;
   const { color } = req.body;
+  if (!/^#[0-9A-Fa-f]{6}$/i.test(color || '')) {
+    return res.status(400).json({ error: 'Invalid HEX color format.' });
+  }
+
   try {
     const result = await pool.query('UPDATE projects SET color = $1 WHERE id = $2 RETURNING *', [color, id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Project not found.' });
     res.json(result.rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Failed to update color.' });
   }
 });
@@ -293,17 +320,6 @@ router.delete('/:id', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete project.' });
-  }
-});
-
-// PATCH /projects/all/color — Update color for ALL projects
-router.patch('/all/color', async (req, res) => {
-  const { color } = req.body;
-  try {
-    await pool.query('UPDATE projects SET color = $1', [color]);
-    res.json({ success: true, color });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update all project colors.' });
   }
 });
 

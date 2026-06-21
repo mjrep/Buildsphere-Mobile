@@ -9,10 +9,18 @@ const { createNotification, sendPushNotificationToUser } = require('../services/
 const { hasQuantityTracking, syncTaskQuantityStatus } = require('../services/taskStatusService');
 const { logProjectActivity } = require('../services/activityLogService');
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+let supabase = null;
+
+function getSupabaseStorageClient() {
+  if (supabase) return supabase;
+
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return null;
+  }
+
+  supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  return supabase;
+}
 
 
 const storage = multer.memoryStorage();
@@ -77,12 +85,29 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
   let photoUrls = []; 
 
   try {
+    const parsedProjectId = firstFiniteInteger(projectId);
+    const parsedTaskId = firstFiniteInteger(taskId);
+    const parsedUserId = firstFiniteInteger(userId);
+
+    if (!parsedProjectId || !parsedTaskId || !parsedUserId) {
+      return res.status(400).json({
+        message: 'Project, task, and user are required to save site progress.',
+      });
+    }
+
+    const supabaseStorage = getSupabaseStorageClient();
+    if ((req.files?.length || 0) > 0 && !supabaseStorage) {
+      return res.status(503).json({
+        message: 'Image upload storage is not configured. Please try again later.',
+      });
+    }
+
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
         const filename = `progress_${Date.now()}_${Math.floor(Math.random() * 1000)}${path.extname(file.originalname)}`;
         
         // 1. Upload to Supabase Storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const { error: uploadError } = await supabaseStorage.storage
           .from('site-progress')
           .upload(filename, file.buffer, {
             contentType: file.mimetype,
@@ -92,11 +117,13 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
 
         if (uploadError) {
           console.error('Supabase Upload Error:', uploadError);
-          continue; // Skip failed uploads
+          return res.status(502).json({
+            message: 'Image upload failed. Please try again.',
+          });
         }
 
         // 2. Get Public URL
-        const { data: publicUrlData } = supabase.storage
+        const { data: publicUrlData } = supabaseStorage.storage
           .from('site-progress')
           .getPublicUrl(filename);
         
@@ -116,7 +143,7 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
        FROM tasks t
        LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
        WHERE t.id = $1`,
-      [taskId]
+      [parsedTaskId]
     );
     const taskMilestone = taskRes.rows[0] || {};
     const milestoneId = taskMilestone.milestone_id || null;
@@ -132,9 +159,9 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
       RETURNING *`,
       [
-        parseInt(taskId),
+        parsedTaskId,
         milestoneId,
-        parseInt(userId),
+        parsedUserId,
         savedQuantity,
         finalPhotoPath,
         notes,
@@ -153,7 +180,7 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
     };
 
     if (milestoneId && hasQuantityTracking(taskMilestone)) {
-      const syncedProgress = await syncTaskQuantityStatus(pool, taskId);
+      const syncedProgress = await syncTaskQuantityStatus(pool, parsedTaskId);
 
       if (syncedProgress) {
         progress.current_quantity = syncedProgress.current_quantity;
@@ -163,12 +190,12 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
     }
 
     await logProjectActivity(pool, {
-      projectId,
-      userId,
+      projectId: parsedProjectId,
+      userId: parsedUserId,
       action: 'site_progress_uploaded',
-      description: `Site progress uploaded for task #${taskId}.`,
+      description: `Site progress uploaded for task #${parsedTaskId}.`,
       metadata: {
-        task_id: Number(taskId),
+        task_id: parsedTaskId,
         milestone_id: milestoneId,
         site_progress_id: progress.id,
         image_url: finalPhotoPath,
@@ -181,12 +208,12 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
     });
 
     await logProjectActivity(pool, {
-      projectId,
-      userId,
+      projectId: parsedProjectId,
+      userId: parsedUserId,
       action: 'verified_panel_count_saved',
-      description: `Verified panel count saved as ${savedQuantity} for task #${taskId}.`,
+      description: `Verified panel count saved as ${savedQuantity} for task #${parsedTaskId}.`,
       metadata: {
-        task_id: Number(taskId),
+        task_id: parsedTaskId,
         milestone_id: milestoneId,
         site_progress_id: progress.id,
         verified_panel_count: savedQuantity,
@@ -195,12 +222,12 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
 
     if (ai_detected_count != null) {
       await logProjectActivity(pool, {
-        projectId,
-        userId,
+        projectId: parsedProjectId,
+        userId: parsedUserId,
         action: 'ai_analysis_completed',
-        description: `AI analysis detected ${parseInt(ai_detected_count) || 0} glass panels for task #${taskId}.`,
+        description: `AI analysis detected ${parseInt(ai_detected_count) || 0} glass panels for task #${parsedTaskId}.`,
         metadata: {
-          task_id: Number(taskId),
+          task_id: parsedTaskId,
           site_progress_id: progress.id,
           ai_detected_count: parseInt(ai_detected_count) || 0,
           verified_panel_count: savedQuantity,
@@ -211,12 +238,12 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
     }
 
     const notifTitle = 'Task Progress Recorded';
-    const notifMessage = `Progress of ${savedQuantity} units recorded for task #${taskId}.`;
+    const notifMessage = `Progress of ${savedQuantity} units recorded for task #${parsedTaskId}.`;
 
     // Notifications should never make a successfully saved progress upload look failed.
     try {
       await createNotification({
-        recipientId: userId,
+        recipientId: parsedUserId,
         title: notifTitle,
         message: notifMessage,
         type: 'site_progress_uploaded',
@@ -227,10 +254,10 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
           screen: 'SiteProgressDetails',
           reference_type: 'site_progress',
           reference_id: String(progress.id),
-          project_id: String(projectId),
+          project_id: String(parsedProjectId),
           site_progress_id: String(progress.id),
           progress_id: String(progress.id),
-          task_id: String(taskId),
+          task_id: String(parsedTaskId),
         },
         sendPush: false,
       });
@@ -247,14 +274,14 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
            WHERE t.project_id = $1
          ) users_for_project
          WHERE candidate_user_id IS NOT NULL`,
-        [projectId]
+        [parsedProjectId]
       );
 
-      const projectNameResult = await pool.query('SELECT project_name FROM projects WHERE id = $1', [projectId]);
+      const projectNameResult = await pool.query('SELECT project_name FROM projects WHERE id = $1', [parsedProjectId]);
       const projectName = projectNameResult.rows[0]?.project_name || 'this project';
       const targetUsers = projectUsersResult.rows
         .map((row) => row.user_id)
-        .filter((id) => String(id) !== String(userId));
+        .filter((id) => String(id) !== String(parsedUserId));
 
       for (const targetUserId of targetUsers) {
         await sendPushNotificationToUser(
@@ -266,10 +293,10 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
             reference_type: 'site_progress',
             reference_id: String(progress.id),
             screen: 'SiteProgressDetails',
-            project_id: String(projectId),
+            project_id: String(parsedProjectId),
             site_progress_id: String(progress.id),
             progress_id: String(progress.id),
-            task_id: String(taskId),
+            task_id: String(parsedTaskId),
           }
         );
       }
@@ -286,10 +313,10 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
               reference_type: 'site_progress',
               reference_id: String(progress.id),
               screen: 'SiteProgressDetails',
-              project_id: String(projectId),
+              project_id: String(parsedProjectId),
               site_progress_id: String(progress.id),
               progress_id: String(progress.id),
-              task_id: String(taskId),
+              task_id: String(parsedTaskId),
             }
           );
         }
@@ -302,8 +329,7 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
   } catch (err) {
     console.error('SERVER_SAVE_ERROR:', err);
     res.status(500).json({ 
-      error: 'Failed to save task progress.',
-      detail: err.message 
+      message: 'Failed to save task progress.',
     });
   }
 });
