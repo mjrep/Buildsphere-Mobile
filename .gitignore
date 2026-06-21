@@ -16,6 +16,7 @@ Devign-Document.pdf
 Frontend/node_modules/
 Frontend/.expo/
 Frontend/expo-env.d.ts
+Frontend/android/
 
 # Backend Server
 Server/node_modules/
