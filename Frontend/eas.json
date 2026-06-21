@@ -13,7 +13,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://buildsphere-mobile-server.onrender.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://gadhovevmzmzesiqgubb.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "YOUR_SUPABASE_ANON_KEY"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInJlZiI6ImdhZGhvdmV2bXptemVzaXFndWJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTkyNTQsImV4cCI6MjA4OTMzNTI1NH0.0s5pDFBxGC_fTWIErJS7TNA_14B4gogaf1Sm2t3hhgM"
       },
       "android": {
         "buildType": "apk"
@@ -24,7 +24,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://buildsphere-mobile-server.onrender.com",
         "EXPO_PUBLIC_SUPABASE_URL": "https://gadhovevmzmzesiqgubb.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "YOUR_SUPABASE_ANON_KEY"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInJlZiI6ImdhZGhvdmV2bXptemVzaXFndWJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTkyNTQsImV4cCI6MjA4OTMzNTI1NH0.0s5pDFBxGC_fTWIErJS7TNA_14B4gogaf1Sm2t3hhgM"
       }
     }
   },
