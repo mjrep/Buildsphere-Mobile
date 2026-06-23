@@ -8,13 +8,16 @@ const LOCAL_API_URL_PATTERN =
 const TEMPORARY_TUNNEL_URL_PATTERN = /trycloudflare\.com|loca\.lt|ngrok-free\.app|ngrok\.io/i;
 const PLACEHOLDER_API_URL_PATTERN = /YOUR_PUBLIC_BACKEND_URL|DEPLOYED_BACKEND_URL|your-buildsphere-api|YOUR_LAN_IP/i;
 const DEPLOYED_API_URL = 'https://buildsphere-mobile-server.onrender.com';
+const ALLOW_LOCAL_API_URL = process.env.EXPO_PUBLIC_ALLOW_LOCAL_API === 'true';
 
 const isDevelopmentRuntime = () =>
   typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
 
 const configuredApiUrl = normalizeUrl(process.env.EXPO_PUBLIC_API_URL || '');
 export const API_URL =
-  !configuredApiUrl || PLACEHOLDER_API_URL_PATTERN.test(configuredApiUrl)
+  !configuredApiUrl ||
+  PLACEHOLDER_API_URL_PATTERN.test(configuredApiUrl) ||
+  (LOCAL_API_URL_PATTERN.test(configuredApiUrl) && !ALLOW_LOCAL_API_URL)
     ? DEPLOYED_API_URL
     : configuredApiUrl;
 
