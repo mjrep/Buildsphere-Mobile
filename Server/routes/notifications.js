@@ -260,12 +260,18 @@ router.delete('/:id', async (req, res) => {
 router.post('/register-token', async (req, res) => {
   const { expo_push_token, device_id, device_type } = req.body;
   const userId = getRequestUserId(req);
-  if (!userId || !expo_push_token) {
-    return res.status(400).json({ error: 'expo_push_token is required.' });
+  qaDebug('Push token register request received', { userId: userId ? String(userId) : undefined });
+
+  if (!userId) {
+    return res.status(401).json({ success: false, saved: false, message: 'Authentication is required.' });
+  }
+
+  if (typeof expo_push_token !== 'string' || !expo_push_token.trim()) {
+    return res.status(400).json({ success: false, saved: false, message: 'expo_push_token is required.' });
   }
 
   if (!Expo.isExpoPushToken(expo_push_token)) {
-    return res.status(400).json({ error: 'Invalid Expo push token format.' });
+    return res.status(400).json({ success: false, saved: false, message: 'Invalid Expo push token format.' });
   }
 
   try {
@@ -298,12 +304,16 @@ router.post('/register-token', async (req, res) => {
       [userId, expo_push_token, device_id || null, device_type || 'unknown']
     );
 
-    qaDebug('Push token registered', { saved: true, userId: String(userId), deviceType: device_type || 'unknown' });
-    res.json({ success: true });
+    qaDebug('Push token saved for user', { saved: true, userId: String(userId), deviceType: device_type || 'unknown' });
+    res.json({ success: true, saved: true });
   } catch (err) {
-    qaDebug('Push token registered', { saved: false, userId: String(userId) });
-    console.error(err);
-    res.status(500).json({ error: 'Failed to register push token.' });
+    qaDebug('Push token save failed', {
+      saved: false,
+      userId: String(userId),
+      message: err instanceof Error ? err.message : 'Failed to register push token.',
+    });
+    console.error('Push token register error:', err.message || err);
+    res.status(500).json({ success: false, saved: false, message: 'Failed to register push token.' });
   }
 });
 

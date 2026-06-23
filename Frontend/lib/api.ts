@@ -14,18 +14,27 @@ export const SERVER_UNREACHABLE_MESSAGE =
   'BuildSphere server is currently unreachable. Please try again later.';
 export const SERVER_WAKING_MESSAGE =
   'Server may be waking up. Please try again in a few seconds.';
+export const SERVER_OFFLINE_MESSAGE =
+  'Unable to connect to the server. Please check your internet connection.';
 
 export function getServerConnectionErrorMessage(error?: unknown) {
-  if (error instanceof DOMException && error.name === 'AbortError') {
+  try {
+    const name = error instanceof Error ? error.name : '';
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const normalized = `${name} ${message}`.toLowerCase();
+
+    if (name === 'AbortError' || /timeout|aborted/.test(normalized)) {
+      return SERVER_WAKING_MESSAGE;
+    }
+
+    if (/network request failed|failed to fetch|networkerror|unable to connect/.test(normalized)) {
+      return SERVER_OFFLINE_MESSAGE;
+    }
+
+    return message || SERVER_UNREACHABLE_MESSAGE;
+  } catch {
     return SERVER_WAKING_MESSAGE;
   }
-
-  const message = error instanceof Error ? error.message : String(error || '');
-  if (/timeout|aborted|network request failed|failed to fetch|networkerror/i.test(message)) {
-    return SERVER_WAKING_MESSAGE;
-  }
-
-  return SERVER_UNREACHABLE_MESSAGE;
 }
 
 export async function checkApiHealth(timeoutMs = 5000) {

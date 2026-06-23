@@ -45,6 +45,11 @@ const PUSH_TOKEN_REGISTER_RETRY_DELAYS_MS = [0, 2500, 6000];
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const readPushTokenSaveError = async (response: Response) => {
+  const body = await response.json().catch(() => null);
+  return body?.message || body?.error || `Push token registration failed (${response.status}).`;
+};
+
 async function getPushDeviceId() {
   const existing = await AsyncStorage.getItem(PUSH_DEVICE_ID_KEY);
   if (existing) return existing;
@@ -379,6 +384,12 @@ function AppContent() {
           if (delayMs > 0) await wait(delayMs);
 
           try {
+            qaDebug('Push token save request started', {
+              userId: user.id,
+              attempt: attemptIndex + 1,
+              endpoint: '/api/notifications/register-token',
+            });
+
             const response = await apiFetch(`${API_URL}/api/notifications/register-token`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -390,8 +401,12 @@ function AppContent() {
             });
 
             if (!response.ok) {
-              const text = await response.text().catch(() => '');
-              throw new Error(`Push token registration failed (${response.status}): ${text.slice(0, 180)}`);
+              throw new Error(await readPushTokenSaveError(response));
+            }
+
+            const result = await response.json().catch(() => ({ success: true, saved: true }));
+            if (result?.success === false || result?.saved === false) {
+              throw new Error(result?.message || result?.error || 'Push token registration was not saved.');
             }
 
             registeredPushTokenRef.current = expoPushToken;
@@ -399,17 +414,23 @@ function AppContent() {
             return;
           } catch (registerError) {
             lastError = registerError;
-            qaDebug('Push token save attempt failed', {
+            qaDebug('Push token save failed', {
+              saved: false,
               userId: user.id,
               attempt: attemptIndex + 1,
               willRetry: attemptIndex < PUSH_TOKEN_REGISTER_RETRY_DELAYS_MS.length - 1,
+              message: registerError instanceof Error ? registerError.message : 'Push token registration failed.',
             });
           }
         }
 
         throw lastError || new Error('Push token registration failed.');
       } catch (err) {
-        qaDebug('Push token saved', { saved: false, userId: user.id });
+        qaDebug('Push token save failed', {
+          saved: false,
+          userId: user.id,
+          message: getServerConnectionErrorMessage(err),
+        });
         console.warn('Push token registration skipped for now:', getServerConnectionErrorMessage(err));
       }
     };
