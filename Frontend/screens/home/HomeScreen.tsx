@@ -308,7 +308,12 @@ export default function HomeScreen({
           setUnreadCount(unread);
         }
       })
-      .catch((err) => console.error('Notif Count Fetch Error:', err));
+      .catch((err) => {
+        qaDebug('Notification count fetch failed', {
+          message: err instanceof Error ? err.message : 'Could not fetch notification count.',
+        });
+        console.warn('Notification count fetch failed:', err);
+      });
   };
 
   useEffect(() => {
