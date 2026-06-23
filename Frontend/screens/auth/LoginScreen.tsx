@@ -75,10 +75,6 @@ export default function LoginScreen({
         onLogin(profileData, authData.token);
       };
 
-      if (__DEV__) {
-        console.log('Login method: Supabase Auth signInWithPassword');
-        console.log('Login normalized email:', trimmedEmail);
-      }
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password,

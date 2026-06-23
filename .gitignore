@@ -7,18 +7,29 @@ node_modules/
 .env*.local
 .DS_Store
 *.apk
+*.aab
+*.ipa
 *.log
 *.brotli.txt
 *.inflateRaw.txt
 Devign-Document.pdf
+dist/
+build/
+coverage/
 
 # Mobile Frontend
 Frontend/node_modules/
 Frontend/.expo/
 Frontend/expo-env.d.ts
 Frontend/android/
+Frontend/dist/
+Frontend/build/
+Frontend/coverage/
 
 # Backend Server
 Server/node_modules/
 Server/.env
 Server/uploads/
+Server/dist/
+Server/build/
+Server/coverage/
