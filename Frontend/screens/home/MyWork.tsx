@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiFetch } from '../../lib/api';
-import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, TaskCardSkeleton } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
@@ -58,25 +57,6 @@ const STATUS_MAP: Record<Tab, string> = {
   Completed: 'completed',
 };
 
-const fetchAssignedTasksFromSupabase = async (userId: number) => {
-  const byAssignedTo = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('assigned_to', userId)
-    .order('id', { ascending: false });
-
-  if (!byAssignedTo.error) return Array.isArray(byAssignedTo.data) ? byAssignedTo.data : [];
-
-  const byUserId = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('user_id', userId)
-    .order('id', { ascending: false });
-
-  if (byUserId.error) throw byUserId.error;
-  return Array.isArray(byUserId.data) ? byUserId.data : [];
-};
-
 export default function MyWork({
   userId,
   onTaskSelect,
@@ -109,20 +89,12 @@ export default function MyWork({
     setLoading(true);
     setError(null);
     try {
-      let nextTasks: Task[] = [];
-
-      try {
-        const res = await apiFetch(`${API_URL}/tasks`);
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(data?.message || data?.error || 'Failed to fetch tasks.');
-        }
-        nextTasks = Array.isArray(data) ? data : [];
-      } catch (backendError) {
-        qaDebug('Tasks fallback triggered', { fallbackTriggered: true });
-        console.warn('Backend tasks unavailable, using Supabase fallback:', backendError);
-        nextTasks = await fetchAssignedTasksFromSupabase(userId);
+      const res = await apiFetch(`${API_URL}/tasks`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to fetch tasks.');
       }
+      const nextTasks = Array.isArray(data) ? data : [];
 
       qaDebug('Tasks loaded', { taskCount: nextTasks.length });
       setTasks(Array.isArray(nextTasks) ? nextTasks : []);

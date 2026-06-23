@@ -140,45 +140,6 @@ const filterAssignedProjects = (allProjects: any[], assignedTasks: AssignedTaskP
   });
 };
 
-const fetchProjectsFromSupabase = async () => {
-  let query = supabase.from('projects').select('*, progress_percentage').order('created_at', { ascending: false });
-  let { data, error } = await query;
-
-  if (error && error.message.toLowerCase().includes('created_at')) {
-    const fallback = await supabase.from('projects').select('*, progress_percentage').order('id', { ascending: false });
-    data = fallback.data;
-    error = fallback.error;
-  }
-
-  if (error) throw error;
-  const projects = Array.isArray(data) ? data : [];
-
-  return projects.map((project: any) => ({
-    ...project,
-    progress_percentage: normalizeProgress(project),
-    progress: normalizeProgress(project),
-  }));
-};
-
-const fetchAssignedTasksFromSupabase = async (userId: number) => {
-  const byAssignedTo = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('assigned_to', userId)
-    .order('id', { ascending: false });
-
-  if (!byAssignedTo.error) return Array.isArray(byAssignedTo.data) ? byAssignedTo.data : [];
-
-  const byUserId = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('user_id', userId)
-    .order('id', { ascending: false });
-
-  if (byUserId.error) throw byUserId.error;
-  return Array.isArray(byUserId.data) ? byUserId.data : [];
-};
-
 class ApiRequestError extends Error {
   status: number;
   endpoint: string;
@@ -204,21 +165,16 @@ const logProjectRequest = (endpoint: string, status: number, message?: string, f
   });
 };
 
-const warnProjectsFallback = (error: unknown) => {
+const warnProjectsBackendFailure = (error: unknown) => {
   if (!__DEV__) return;
   const status = error instanceof ApiRequestError ? error.status : 0;
   const endpoint = error instanceof ApiRequestError ? error.endpoint : `${API_URL}/projects`;
   const message = error instanceof Error ? error.message : String(error || 'Unknown error');
-  console.warn('Backend projects request failed. Using Supabase fallback.', {
+  console.warn('Backend projects request failed.', {
     status,
     endpoint,
     error: safeErrorMessage(message),
   });
-};
-
-const shouldUseProjectsFallback = (error: unknown) => {
-  if (!(error instanceof ApiRequestError)) return true;
-  return error.status === 0 || error.status >= 500;
 };
 
 const fetchJsonArray = async (url: string, label: string) => {
@@ -464,13 +420,13 @@ export default function HomeScreen({
       try {
         allProjects = await fetchJsonArray(`${API_URL}/projects`, 'Backend projects fetch failed');
       } catch (backendError) {
-        if (!shouldUseProjectsFallback(backendError)) throw backendError;
-        logProjectRequest(`${API_URL}/projects`, backendError instanceof ApiRequestError ? backendError.status : 0, backendError instanceof Error ? backendError.message : String(backendError), true);
-        warnProjectsFallback(backendError);
-        allProjects = await fetchProjectsFromSupabase();
+        logProjectRequest(`${API_URL}/projects`, backendError instanceof ApiRequestError ? backendError.status : 0, backendError instanceof Error ? backendError.message : String(backendError), false);
+        warnProjectsBackendFailure(backendError);
+        throw backendError;
       }
 
       let assignedTasks: AssignedTaskProject[] = [];
+      let canApplyAssignedTaskFilter = true;
 
       const assignedProjectRoles = new Set(['project_engineer', 'project_coordinator', 'foreman', 'project_supervisor']);
 
@@ -478,13 +434,13 @@ export default function HomeScreen({
         try {
           assignedTasks = await fetchJsonArray(`${API_URL}/tasks`, 'Backend tasks fetch failed');
         } catch (taskError) {
-          console.warn('Dashboard task filter backend fetch failed, using Supabase fallback:', taskError);
-          assignedTasks = await fetchAssignedTasksFromSupabase(user.id);
+          canApplyAssignedTaskFilter = false;
+          console.warn('Dashboard task filter backend fetch failed. Keeping backend project list unfiltered:', taskError);
         }
       }
 
       let filteredData = allProjects;
-      if (assignedProjectRoles.has(normalizedRole)) {
+      if (assignedProjectRoles.has(normalizedRole) && canApplyAssignedTaskFilter) {
         filteredData = filterAssignedProjects(allProjects, assignedTasks, user.id);
       }
 

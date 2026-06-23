@@ -23,7 +23,6 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { API_URL, apiFetch, getServerConnectionErrorMessage } from '../../lib/api';
 import { UserInfo } from '../../App';
-import { supabase } from '../../lib/supabase';
 import { analyzeGlassPanelsWithGemini, GeminiAuditResult } from '../../lib/generative-ai';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
@@ -75,25 +74,6 @@ type AnalysisStatus =
   | 'failed';           // Analysis failed — manual entry needed
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-const fetchAssignedTasksFromSupabase = async (userId: number) => {
-  const byAssignedTo = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('assigned_to', userId)
-    .order('id', { ascending: false });
-
-  if (!byAssignedTo.error) return Array.isArray(byAssignedTo.data) ? byAssignedTo.data : [];
-
-  const byUserId = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('user_id', userId)
-    .order('id', { ascending: false });
-
-  if (byUserId.error) throw byUserId.error;
-  return Array.isArray(byUserId.data) ? byUserId.data : [];
-};
 
 export default function UploadSiteProgressScreen({ visible, user, onClose, projects, initialTask }: Props) {
   const { theme } = useAppTheme();
@@ -168,19 +148,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     setLoadingTasks(true);
     setTasksError(null);
     try {
-      let tasks: any[] = [];
-
-      try {
-        const res = await apiFetch(`${API_URL}/tasks`);
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(data?.message || data?.error || 'Could not load assigned tasks.');
-        }
-        tasks = Array.isArray(data) ? data : [];
-      } catch (backendError) {
-        console.warn('Backend tasks unavailable, using Supabase fallback:', backendError);
-        tasks = await fetchAssignedTasksFromSupabase(user.id);
+      const res = await apiFetch(`${API_URL}/tasks`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || 'Could not load assigned tasks.');
       }
+      const tasks = Array.isArray(data) ? data : [];
 
       setUserTasks(tasks);
       if (!initialTask && tasks.length > 0) {

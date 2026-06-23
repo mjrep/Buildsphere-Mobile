@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiFetch } from '../../lib/api';
-import { supabase } from '../../lib/supabase';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { ACTION_TYPE_LABELS, ACTION_TYPE_COLORS } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -37,17 +36,6 @@ interface InventoryItem {
   price: number | string;
   unit?: string;
 }
-
-const fetchProjectTasksFromSupabase = async (projectId: number) => {
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('id,title')
-    .eq('project_id', projectId)
-    .order('id', { ascending: false });
-
-  if (error) throw error;
-  return Array.isArray(data) ? data : [];
-};
 
 interface InventoryLog {
   id: number;
@@ -251,19 +239,12 @@ export default function InventoryScreen({
   const fetchTasks = async () => {
     if (!canView) return;
     try {
-      let nextTasks: { id: number; title: string }[] = [];
-
-      try {
-        const res = await apiFetch(`${API_URL}/tasks/project/${projectId}`);
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(data?.message || data?.error || 'Failed to fetch project tasks.');
-        }
-        nextTasks = Array.isArray(data) ? data : [];
-      } catch (backendError) {
-        console.warn('Backend project tasks unavailable, using Supabase fallback:', backendError);
-        nextTasks = await fetchProjectTasksFromSupabase(projectId);
+      const res = await apiFetch(`${API_URL}/tasks/project/${projectId}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to fetch project tasks.');
       }
+      const nextTasks = Array.isArray(data) ? data : [];
 
       setProjectTasks(Array.isArray(nextTasks) ? nextTasks : []);
     } catch (err) {

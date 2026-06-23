@@ -8,7 +8,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiFetch } from '../../lib/api';
-import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { TaskCardSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,17 +31,6 @@ interface ProjectTasksViewProps {
   onBack: () => void;
 }
 
-const fetchProjectTasksFromSupabase = async (projectId: number) => {
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('id', { ascending: false });
-
-  if (error) throw error;
-  return Array.isArray(data) ? data : [];
-};
-
 export default function ProjectTasksView({ projectId, currentUserId, onTaskSelect, onBack }: ProjectTasksViewProps) {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -55,19 +43,12 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
   const fetchProjectTasks = async () => {
     setLoading(true);
     try {
-      let nextTasks: Task[] = [];
-
-      try {
-        const res = await apiFetch(`${API_URL}/tasks/project/${projectId}`);
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(data?.message || data?.error || 'Failed to fetch project tasks.');
-        }
-        nextTasks = Array.isArray(data) ? data : [];
-      } catch (backendError) {
-        console.warn('Backend project tasks unavailable, using Supabase fallback:', backendError);
-        nextTasks = await fetchProjectTasksFromSupabase(projectId);
+      const res = await apiFetch(`${API_URL}/tasks/project/${projectId}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to fetch project tasks.');
       }
+      const nextTasks = Array.isArray(data) ? data : [];
 
       setTasks(Array.isArray(nextTasks) ? nextTasks : []);
     } catch (err) {
