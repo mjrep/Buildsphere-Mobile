@@ -1,6 +1,7 @@
 import { Alert } from 'react-native';
-import { API_URL } from '../lib/api';
+import { API_URL, apiFetch } from '../lib/api';
 import { LEGACY_NOTIFICATION_TYPE_MAP } from '../constants/constants';
+import { qaDebug } from './qaDebug';
 
 export type MainNotificationTab = 'home' | 'mywork' | 'notifications' | 'more';
 
@@ -186,7 +187,7 @@ export async function markNotificationRead(notificationId: number | string | und
   if (!notificationId) return;
 
   try {
-    const response = await fetch(`${API_URL}/notifications/${notificationId}/read?userId=${userId}`, {
+    const response = await apiFetch(`${API_URL}/notifications/${notificationId}/read`, {
       method: 'PATCH',
     });
     if (!response.ok) throw new Error(`Mark read failed (${response.status})`);
@@ -227,5 +228,13 @@ export async function handleNotificationNavigation(
 ) {
   const notificationId = notification.notification_id || notification.id;
   await markNotificationRead(notificationId, userId);
-  return routeNotification(buildNotificationRoute(notification), handlers);
+  const route = buildNotificationRoute(notification);
+  const metadata = getNotificationMetadata(notification);
+  qaDebug('Notification route payload parsed', {
+    notificationId: notificationId ? String(notificationId) : undefined,
+    type: metadata.type || notification.type,
+    referenceType: metadata.reference_type || notification.reference_type,
+    routeKind: route.kind,
+  });
+  return routeNotification(route, handlers);
 }

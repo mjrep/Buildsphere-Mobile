@@ -21,7 +21,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 
 import * as ImagePicker from 'expo-image-picker';
 
-import { API_URL, getServerConnectionErrorMessage } from '../../lib/api';
+import { API_URL, apiFetch, getServerConnectionErrorMessage } from '../../lib/api';
 import { UserInfo } from '../../App';
 import { supabase } from '../../lib/supabase';
 import { analyzeGlassPanelsWithGemini, GeminiAuditResult } from '../../lib/generative-ai';
@@ -171,7 +171,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       let tasks: any[] = [];
 
       try {
-        const res = await fetch(`${API_URL}/tasks?userId=${user.id}`);
+        const res = await apiFetch(`${API_URL}/tasks`);
         const data = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(data?.message || data?.error || 'Could not load assigned tasks.');
@@ -445,7 +445,6 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       
       formData.append('workDate', formattedDate);
       formData.append('notes', notes);
-      formData.append('userId', user.id.toString());
 
       // Gemini-only analysis fields
       formData.append('ai_detected_count', aiDetectedCount.toString());
@@ -470,7 +469,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
         });
       }
 
-      const response = await fetch(`${API_URL}/site-progress`, {
+      const response = await apiFetch(`${API_URL}/site-progress`, {
         method: 'POST',
         body: formData,
         headers: {

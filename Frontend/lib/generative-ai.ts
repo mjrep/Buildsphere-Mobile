@@ -1,4 +1,5 @@
-import { API_URL } from './api';
+import { API_URL, apiFetch } from './api';
+import { qaDebug } from '../utils/qaDebug';
 
 const withRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000): Promise<T> => {
   try {
@@ -79,7 +80,7 @@ export const countGlassPanels = async (
     const timeoutId = setTimeout(() => controller.abort(), 90000);
 
     try {
-      const response = await fetch(`${API_URL}/api/ai/glass-analysis`, {
+      const response = await apiFetch(`${API_URL}/api/ai/glass-analysis`, {
         method: 'POST',
         headers: {
           Accept: 'application/json',
@@ -90,10 +91,16 @@ export const countGlassPanels = async (
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
+        qaDebug('Gemini analysis failed', { status: response.status });
         throw new Error(body?.message || `AI analysis failed (${response.status}).`);
       }
 
-      return response.json();
+      const result = await response.json();
+      qaDebug('Gemini analysis succeeded', {
+        status: response.status,
+        detectedCount: result?.ai_detected_count ?? result?.total_valid_panels,
+      });
+      return result;
     } finally {
       clearTimeout(timeoutId);
     }
@@ -133,6 +140,7 @@ export const analyzeGlassPanelsWithGemini = async (
       uncertainDetections,
     };
   } catch (error: any) {
+    qaDebug('Gemini analysis failed', { status: 0 });
     console.error('GEMINI_BACKEND_AUDIT_ERROR:', error);
     throw new Error(`Gemini Audit Failed: ${error.message || 'Unknown Error'}`);
   }

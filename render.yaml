@@ -30,6 +30,10 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_API_KEY_2
+        sync: false
+      - key: GEMINI_API_KEY_3
+        sync: false
       - key: GEMINI_MODEL
         value: gemini-3-flash-preview
       - key: AI_ANALYSIS_MODE

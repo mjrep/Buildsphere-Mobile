@@ -4,24 +4,19 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { API_URL, getServerConnectionErrorMessage } from '../../lib/api';
+import { API_URL, apiFetch, getServerConnectionErrorMessage } from '../../lib/api';
 import SiteUpdatesScreen from './SiteUpdatesScreen';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
-import {
-  BudgetValue,
-  formatBudgetPercent,
-  formatCurrencyPHP,
-  getProjectBudgetOverview,
-} from '../../utils/budget';
+import { normalizeProgress } from '../../utils/projectProgress';
+import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
 
 interface Project {
   id: number;
@@ -36,15 +31,8 @@ interface Project {
   clientName?: string;
   start_date?: string;
   end_date?: string;
-  budget?: BudgetValue;
-  contract_price?: BudgetValue;
-  budget_for_materials?: BudgetValue;
-  total_budget?: BudgetValue;
-  used_budget?: BudgetValue;
-  actual_cost?: BudgetValue;
-  remaining_budget?: BudgetValue;
-  budget_utilization?: BudgetValue;
   progress?: number;
+  progress_percentage?: number;
 }
 
 interface ProjectActivity {
@@ -56,7 +44,6 @@ interface ProjectActivity {
 
 interface Props {
   projectId: number;
-  userId: number;
   onBack: () => void;
   userRole?: UserRole;
   onNavigate?: (tab: MainTab) => void;
@@ -138,15 +125,15 @@ function ProjectDetailSkeleton({ onBack }: { onBack: () => void }) {
 }
 
 function statusBadge(status: string) {
-  switch ((status || '').toLowerCase()) {
+  switch (normalizeDisplayKey(status)) {
     case 'delayed':
       return { label: 'Delayed', bg: '#FF6B6B', text: 'white' };
     case 'completed':
       return { label: 'Completed', bg: '#51CF66', text: 'white' };
-    case 'on hold':
+    case 'on-hold':
       return { label: 'On Hold', bg: '#FFA500', text: 'white' };
     default:
-      return { label: 'Ongoing', bg: '#7370FF', text: 'white' };
+      return { label: formatDisplayLabel(status, 'Ongoing'), bg: '#7370FF', text: 'white' };
   }
 }
 
@@ -169,36 +156,10 @@ function daysLeft(end?: string) {
   return diff > 0 ? diff : 0;
 }
 
-function BudgetOverviewRow({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  const { theme } = useAppTheme();
-  return (
-    <View className="mb-3 flex-row items-center justify-between">
-      <Text className="mr-3 flex-1 text-[12px]" style={{ color: theme.textMuted }}>{label}</Text>
-      <Text
-        className={accent ? 'text-[14px] font-extrabold' : 'text-[13px] font-bold'}
-        style={{ color: accent ? theme.primary : theme.text }}
-        numberOfLines={1}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
 export default function ProjectDetailScreen({
   projectId,
-  userId,
   onBack,
   userRole,
-  onNavigate,
   canViewHome = true,
   unreadCount = 0,
   onViewInventory,
@@ -219,7 +180,7 @@ export default function ProjectDetailScreen({
     setLoading(true);
     setError(null);
     try {
-      const projectResponse = await fetch(`${API_URL}/projects/${projectId}`);
+      const projectResponse = await apiFetch(`${API_URL}/projects/${projectId}`);
       const projectData = await projectResponse.json().catch(() => null);
       if (!projectResponse.ok) {
         throw new Error(projectData?.error || 'Could not load projects.');
@@ -227,7 +188,7 @@ export default function ProjectDetailScreen({
       setProject(projectData);
 
       try {
-        const activityResponse = await fetch(`${API_URL}/projects/${projectId}/activity`);
+        const activityResponse = await apiFetch(`${API_URL}/projects/${projectId}/activity`);
         const activityData = await activityResponse.json().catch(() => []);
         setActivities(Array.isArray(activityData) ? activityData : []);
       } catch (activityError) {
@@ -263,11 +224,16 @@ export default function ProjectDetailScreen({
 
   const badge = statusBadge(project.status);
   const days = daysLeft(project.end_date);
-  const progress = project.progress || 0;
-  const budgetOverview = getProjectBudgetOverview(project);
-  const budgetUtilizationText = formatBudgetPercent(budgetOverview.budgetUtilization);
+  const progress = normalizeProgress(project);
   const engineerName = project.engineer || project.project_engineer || project.project_in_charge_name || 'Unassigned';
   const clientName = project.client_name || project.clientName || 'Not set';
+  const detailFields = [
+    { label: 'Project Engineer', value: engineerName },
+    { label: 'Client', value: clientName },
+    { label: 'Address', value: project.location || 'Unknown Location' },
+    { label: 'Project Start', value: fmt(project.start_date) },
+    { label: 'Project End', value: fmt(project.end_date) },
+  ];
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
@@ -290,7 +256,7 @@ export default function ProjectDetailScreen({
           <View className="mb-3 flex-row items-center justify-between">
             <Text className="mr-3 flex-1 text-[20px] font-bold" style={{ color: theme.text }} numberOfLines={2}>{project.name}</Text>
             <View className="rounded-full px-5 py-2" style={{ backgroundColor: badge.bg }}>
-              <Text className="text-[11px] font-bold uppercase tracking-wider text-white">
+              <Text className="text-[11px] font-bold text-white">
                 {badge.label}
               </Text>
             </View>
@@ -305,67 +271,19 @@ export default function ProjectDetailScreen({
             </View>
           </View>
 
-          <View className="mb-6 flex-row">
-            <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Project Engineer</Text>
-              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>
-                {engineerName}
-              </Text>
-            </View>
-            <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Project Start</Text>
-              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>
-                {fmt(project.start_date)}
-              </Text>
-            </View>
-          </View>
-
-          <View className="flex-row">
-            <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Client / Company</Text>
-              <Text className="text-[13px] font-bold" style={{ color: theme.text }} numberOfLines={2}>
-                {clientName}
-              </Text>
-            </View>
-            <View className="flex-1">
-              <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Project End</Text>
-              <Text className="text-[13px] font-bold" style={{ color: theme.text }}>{fmt(project.end_date)}</Text>
-            </View>
-          </View>
-          <View className="mt-5">
-            <Text className="mb-1 text-[11px] font-medium" style={{ color: theme.textMuted }}>Location</Text>
-            <Text className="text-[13px] font-bold" style={{ color: theme.text }} numberOfLines={2}>
-              {project.location || 'Unknown Location'}
-            </Text>
+          <View className="flex-row flex-wrap">
+            {detailFields.map((field) => (
+              <View key={field.label} className="mb-5 w-1/2 pr-3">
+                <Text className="mb-1 text-[11px] font-semibold" style={{ color: theme.textMuted }} numberOfLines={1}>
+                  {field.label}
+                </Text>
+                <Text className="text-[13px] font-bold" style={{ color: theme.text }} numberOfLines={2}>
+                  {field.value}
+                </Text>
+              </View>
+            ))}
           </View>
         </View>
-
-        {perms.canViewBudget ? (
-          <View
-            className="mb-4 rounded-[24px] border p-6"
-            style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
-            <View className="mb-4 flex-row items-center">
-              <View className="mr-3 h-9 w-9 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primaryLight }}>
-                <Ionicons name="wallet-outline" size={18} color={theme.primary} />
-              </View>
-              <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Budget Overview</Text>
-            </View>
-            <BudgetOverviewRow
-              label="Total Budget"
-              value={formatCurrencyPHP(budgetOverview.totalBudget)}
-              accent={budgetOverview.totalBudget !== null}
-            />
-            {budgetOverview.usedBudget !== null ? (
-              <BudgetOverviewRow label="Used" value={formatCurrencyPHP(budgetOverview.usedBudget)} />
-            ) : null}
-            {budgetOverview.remainingBudget !== null ? (
-              <BudgetOverviewRow label="Remaining" value={formatCurrencyPHP(budgetOverview.remainingBudget)} />
-            ) : null}
-            {budgetUtilizationText ? (
-              <BudgetOverviewRow label="Utilization" value={budgetUtilizationText} />
-            ) : null}
-          </View>
-        ) : null}
 
         {/* Progress Card */}
         <View
@@ -388,27 +306,18 @@ export default function ProjectDetailScreen({
               />
             </View>
           </View>
-
-          <View className="h-[2px] w-full rounded-full" style={{ backgroundColor: theme.border }}>
-            <View
-              style={{ width: `${progress}%`, backgroundColor: '#5DBF50' }}
-              className="h-full rounded-full"
-            />
-          </View>
         </View>
 
         {/* Navigation List */}
         <View className="mt-8">
           {[
-            { label: 'Tasks', key: 'tasks' },
             ...(mayViewInventory ? [{ label: 'Inventory', key: 'inventory' }] : []),
             { label: 'Site Updates', key: 'siteUpdates' },
           ].map((item) => (
             <TouchableOpacity
               key={item.key}
               onPress={() => {
-                if (item.key === 'tasks') onNavigate?.('mywork');
-                else if (item.key === 'siteUpdates') setShowSiteUpdates(true);
+                if (item.key === 'siteUpdates') setShowSiteUpdates(true);
                 else if (item.key === 'inventory') onViewInventory?.(project.id);
               }}
               className="mb-4 flex-row items-center justify-between rounded-[20px] border px-6 py-5"
@@ -432,7 +341,7 @@ export default function ProjectDetailScreen({
             {activities.slice(0, 5).map((activity) => (
               <View key={activity.id} className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
                 <Text className="text-[12px] font-bold" style={{ color: theme.text }} numberOfLines={1}>
-                  {activity.action || 'Activity'}
+                  {formatDisplayLabel(activity.action, 'Activity')}
                 </Text>
                 <Text className="mt-1 text-[12px]" style={{ color: theme.textSecondary }} numberOfLines={2}>
                   {activity.description || 'Project activity recorded.'}
@@ -458,7 +367,10 @@ export default function ProjectDetailScreen({
         <SiteUpdatesScreen
           visible={showSiteUpdates}
           projectName={project.name}
-          onClose={() => setShowSiteUpdates(false)}
+          onClose={() => {
+            setShowSiteUpdates(false);
+            loadProject();
+          }}
         />
       )}
     </View>

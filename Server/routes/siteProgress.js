@@ -8,6 +8,9 @@ const { createClient } = require('@supabase/supabase-js');
 const { createNotification, sendPushNotificationToUser } = require('../services/pushNotificationService');
 const { hasQuantityTracking, syncTaskQuantityStatus } = require('../services/taskStatusService');
 const { logProjectActivity } = require('../services/activityLogService');
+const { authenticateRequest } = require('../middleware/auth');
+const { canUploadSiteProgress } = require('../rbac');
+const { qaDebug } = require('../services/qaDebug');
 
 let supabase = null;
 
@@ -24,7 +27,36 @@ function getSupabaseStorageClient() {
 
 
 const storage = multer.memoryStorage();
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+  fileFilter: (_req, file, cb) => {
+    if (!/^image\/(jpeg|jpg|png|webp)$/i.test(file.mimetype || '')) {
+      return cb(new Error('Unsupported image type. Please upload JPEG, PNG, or WebP images.'));
+    }
+    return cb(null, true);
+  },
+});
+
+function handleSiteProgressUpload(req, res, next) {
+  upload.array('photos', 5)(req, res, (error) => {
+    if (!error) return next();
+
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ message: 'Each progress image must be smaller than 10 MB.' });
+    }
+
+    return res.status(400).json({ message: error.message || 'Invalid progress image upload.' });
+  });
+}
+
+function requireSiteProgressRole(req, res, next) {
+  if (!canUploadSiteProgress(req.user?.role)) {
+    return res.status(403).json({ message: 'You do not have permission to upload site progress.' });
+  }
+
+  return next();
+}
 
 function parseJsonBodyField(value, fallback = null) {
   if (!value) return fallback;
@@ -72,10 +104,12 @@ function firstFiniteInteger(...values) {
   return 0;
 }
 
-router.post('/', upload.array('photos', 5), async (req, res) => {
+router.use(authenticateRequest);
+
+router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, res) => {
   // photoUrls can come from body or req.files
   const {
-    projectId, taskId, quantityInstalled, notes, userId,
+    projectId, taskId, quantityInstalled, notes,
     glassCount, shift, workDate,
     // AI detection fields from Gemini-only backend analysis
     ai_detected_count, verified_panel_count,
@@ -87,7 +121,7 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
   try {
     const parsedProjectId = firstFiniteInteger(projectId);
     const parsedTaskId = firstFiniteInteger(taskId);
-    const parsedUserId = firstFiniteInteger(userId);
+    const parsedUserId = firstFiniteInteger(req.user.id);
 
     if (!parsedProjectId || !parsedTaskId || !parsedUserId) {
       return res.status(400).json({
@@ -116,11 +150,13 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
           });
 
         if (uploadError) {
-          console.error('Supabase Upload Error:', uploadError);
+          qaDebug('Storage upload result', { success: false, bucket: 'site-progress', mimeType: file.mimetype });
+          console.error('Supabase Upload Error:', uploadError.message || uploadError);
           return res.status(502).json({
             message: 'Image upload failed. Please try again.',
           });
         }
+        qaDebug('Storage upload result', { success: true, bucket: 'site-progress', mimeType: file.mimetype });
 
         // 2. Get Public URL
         const { data: publicUrlData } = supabaseStorage.storage
@@ -137,15 +173,38 @@ router.post('/', upload.array('photos', 5), async (req, res) => {
     // 1. Fetch milestone data from the task. Quantity milestones drive task status automatically.
     const taskRes = await pool.query(
       `SELECT
+         t.id,
+         t.project_id,
+         t.assigned_to,
+         t.assigned_by,
+         t.created_by,
          t.milestone_id,
+         p.project_in_charge_id,
          pm.has_quantity,
          pm.target_quantity
        FROM tasks t
+       LEFT JOIN projects p ON p.id = t.project_id
        LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
        WHERE t.id = $1`,
       [parsedTaskId]
     );
     const taskMilestone = taskRes.rows[0] || {};
+    if (!taskMilestone.id) {
+      return res.status(404).json({ message: 'Task not found.' });
+    }
+    if (Number(taskMilestone.project_id) !== parsedProjectId) {
+      return res.status(400).json({ message: 'Selected task does not belong to the selected project.' });
+    }
+    const canUploadForTask = [
+      taskMilestone.assigned_to,
+      taskMilestone.assigned_by,
+      taskMilestone.created_by,
+      taskMilestone.project_in_charge_id,
+    ].some((candidate) => String(candidate || '') === String(parsedUserId));
+    if (!canUploadForTask) {
+      return res.status(403).json({ message: 'You do not have permission to upload progress for this task.' });
+    }
+
     const milestoneId = taskMilestone.milestone_id || null;
     const savedQuantity = firstFiniteInteger(verified_panel_count, quantityInstalled, glassCount);
 

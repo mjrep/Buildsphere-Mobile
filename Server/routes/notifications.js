@@ -7,6 +7,8 @@ const {
   createNotification,
   ensureNotificationTables,
 } = require('../services/pushNotificationService');
+const { authenticateRequest } = require('../middleware/auth');
+const { qaDebug } = require('../services/qaDebug');
 
 let supabase = null;
 
@@ -46,7 +48,7 @@ function mapNotificationRow(n) {
 }
 
 function getRequestUserId(req) {
-  return req.query.userId || req.body?.userId || req.body?.user_id;
+  return req.user?.id;
 }
 
 async function fetchNotificationsForUser(userId) {
@@ -160,10 +162,12 @@ async function deleteNotificationViaSupabase(notificationId, userId) {
   return data;
 }
 
-// GET /notifications?userId=xxx
+router.use(authenticateRequest);
+
+// GET /notifications
 router.get('/', async (req, res) => {
-  const { userId } = req.query;
-  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+  const userId = getRequestUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
 
   try {
     const rows = await fetchNotificationsWithSchemaRepair(userId);
@@ -177,7 +181,7 @@ router.get('/', async (req, res) => {
 // PATCH /notifications/:id/read
 router.patch('/:id/read', async (req, res) => {
   const userId = getRequestUserId(req);
-  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
 
   try {
     let notification;
@@ -202,8 +206,8 @@ router.patch('/:id/read', async (req, res) => {
 
 // PATCH /notifications/read-all?userId=xxx
 router.patch('/read-all', async (req, res) => {
-  const { userId } = req.query;
-  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+  const userId = getRequestUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
 
   try {
     let count;
@@ -229,7 +233,7 @@ router.patch('/read-all', async (req, res) => {
 // DELETE /notifications/:id
 router.delete('/:id', async (req, res) => {
   const userId = getRequestUserId(req);
-  if (!userId) return res.status(400).json({ error: 'userId is required.' });
+  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
 
   try {
     let deletedNotification;
@@ -254,9 +258,10 @@ router.delete('/:id', async (req, res) => {
 
 // POST /notifications/register-token
 router.post('/register-token', async (req, res) => {
-  const { user_id, expo_push_token, device_type } = req.body;
-  if (!user_id || !expo_push_token) {
-    return res.status(400).json({ error: 'user_id and expo_push_token are required.' });
+  const { expo_push_token, device_id, device_type } = req.body;
+  const userId = getRequestUserId(req);
+  if (!userId || !expo_push_token) {
+    return res.status(400).json({ error: 'expo_push_token is required.' });
   }
 
   if (!Expo.isExpoPushToken(expo_push_token)) {
@@ -266,33 +271,78 @@ router.post('/register-token', async (req, res) => {
   try {
     await ensureNotificationTables();
     await pool.query(
-      `INSERT INTO user_push_tokens (user_id, expo_push_token, device_type, is_active, created_at, updated_at)
-       VALUES ($1, $2, $3, true, NOW(), NOW())
+      `UPDATE user_push_tokens
+       SET is_active = false, updated_at = NOW()
+       WHERE expo_push_token = $1 AND user_id::text <> $2`,
+      [expo_push_token, String(userId)]
+    );
+    if (device_id) {
+      await pool.query(
+        `UPDATE user_push_tokens
+         SET is_active = false, updated_at = NOW()
+         WHERE user_id::text = $1
+           AND device_id = $2
+           AND expo_push_token <> $3`,
+        [String(userId), device_id, expo_push_token]
+      );
+    }
+    await pool.query(
+      `INSERT INTO user_push_tokens (user_id, expo_push_token, device_id, device_type, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, true, NOW(), NOW())
        ON CONFLICT (user_id, expo_push_token)
        DO UPDATE SET
+         device_id = EXCLUDED.device_id,
          device_type = EXCLUDED.device_type,
          is_active = true,
          updated_at = NOW()`,
-      [user_id, expo_push_token, device_type || 'unknown']
+      [userId, expo_push_token, device_id || null, device_type || 'unknown']
     );
 
+    qaDebug('Push token registered', { saved: true, userId: String(userId), deviceType: device_type || 'unknown' });
     res.json({ success: true });
   } catch (err) {
+    qaDebug('Push token registered', { saved: false, userId: String(userId) });
     console.error(err);
     res.status(500).json({ error: 'Failed to register push token.' });
   }
 });
 
-// POST /notifications/test
-router.post('/test', async (req, res) => {
-  const { user_id, title, message } = req.body;
-  if (!user_id) {
-    return res.status(400).json({ error: 'user_id is required.' });
+// POST /notifications/unregister-token
+router.post('/unregister-token', async (req, res) => {
+  const { expo_push_token, device_id } = req.body;
+  const userId = getRequestUserId(req);
+  if (!userId || !expo_push_token) {
+    return res.status(400).json({ error: 'expo_push_token is required.' });
   }
 
   try {
+    await ensureNotificationTables();
+    const result = await pool.query(
+      `UPDATE user_push_tokens
+       SET is_active = false, updated_at = NOW()
+       WHERE user_id::text = $1
+         AND (expo_push_token = $2 OR ($3::text IS NOT NULL AND device_id = $3))
+       RETURNING id`,
+      [String(userId), expo_push_token, device_id || null]
+    );
+
+    qaDebug('Push token unregistered', { userId: String(userId), rows: result.rowCount });
+    res.json({ success: true, count: result.rowCount });
+  } catch (err) {
+    console.error('Push token unregister error:', err.message || err);
+    res.status(500).json({ error: 'Failed to unregister push token.' });
+  }
+});
+
+// POST /notifications/test
+router.post('/test', async (req, res) => {
+  const { title, message } = req.body;
+  const userId = getRequestUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
+
+  try {
     const result = await createNotification({
-      recipientId: user_id,
+      recipientId: userId,
       title: title || 'BuildSphere Alert',
       message: message || 'This is a test notification from BuildSphere.',
       type: 'test_notification',

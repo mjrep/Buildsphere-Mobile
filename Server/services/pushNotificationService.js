@@ -1,9 +1,11 @@
 const { Expo } = require('expo-server-sdk');
 const pool = require('../db');
+const { qaDebug } = require('./qaDebug');
 
 const expo = new Expo();
 
 let notificationSchemaReady = false;
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
 async function resolveUserIdSqlType() {
   const { rows } = await pool.query(
@@ -31,6 +33,7 @@ async function ensureNotificationTables() {
       id BIGSERIAL PRIMARY KEY,
       user_id ${userIdType} NOT NULL,
       expo_push_token TEXT NOT NULL,
+      device_id TEXT,
       device_type TEXT,
       is_active BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -56,6 +59,11 @@ async function ensureNotificationTables() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE user_push_tokens
+      ADD COLUMN IF NOT EXISTS device_id TEXT
   `);
 
   await pool.query(`
@@ -122,6 +130,7 @@ async function deactivateInvalidTokens(invalidTokens) {
      WHERE expo_push_token = ANY($1::text[])`,
     [invalidTokens]
   );
+  qaDebug('Invalid push token removed', { count: invalidTokens.length });
 }
 
 async function sendExpoPushToUser(userId, title, body, data = {}) {
@@ -154,19 +163,43 @@ async function sendExpoPushToUser(userId, title, body, data = {}) {
     await deactivateInvalidTokens(invalidTokens);
   }
 
+  if (isDevelopment) {
+    qaDebug('Push send target summary', {
+      userId: String(userId),
+      activeTokens: tokenResult.rows.length,
+      validTokens: validMessages.length,
+      invalidTokens: invalidTokens.length,
+      type: data?.type || 'system',
+    });
+  }
+
   const chunks = expo.chunkPushNotifications(validMessages);
   const newInvalidTokens = [];
+  let ticketSuccessCount = 0;
+  let ticketErrorCount = 0;
 
   for (const chunk of chunks) {
     try {
       const tickets = await expo.sendPushNotificationsAsync(chunk);
       tickets.forEach((ticket, idx) => {
+        if (ticket.status === 'ok') {
+          ticketSuccessCount += 1;
+        }
+
         if (
           ticket.status === 'error' &&
           (ticket.details?.error === 'DeviceNotRegistered' || ticket.details?.error === 'InvalidCredentials')
         ) {
           const badToken = chunk[idx]?.to;
           if (badToken) newInvalidTokens.push(badToken);
+        }
+
+        if (ticket.status === 'error') {
+          ticketErrorCount += 1;
+          console.warn('Expo push ticket error:', {
+            userId: String(userId),
+            error: ticket.details?.error || ticket.message || 'unknown',
+          });
         }
       });
     } catch (err) {
@@ -176,6 +209,16 @@ async function sendExpoPushToUser(userId, title, body, data = {}) {
 
   if (newInvalidTokens.length) {
     await deactivateInvalidTokens(newInvalidTokens);
+  }
+
+  if (isDevelopment) {
+    qaDebug('Push send complete', {
+      userId: String(userId),
+      attempted: validMessages.length,
+      ticketSuccessCount,
+      ticketErrorCount,
+      deactivated: invalidTokens.length + newInvalidTokens.length,
+    });
   }
 
   return {
@@ -222,6 +265,12 @@ async function createNotification({
     [recipientId, title, message, type || null, finalReferenceType, finalReferenceId, payload, date, time, finalReferenceUrl]
   );
   const notification = result.rows[0];
+  qaDebug('Notification saved', {
+    saved: Boolean(notification?.id),
+    recipientId: String(recipientId),
+    type,
+    sendPush,
+  });
 
   let push = { sent: 0, invalid: 0 };
   if (sendPush) {

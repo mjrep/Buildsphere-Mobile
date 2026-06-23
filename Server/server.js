@@ -71,6 +71,7 @@ app.use('/tasks', tasksRoutes);
 app.use('/notifications', notificationsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/users', usersRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/site-progress', siteProgressRoutes);
 app.use('/inventory', inventoryRoutes);

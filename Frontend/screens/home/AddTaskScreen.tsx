@@ -15,11 +15,12 @@ import {
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { API_URL, getServerConnectionErrorMessage } from '../../lib/api';
+import { API_URL, apiFetch, getServerConnectionErrorMessage } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
+import { formatDisplayLabel } from '../../utils/display';
 
 interface ProjectOption {
   id: number;
@@ -42,6 +43,12 @@ interface UserOption {
   name: string;
   email?: string;
   role?: string;
+}
+
+interface ProjectUserLink {
+  project_id: number;
+  user_id: number;
+  role_in_project?: string;
 }
 
 interface PickedAttachment {
@@ -97,7 +104,6 @@ interface SectionProps {
 interface AddTaskScreenProps {
   visible: boolean;
   onClose: () => void;
-  userId: number;
   projects: ProjectOption[];
   onTaskAdded: () => void;
 }
@@ -107,6 +113,17 @@ const PRIORITIES = [
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
 ];
+const ALLOWED_ATTACHMENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
+const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 const toDateInput = (date: Date) => {
   const year = date.getFullYear();
@@ -130,7 +147,10 @@ const normalizeMilestones = (milestones: any[] = []): MilestoneOption[] =>
   milestones
     .map((milestone) => ({
       id: Number(milestone.id),
-      name: milestone.name || milestone.milestone_name || `Milestone ${milestone.sequence_no || milestone.id}`,
+      name: formatDisplayLabel(
+        milestone.name || milestone.milestone_name || milestone.milestone_key || milestone.milestoneKey,
+        `Milestone ${milestone.sequence_no || milestone.id}`
+      ),
     }))
     .filter((milestone) => Number.isFinite(milestone.id) && milestone.id > 0);
 
@@ -138,7 +158,10 @@ const normalizePhases = (phases: any[] = []): PhaseOption[] =>
   phases
     .map((phase) => ({
       id: Number(phase.id),
-      name: phase.name || phase.phase_title || phase.phase_name || phase.phase_key || `Phase ${phase.sequence_no || phase.id}`,
+      name: formatDisplayLabel(
+        phase.name || phase.phase_title || phase.phase_name || phase.phase_key || phase.phaseKey,
+        `Phase ${phase.sequence_no || phase.id}`
+      ),
       milestones: normalizeMilestones(Array.isArray(phase.milestones) ? phase.milestones : []),
     }))
     .filter((phase) => Number.isFinite(phase.id) && phase.id > 0);
@@ -210,7 +233,6 @@ const Section = ({
 export default function AddTaskScreen({
   visible,
   onClose,
-  userId,
   projects,
   onTaskAdded,
 }: AddTaskScreenProps) {
@@ -228,6 +250,7 @@ export default function AddTaskScreen({
   const [phases, setPhases] = useState<PhaseOption[]>([]);
   const [milestones, setMilestones] = useState<MilestoneOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [projectUsers, setProjectUsers] = useState<ProjectUserLink[]>([]);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [selector, setSelector] = useState<SelectorKind | null>(null);
@@ -245,6 +268,17 @@ export default function AddTaskScreen({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const projectOptions = projects.length > 0 ? projects : dbProjects;
+  const assigneeOptions = useMemo(() => {
+    if (!projectId) return [];
+
+    const assignedIds = new Set(
+      projectUsers
+        .filter((link) => String(link.project_id) === projectId)
+        .map((link) => String(link.user_id))
+    );
+
+    return users.filter((user) => assignedIds.has(String(user.id)));
+  }, [projectId, projectUsers, users]);
 
   const selectedProjectLabel = useMemo(
     () => projectOptions.find((project) => String(project.id) === projectId)?.name || '',
@@ -262,10 +296,10 @@ export default function AddTaskScreen({
   );
 
   const selectedAssigneeLabel = useMemo(() => {
-    const user = users.find((item) => String(item.id) === assignedTo);
+    const user = assigneeOptions.find((item) => String(item.id) === assignedTo);
     if (!user) return '';
-    return `${user.name}${user.role ? ` - ${user.role}` : ''}`;
-  }, [assignedTo, users]);
+    return `${user.name}${user.role ? ` - ${formatDisplayLabel(user.role)}` : ''}`;
+  }, [assignedTo, assigneeOptions]);
 
   const selectedPriorityLabel = PRIORITIES.find((item) => item.value === priority)?.label || '';
 
@@ -320,11 +354,11 @@ export default function AddTaskScreen({
       return {
         title: 'Assign To',
         selectedValue: assignedTo,
-        emptyText: 'No users available.',
-        options: users.map((user) => ({
+        emptyText: projectId ? 'No assigned users found for this project.' : 'Select a project first.',
+        options: assigneeOptions.map((user) => ({
           value: String(user.id),
           label: user.name,
-          detail: user.role || user.email,
+          detail: user.role ? formatDisplayLabel(user.role) : user.email,
         })),
       };
     }
@@ -352,7 +386,7 @@ export default function AddTaskScreen({
     projectId,
     projectOptions,
     selector,
-    users,
+    assigneeOptions,
   ]);
 
   const isDirty = Boolean(
@@ -442,7 +476,7 @@ export default function AddTaskScreen({
     if (!visible) return;
     setDbProjects(projects);
     setLoadingMeta(true);
-    fetch(`${API_URL}/tasks/meta`)
+    apiFetch(`${API_URL}/tasks/meta`)
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not load task form options.');
@@ -451,6 +485,23 @@ export default function AddTaskScreen({
       .then((data) => {
         if (Array.isArray(data.projects)) setDbProjects(data.projects);
         if (Array.isArray(data.users)) setUsers(data.users);
+        if (Array.isArray(data.projectUsers)) {
+          setProjectUsers(
+            data.projectUsers
+              .map((link: any) => ({
+                project_id: Number(link.project_id),
+                user_id: Number(link.user_id),
+                role_in_project: link.role_in_project,
+              }))
+              .filter(
+                (link: ProjectUserLink) =>
+                  Number.isFinite(link.project_id) &&
+                  link.project_id > 0 &&
+                  Number.isFinite(link.user_id) &&
+                  link.user_id > 0
+              )
+          );
+        }
       })
       .catch((err) => {
         console.error('Failed to fetch task metadata:', err);
@@ -476,7 +527,7 @@ export default function AddTaskScreen({
     setPhases([]);
     setMilestones([]);
 
-    fetch(`${API_URL}/projects/${projectId}/milestone-plan`)
+    apiFetch(`${API_URL}/projects/${projectId}/milestone-plan`)
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Failed to fetch milestone plan.');
@@ -516,18 +567,26 @@ export default function AddTaskScreen({
     setLoadingMilestones(false);
   }, [phaseId, phases]);
 
+  useEffect(() => {
+    if (!assignedTo) return;
+    if (!assigneeOptions.some((user) => String(user.id) === assignedTo)) {
+      setAssignedTo('');
+      setErrors((prev) => ({ ...prev, assigned_to: '' }));
+    }
+  }, [assignedTo, assigneeOptions]);
+
   const validate = () => {
     const nextErrors: Record<string, string> = {};
-    if (!projectId) nextErrors.project_id = 'Project is required.';
-    if (!phaseId) nextErrors.phase_id = 'Phase is required.';
-    if (!milestoneId) nextErrors.milestone_id = 'Milestone is required.';
-    if (!title.trim()) nextErrors.title = 'Task title is required.';
-    if (!assignedTo) nextErrors.assigned_to = 'Assigned user is required.';
-    if (!priority) nextErrors.priority = 'Priority is required.';
-    if (!startDate) nextErrors.start_date = 'Start date is required.';
-    if (!dueDate) nextErrors.due_date = 'Finish date is required.';
+    if (!projectId) nextErrors.project_id = 'Please select a project.';
+    if (!phaseId) nextErrors.phase_id = 'Please select a phase.';
+    if (!milestoneId) nextErrors.milestone_id = 'Please select a milestone.';
+    if (!title.trim()) nextErrors.title = 'Please enter a task title.';
+    if (!assignedTo) nextErrors.assigned_to = 'Please select an assignee.';
+    if (!priority) nextErrors.priority = 'Please select a priority level.';
+    if (!startDate) nextErrors.start_date = 'Please select a task start date.';
+    if (!dueDate) nextErrors.due_date = 'Please select a task until date.';
     if (startDate && dueDate && dueDate < startDate) {
-      nextErrors.due_date = 'Finish date cannot be earlier than start date.';
+      nextErrors.due_date = 'Task until date cannot be earlier than task start date.';
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -537,6 +596,7 @@ export default function AddTaskScreen({
     Keyboard.dismiss();
     if (kind === 'phase' && !projectId) return;
     if (kind === 'milestone' && !phaseId) return;
+    if (kind === 'assignedTo' && !projectId) return;
     setSelector(kind);
   };
 
@@ -551,6 +611,7 @@ export default function AddTaskScreen({
         setMilestones([]);
         setPhaseLoadError('');
         setMilestoneLoadError('');
+        setAssignedTo('');
       }
       setProjectId(value);
       setErrors((prev) => ({ ...prev, project_id: '', phase_id: '', milestone_id: '' }));
@@ -597,18 +658,31 @@ export default function AddTaskScreen({
   };
 
   const pickAttachment = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ALLOWED_ATTACHMENT_TYPES,
+      copyToCacheDirectory: true,
+      multiple: false,
     });
 
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
-    const name = asset.fileName || `task_attachment_${Date.now()}.jpg`;
+    const type = asset.mimeType || 'application/octet-stream';
+    const size = asset.size || 0;
+
+    if (!ALLOWED_ATTACHMENT_TYPES.includes(type)) {
+      Alert.alert('Unsupported attachment', 'Please attach an image, PDF, Word, or Excel file.');
+      return;
+    }
+
+    if (size > ATTACHMENT_MAX_BYTES) {
+      Alert.alert('Attachment too large', 'Please choose a file smaller than 10 MB.');
+      return;
+    }
+
     setAttachment({
       uri: asset.uri,
-      name,
-      type: asset.mimeType || 'image/jpeg',
+      name: asset.name || `task_attachment_${Date.now()}`,
+      type,
     });
   };
 
@@ -628,13 +702,13 @@ export default function AddTaskScreen({
       setErrors((prev) => ({
         ...prev,
         start_date: '',
-        due_date: dueDate && dueDate < formatted ? 'Finish date cannot be earlier than start date.' : '',
+        due_date: dueDate && dueDate < formatted ? 'Task until date cannot be earlier than task start date.' : '',
       }));
     } else {
       setDueDate(formatted);
       setErrors((prev) => ({
         ...prev,
-        due_date: startDate && formatted < startDate ? 'Finish date cannot be earlier than start date.' : '',
+        due_date: startDate && formatted < startDate ? 'Task until date cannot be earlier than task start date.' : '',
       }));
     }
   };
@@ -658,7 +732,6 @@ export default function AddTaskScreen({
       formData.append('status', 'pending');
       formData.append('start_date', startDate);
       formData.append('due_date', dueDate);
-      formData.append('created_by', String(userId));
       formData.append('visibility_scope', 'public');
 
       if (attachment) {
@@ -669,7 +742,7 @@ export default function AddTaskScreen({
         } as any);
       }
 
-      const response = await fetch(`${API_URL}/tasks`, {
+      const response = await apiFetch(`${API_URL}/tasks`, {
         method: 'POST',
         body: formData,
       });
@@ -683,7 +756,7 @@ export default function AddTaskScreen({
 
       resetForm();
       onTaskAdded();
-      Alert.alert('Task created', 'The task was saved and assigned successfully.');
+      Alert.alert('Task added successfully.', 'Task added successfully.');
       onClose();
     } catch (error) {
       console.error('Error adding task:', error);
@@ -898,8 +971,9 @@ export default function AddTaskScreen({
                     <FormLabel color={labelColor}>Assigned To *</FormLabel>
                     <SelectField
                       value={selectedAssigneeLabel}
-                      placeholder="Select assignee"
+                      placeholder={projectId ? 'Select assignee' : 'Select project first'}
                       onPress={() => openSelector('assignedTo')}
+                      disabled={!projectId}
                       {...selectStyleProps}
                     />
                     <FieldErrorText message={errors.assigned_to} color={theme.danger} />
@@ -919,7 +993,7 @@ export default function AddTaskScreen({
 
                 <Section title="Schedule" icon="calendar-outline" {...sectionStyleProps}>
                   <FieldWrap>
-                    <FormLabel color={labelColor}>Start Date *</FormLabel>
+                    <FormLabel color={labelColor}>Task Start *</FormLabel>
                     <TouchableOpacity
                       onPress={() => {
                         setShowEndPicker(false);
@@ -942,7 +1016,7 @@ export default function AddTaskScreen({
                   </FieldWrap>
 
                   <FieldWrap className="mb-0">
-                    <FormLabel color={labelColor}>Finish Date *</FormLabel>
+                    <FormLabel color={labelColor}>Task Until *</FormLabel>
                     <TouchableOpacity
                       onPress={() => {
                         setShowStartPicker(false);
@@ -1020,7 +1094,7 @@ export default function AddTaskScreen({
               {submitting ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text className="text-[15px] font-bold text-white">Create Task</Text>
+                <Text className="text-[15px] font-bold text-white">Submit</Text>
               )}
             </TouchableOpacity>
             {!requiredFieldsComplete && !loadingMeta ? (

@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { qaDebug } from '../utils/qaDebug';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -14,7 +15,7 @@ Notifications.setNotificationHandler({
 
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
   if (!Device.isDevice) {
-    if (__DEV__) console.log('Push notifications require a physical device.');
+    qaDebug('Push token generated', { generated: false, reason: 'physical-device-required' });
     return null;
   }
 
@@ -30,14 +31,16 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
+  qaDebug('Push notification permission status', { status: existingStatus });
 
   if (existingStatus !== 'granted') {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
+    qaDebug('Push notification permission request result', { status });
   }
 
   if (finalStatus !== 'granted') {
-    if (__DEV__) console.log('Push notification permission denied.');
+    qaDebug('Push token generated', { generated: false, reason: 'permission-denied' });
     return null;
   }
 
@@ -50,7 +53,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     Constants?.easConfig?.projectId;
 
   if (!projectId) {
-    console.warn("No Expo projectId found. Push token registration skipped.");
+    qaDebug('Push token generated', { generated: false, reason: 'missing-project-id' });
     return null;
   }
 
@@ -58,8 +61,10 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     const token = (
       await Notifications.getExpoPushTokenAsync({ projectId })
     ).data;
+    qaDebug('Push token generated', { generated: true });
     return token;
   } catch (error) {
+    qaDebug('Push token generated', { generated: false, reason: 'expo-token-error' });
     console.error('Failed to register push token:', error);
     return null;
   }
@@ -70,10 +75,12 @@ export function addNotificationListeners(
   onResponse?: (response: Notifications.NotificationResponse) => void
 ) {
   const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+    qaDebug('Foreground push notification received');
     onReceived?.(notification);
   });
 
   const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+    qaDebug('Push notification tapped');
     onResponse?.(response);
   });
 

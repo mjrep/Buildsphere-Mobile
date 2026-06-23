@@ -3,8 +3,10 @@ const router = express.Router();
 const pool = require('../db');
 const { sendPushNotificationToUser } = require('../services/pushNotificationService');
 const { logProjectActivity } = require('../services/activityLogService');
+const { authenticateRequest } = require('../middleware/auth');
 const {
   VIEW_ONLY_INVENTORY_MESSAGE,
+  USAGE_ONLY_INVENTORY_MESSAGE,
   NO_INVENTORY_ACCESS_MESSAGE,
   getInventoryAccessLevel,
   normalizeRole,
@@ -74,7 +76,7 @@ async function getUserRole(userId) {
 }
 
 function getActorId(req) {
-  return (
+  return req.user?.id || (
     req.query?.userId ||
     req.query?.user_id ||
     req.body?.userId ||
@@ -91,6 +93,11 @@ function getActorId(req) {
 function rejectInventoryAccess(res, accessLevel) {
   if (accessLevel === 'VIEW_ONLY') {
     res.status(403).json({ message: VIEW_ONLY_INVENTORY_MESSAGE });
+    return true;
+  }
+
+  if (accessLevel === 'CAN_CONSUME') {
+    res.status(403).json({ message: USAGE_ONLY_INVENTORY_MESSAGE });
     return true;
   }
 
@@ -158,12 +165,15 @@ async function rejectInventoryRead(req, res) {
   return rejectInventoryProjectAccess(req, res, projectId, context);
 }
 
-async function rejectInventoryWrite(req, res) {
+async function rejectInventoryWrite(req, res, options = {}) {
   const actorId = getActorId(req);
   const context = await getActorInventoryAccess(actorId);
+  if (context.accessLevel === 'CAN_CONSUME' && options.allowConsumptionLog) return context;
   const rejected = rejectInventoryAccess(res, context.accessLevel);
   return rejected ? null : context;
 }
+
+router.use(authenticateRequest);
 
 // GET /inventory?projectId=1&userId=1
 router.get('/', async (req, res) => {
@@ -257,15 +267,13 @@ router.get('/logs', async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════
 router.post('/:itemId/transaction', async (req, res) => {
   const { itemId } = req.params;
-  const { action_type, quantity, reference_task_id, notes, created_by } = req.body;
+  const { action_type, quantity, reference_task_id, notes } = req.body;
+  const actorId = req.user.id;
   const parsedItemId = parsePositiveInteger(itemId);
 
   if (!parsedItemId) {
     return res.status(400).json({ message: 'A valid inventory item id is required.' });
   }
-
-  const inventoryContext = await rejectInventoryWrite(req, res);
-  if (!inventoryContext) return;
 
   // ── Validate action_type ──
   if (!action_type || !VALID_ACTION_TYPES.includes(action_type)) {
@@ -275,6 +283,11 @@ router.post('/:itemId/transaction', async (req, res) => {
   }
 
   // ── Validate quantity ──
+  const inventoryContext = await rejectInventoryWrite(req, res, {
+    allowConsumptionLog: action_type === 'CONSUMPTION',
+  });
+  if (!inventoryContext) return;
+
   const numQty = parseNumeric(quantity);
   if (!numQty || numQty <= 0) {
     return res.status(400).json({ error: 'quantity must be a positive number.' });
@@ -304,7 +317,7 @@ router.post('/:itemId/transaction', async (req, res) => {
       `INSERT INTO project_inventory_logs (item_id, action_type, quantity, reference_task_id, notes, created_by, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING *`,
-      [parsedItemId, action_type, numQty, reference_task_id || null, notes || null, created_by || 1]
+      [parsedItemId, action_type, numQty, reference_task_id || null, notes || null, actorId]
     );
 
     // Refetch updated item to get the new stock level (updated by trigger)
@@ -315,7 +328,7 @@ router.post('/:itemId/transaction', async (req, res) => {
     const refreshedItem = mapInventoryItem(updatedItem.rows[0]);
     await logProjectActivity(pool, {
       projectId: item.project_id,
-      userId: created_by,
+      userId: actorId,
       action: 'inventory_transaction_saved',
       description: `${action_type} recorded for ${item.item_name}.`,
       metadata: {
@@ -338,7 +351,7 @@ router.post('/:itemId/transaction', async (req, res) => {
           // Phase 2: Use sendPushNotificationToUser (handles both Push and DB persistence)
           await sendPushNotificationToUser(
             proj.project_in_charge_id,
-            'Low Stock Alert ⚠️',
+            'Low Stock Alert',
             `Item '${item.item_name}' in ${proj.project_name || 'Project'} is at ${refreshedItem.quantity} ${refreshedItem.unit || 'pcs'} (critical: ${refreshedItem.critical_level}).`,
             {
               type: 'inventory_low_stock',
@@ -352,7 +365,7 @@ router.post('/:itemId/transaction', async (req, res) => {
           );
           await logProjectActivity(pool, {
             projectId: item.project_id,
-            userId: created_by,
+            userId: actorId,
             action: 'low_stock_alert_generated',
             description: `${item.item_name} reached low stock level.`,
             metadata: {
@@ -377,7 +390,8 @@ router.post('/:itemId/transaction', async (req, res) => {
 
 // POST /inventory  — Add new inventory item (unchanged, still allowed)
 router.post('/', async (req, res) => {
-  const { projectId, itemName, category, quantity, criticalLevel, price, unit, createdBy } = req.body;
+  const { projectId, itemName, category, quantity, criticalLevel, price, unit } = req.body;
+  const actorId = req.user.id;
   const parsedProjectId = parsePositiveInteger(projectId);
 
   if (!parsedProjectId) {
@@ -411,7 +425,7 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO project_inventory_items (project_id, item_name, category, current_stock, critical_level, price, unit, created_by, updated_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *, current_stock AS quantity`,
-      [parsedProjectId, itemName.trim(), category, numQty, numCrit, numPrice, unit || 'pcs', createdBy || 1]
+      [parsedProjectId, itemName.trim(), category, numQty, numCrit, numPrice, unit || 'pcs', actorId]
     );
     const item = mapInventoryItem(result.rows[0]);
 
@@ -419,11 +433,11 @@ router.post('/', async (req, res) => {
     await pool.query(
       `INSERT INTO project_inventory_logs (item_id, action_type, quantity, notes, created_by, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())`,
-      [item.id, 'RECEIVING', numQty, 'Initial stock — item added via mobile inventory.', createdBy || 1]
+      [item.id, 'RECEIVING', numQty, 'Initial stock - item added via mobile inventory.', actorId]
     );
     await logProjectActivity(pool, {
       projectId: parsedProjectId,
-      userId: createdBy,
+      userId: actorId,
       action: 'inventory_item_added',
       description: `${item.item_name} was added to inventory.`,
       metadata: {
@@ -442,34 +456,46 @@ router.post('/', async (req, res) => {
 // PATCH /inventory/:id  — Update item metadata ONLY (name, category, etc.)
 // NOTE: Stock quantity updates are NO LONGER allowed here. Use POST /:itemId/transaction.
 router.patch('/:id', async (req, res) => {
-  const inventoryContext = await rejectInventoryWrite(req, res);
-  if (!inventoryContext) return;
+  try {
+    const inventoryContext = await rejectInventoryWrite(req, res);
+    if (!inventoryContext) return;
 
-  const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
-  const item = itemResult.rows[0];
-  if (item && (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext))) return;
+    const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
+    const item = itemResult.rows[0];
+    if (!item) return res.status(404).json({ error: 'Inventory item not found.' });
+    if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
 
-  res.status(405).json({
-    error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
-  });
+    res.status(405).json({
+      error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
+    });
+  } catch (err) {
+    console.error('Inventory PATCH error:', err);
+    res.status(500).json({ error: 'Failed to update inventory item.' });
+  }
 });
 
 router.put('/:id', async (req, res) => {
-  const inventoryContext = await rejectInventoryWrite(req, res);
-  if (!inventoryContext) return;
+  try {
+    const inventoryContext = await rejectInventoryWrite(req, res);
+    if (!inventoryContext) return;
 
-  const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
-  const item = itemResult.rows[0];
-  if (item && (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext))) return;
+    const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
+    const item = itemResult.rows[0];
+    if (!item) return res.status(404).json({ error: 'Inventory item not found.' });
+    if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
 
-  res.status(405).json({
-    error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
-  });
+    res.status(405).json({
+      error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
+    });
+  } catch (err) {
+    console.error('Inventory PUT error:', err);
+    res.status(500).json({ error: 'Failed to update inventory item.' });
+  }
 });
 
 // DELETE /inventory/:id
 router.delete('/:id', async (req, res) => {
-  const { deletedBy } = req.body || {};
+  const actorId = req.user.id;
   const inventoryContext = await rejectInventoryWrite(req, res);
   if (!inventoryContext) return;
 
@@ -482,11 +508,11 @@ router.delete('/:id', async (req, res) => {
       await pool.query(
         `INSERT INTO project_inventory_logs (item_id, action_type, quantity, notes, created_by, created_at)
          VALUES ($1, $2, $3, $4, $5, NOW())`,
-        [item.id, 'ADJUSTMENT', item.current_stock || 0, 'Item deleted from inventory.', deletedBy || 1]
+        [item.id, 'ADJUSTMENT', item.current_stock || 0, 'Item deleted from inventory.', actorId]
       );
       await logProjectActivity(pool, {
         projectId: item.project_id,
-        userId: deletedBy,
+        userId: actorId,
         action: 'inventory_item_deleted',
         description: 'Inventory item was deleted.',
         metadata: {

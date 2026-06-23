@@ -9,11 +9,13 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, TaskCardSkeleton } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
+import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
+import { qaDebug } from '../../utils/qaDebug';
 
 interface Task {
   id: number;
@@ -110,17 +112,19 @@ export default function MyWork({
       let nextTasks: Task[] = [];
 
       try {
-        const res = await fetch(`${API_URL}/tasks?userId=${userId}`);
+        const res = await apiFetch(`${API_URL}/tasks`);
         const data = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(data?.message || data?.error || 'Failed to fetch tasks.');
         }
         nextTasks = Array.isArray(data) ? data : [];
       } catch (backendError) {
+        qaDebug('Tasks fallback triggered', { fallbackTriggered: true });
         console.warn('Backend tasks unavailable, using Supabase fallback:', backendError);
         nextTasks = await fetchAssignedTasksFromSupabase(userId);
       }
 
+      qaDebug('Tasks loaded', { taskCount: nextTasks.length });
       setTasks(Array.isArray(nextTasks) ? nextTasks : []);
     } catch (err) {
       console.warn('Tasks fetch failed:', err);
@@ -170,7 +174,7 @@ export default function MyWork({
 
   const getTabCount = (tab: Tab) => {
     const safeTasks = Array.isArray(tasks) ? tasks : [];
-    let filtered = safeTasks.filter((t) => t.status === STATUS_MAP[tab]);
+    let filtered = safeTasks.filter((t) => normalizeDisplayKey(t.status) === STATUS_MAP[tab]);
     if (selectedProject !== 'All') {
       filtered = filtered.filter(t => t.project === selectedProject);
     }
@@ -178,7 +182,7 @@ export default function MyWork({
   };
 
   const safeTasks = Array.isArray(tasks) ? tasks : [];
-  let processedTasks = safeTasks.filter((t) => t.status === STATUS_MAP[activeTab]);
+  let processedTasks = safeTasks.filter((t) => normalizeDisplayKey(t.status) === STATUS_MAP[activeTab]);
 
   // Filter by Project
   if (selectedProject !== 'All') {
@@ -187,7 +191,7 @@ export default function MyWork({
 
   if (filterBy !== 'all') {
     processedTasks = processedTasks.filter((t) => {
-      const p = t.priority?.toLowerCase();
+      const p = normalizeDisplayKey(t.priority).replace(/-priority$/, '');
       if (filterBy === 'high_priority') return p === 'high';
       if (filterBy === 'medium_priority') return p === 'medium';
       if (filterBy === 'low_priority') return p === 'low';
@@ -197,7 +201,10 @@ export default function MyWork({
 
   processedTasks.sort((a, b) => {
     if (sortBy === 'priority') {
-      const getPrioVal = (p?: string) => (p?.toLowerCase() === 'high' ? 3 : p?.toLowerCase() === 'medium' ? 2 : 1);
+      const getPrioVal = (p?: string) => {
+        const key = normalizeDisplayKey(p).replace(/-priority$/, '');
+        return key === 'high' ? 3 : key === 'medium' ? 2 : 1;
+      };
       return getPrioVal(b.priority) - getPrioVal(a.priority);
     } else {
       const dateA = new Date(a.due_date).getTime();
@@ -229,16 +236,14 @@ export default function MyWork({
   };
 
   const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
+    switch (normalizeDisplayKey(status)) {
       case 'pending':
       case 'todo':
         return '#FF6B6B'; // To Do
       case 'in-progress':
-      case 'in_progress':
         return '#7370FF'; // In Progress
       case 'in-review':
       case 'to-review':
-      case 'in_review':
         return '#FF9800'; // To Review
       case 'completed':
         return '#4CAF50'; // Completed
@@ -381,7 +386,7 @@ export default function MyWork({
                       {task.phase && (
                         <>
                           <View className="mx-2 h-1 w-1 rounded-full" style={{ backgroundColor: theme.border }} />
-                          <Text className="min-w-0 flex-shrink text-[12px]" style={{ color: theme.textMuted }} numberOfLines={1}>{task.phase}</Text>
+                          <Text className="min-w-0 flex-shrink text-[12px]" style={{ color: theme.textMuted }} numberOfLines={1}>{formatDisplayLabel(task.phase)}</Text>
                         </>
                       )}
                     </View>
@@ -477,8 +482,8 @@ export default function MyWork({
                           {project.name}
                         </Text>
                         {!!project.status && (
-                          <Text className="mt-0.5 text-[11px] uppercase" style={{ color: theme.textMuted }} numberOfLines={1}>
-                            {project.status}
+                          <Text className="mt-0.5 text-[11px]" style={{ color: theme.textMuted }} numberOfLines={1}>
+                            {formatDisplayLabel(project.status)}
                           </Text>
                         )}
                       </View>

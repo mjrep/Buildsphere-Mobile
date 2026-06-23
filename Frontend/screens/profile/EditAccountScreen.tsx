@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { UserInfo } from '../../App';
 
 interface EditAccountScreenProps {
@@ -52,7 +52,7 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
       const body: any = { email };
       if (password) body.password = password;
 
-      const res = await fetch(`${API_URL}/users/${user.id}/account`, {
+      const res = await apiFetch(`${API_URL}/users/${user.id}/account`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

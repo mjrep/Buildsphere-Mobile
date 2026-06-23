@@ -3,11 +3,12 @@ import { View, Text, TouchableOpacity, ScrollView, Image, Alert, useWindowDimens
 import { Ionicons } from '@expo/vector-icons';
 import { UserInfo } from '../../App';
 import EditInformationScreen from './EditInformationScreen';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ProfileSkeleton } from '../../components/skeletons';
 import { calculateAgeFromDateOnly, formatDateOnlyDisplay } from '../../utils/dateOnly';
 import { centeredContent } from '../../utils/responsive';
+import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
 
 interface MoreScreenProps {
   user: UserInfo;
@@ -31,7 +32,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
     const loadProfile = async () => {
       setLoadingProfile(true);
       try {
-        const res = await fetch(`${API_URL}/users/${user.id}`);
+        const res = await apiFetch(`${API_URL}/users/${user.id}`);
         if (res.ok) {
           const data = await res.json();
           setProfile((prev) => ({ ...prev, ...data }));
@@ -113,7 +114,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
 
           <Text className="mt-4 text-[20px] font-bold" style={{ color: theme.text }}>{fullName || 'Unnamed User'}</Text>
           <Text className="mt-1 text-center text-[13px]" style={{ color: theme.textMuted }} numberOfLines={2}>{profile.email}</Text>
-          <Text className="mt-1 text-[12px] uppercase" style={{ color: theme.textSecondary }}>{profile.role || 'staff'}</Text>
+          <Text className="mt-1 text-[12px]" style={{ color: theme.textSecondary }}>{formatDisplayLabel(profile.role, 'Staff')}</Text>
         </View>
 
         <View 
@@ -124,8 +125,8 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
             <View>
               <Text className="text-[16px] font-extrabold uppercase tracking-tight" style={{ color: theme.text }}>Profile Info</Text>
               <View className="mt-1 flex-row items-center">
-                <View className={`h-1.5 w-1.5 rounded-full mr-1.5 ${profile.accountStatus === 'active' ? 'bg-[#4CAF50]' : 'bg-[#FF9800]'}`} />
-                <Text className="text-[10px] font-bold uppercase" style={{ color: theme.textMuted }}>{profile.accountStatus || 'active'}</Text>
+                <View className={`h-1.5 w-1.5 rounded-full mr-1.5 ${normalizeDisplayKey(profile.accountStatus) === 'active' ? 'bg-[#4CAF50]' : 'bg-[#FF9800]'}`} />
+                <Text className="text-[10px] font-bold" style={{ color: theme.textMuted }}>{formatDisplayLabel(profile.accountStatus, 'Active')}</Text>
               </View>
             </View>
             

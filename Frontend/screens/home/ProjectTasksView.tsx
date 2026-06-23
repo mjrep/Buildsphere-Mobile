@@ -7,11 +7,12 @@ import {
   TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { TaskCardSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
 
 interface Task {
   id: number;
@@ -57,7 +58,7 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
       let nextTasks: Task[] = [];
 
       try {
-        const res = await fetch(`${API_URL}/tasks/project/${projectId}`);
+        const res = await apiFetch(`${API_URL}/tasks/project/${projectId}`);
         const data = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(data?.message || data?.error || 'Failed to fetch project tasks.');
@@ -83,14 +84,14 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
 
   const safeTasks = Array.isArray(tasks) ? tasks : [];
   const filteredTasks = safeTasks.filter(task => {
-    const matchesFilter = activeFilter === 'all' || task.status === activeFilter;
+    const matchesFilter = activeFilter === 'all' || normalizeDisplayKey(task.status) === activeFilter;
     const matchesUser = !showOnlyMine || String(task.assigned_to) === String(currentUserId);
     const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFilter && matchesUser && matchesSearch;
   });
 
   const getStatusStyle = (status: string) => {
-    const s = (status || '').toLowerCase();
+    const s = normalizeDisplayKey(status);
     switch (s) {
       case 'pending':
       case 'todo':
@@ -102,15 +103,18 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
       case 'completed':
         return { color: '#4CAF50', bg: '#E8F5E9', label: 'Done' };
       default:
-        return { color: '#A3A3A3', bg: '#F5F5F5', label: status || 'Unknown' };
+        return { color: '#A3A3A3', bg: '#F5F5F5', label: formatDisplayLabel(status, 'Unknown') };
     }
   };
 
   const getPriorityColor = (priority: string) => {
-    switch (priority?.toLowerCase()) {
+    switch (normalizeDisplayKey(priority)) {
       case 'high': return '#FF6B6B';
+      case 'high-priority': return '#FF6B6B';
       case 'medium': return '#FF9800';
+      case 'medium-priority': return '#FF9800';
       case 'low': return '#4CAF50';
+      case 'low-priority': return '#4CAF50';
       default: return '#A3A3A3';
     }
   };
@@ -246,7 +250,7 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
                   </View>
                   <View className="rounded-full px-2.5 py-1" style={{ backgroundColor: status.bg }}>
                     <Text className="text-[10px] font-bold" style={{ color: status.color }}>
-                      {(status.label || 'UNKNOWN').toUpperCase()}
+                      {status.label || 'Unknown'}
                     </Text>
                   </View>
                 </View>
@@ -270,7 +274,7 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
                     
                     <View className="flex-row items-center">
                       <View className="w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: getPriorityColor(task.priority) }} />
-                      <Text className="text-[11px] font-bold uppercase tracking-wider" style={{ color: theme.textSecondary }}>{task.priority || 'Normal'}</Text>
+                      <Text className="text-[11px] font-bold" style={{ color: theme.textSecondary }}>{formatDisplayLabel(task.priority, 'Normal')}</Text>
                     </View>
                   </View>
                 </View>

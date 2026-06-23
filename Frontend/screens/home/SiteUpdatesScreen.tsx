@@ -9,7 +9,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { getImageUrls } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
@@ -80,7 +80,7 @@ export default function SiteUpdatesScreen({ visible, onClose, projectName }: Pro
     try {
       // In a real app, we would pass date/shift to the API. 
       // For this refinement, we'll fetch all and filter client-side to show the specified UI.
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_URL}/site-progress/project/${encodeURIComponent(projectName)}`
       );
       const data = await response.json();

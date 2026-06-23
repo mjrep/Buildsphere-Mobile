@@ -23,7 +23,7 @@ export type UserRole =
   | 'general_staff'
   | 'user';
 
-export type InventoryAccessLevel = 'NO_ACCESS' | 'VIEW_ONLY' | 'CAN_EDIT';
+export type InventoryAccessLevel = 'NO_ACCESS' | 'VIEW_ONLY' | 'CAN_CONSUME' | 'CAN_EDIT';
 
 export interface Permissions {
   canViewDashboard: boolean;
@@ -32,28 +32,39 @@ export interface Permissions {
   canViewInventory: boolean;
   canEditInventory: boolean;
   canAddInventory: boolean;
+  canLogInventoryUsage: boolean;
   canSubmitSiteUpdates: boolean;
   canViewReports: boolean;
   canApproveProject: boolean;
   canEditUserRoles: boolean;
 }
 
-const VIEW_ONLY_INVENTORY: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory'> = {
+const VIEW_ONLY_INVENTORY: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory' | 'canLogInventoryUsage'> = {
   canViewInventory: true,
   canEditInventory: false,
   canAddInventory: false,
+  canLogInventoryUsage: false,
 };
 
-const NO_INVENTORY_ACCESS: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory'> = {
+const USAGE_ONLY_INVENTORY: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory' | 'canLogInventoryUsage'> = {
+  canViewInventory: true,
+  canEditInventory: false,
+  canAddInventory: false,
+  canLogInventoryUsage: true,
+};
+
+const NO_INVENTORY_ACCESS: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory' | 'canLogInventoryUsage'> = {
   canViewInventory: false,
   canEditInventory: false,
   canAddInventory: false,
+  canLogInventoryUsage: false,
 };
 
-const FULL_INVENTORY_ACCESS: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory'> = {
+const FULL_INVENTORY_ACCESS: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory' | 'canLogInventoryUsage'> = {
   canViewInventory: true,
   canEditInventory: true,
   canAddInventory: true,
+  canLogInventoryUsage: true,
 };
 
 const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
@@ -101,7 +112,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canViewDashboard: true,
     canViewBudget: false,
     canCreateTasks: false,
-    ...VIEW_ONLY_INVENTORY,
+    ...USAGE_ONLY_INVENTORY,
     canSubmitSiteUpdates: true,
     canViewReports: false,
     canApproveProject: false,
@@ -111,7 +122,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canViewDashboard: true,
     canViewBudget: false,
     canCreateTasks: false,
-    ...VIEW_ONLY_INVENTORY,
+    ...USAGE_ONLY_INVENTORY,
     canSubmitSiteUpdates: true,
     canViewReports: false,
     canApproveProject: false,
@@ -121,7 +132,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canViewDashboard: true,
     canViewBudget: false,
     canCreateTasks: false,
-    ...VIEW_ONLY_INVENTORY,
+    ...USAGE_ONLY_INVENTORY,
     canSubmitSiteUpdates: true,
     canViewReports: false,
     canApproveProject: false,
@@ -140,7 +151,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
   procurement: {
     canViewDashboard: false,
     canViewBudget: true,
-    canCreateTasks: true,
+    canCreateTasks: false,
     ...FULL_INVENTORY_ACCESS,
     canSubmitSiteUpdates: false,
     canViewReports: false,
@@ -160,7 +171,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
   hr: {
     canViewDashboard: false,
     canViewBudget: false,
-    canCreateTasks: true,
+    canCreateTasks: false,
     ...NO_INVENTORY_ACCESS,
     canSubmitSiteUpdates: false,
     canViewReports: false,
@@ -170,7 +181,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
   human_resource: {
     canViewDashboard: false,
     canViewBudget: false,
-    canCreateTasks: true,
+    canCreateTasks: false,
     ...NO_INVENTORY_ACCESS,
     canSubmitSiteUpdates: false,
     canViewReports: false,
@@ -180,7 +191,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
   human_resources: {
     canViewDashboard: false,
     canViewBudget: false,
-    canCreateTasks: true,
+    canCreateTasks: false,
     ...NO_INVENTORY_ACCESS,
     canSubmitSiteUpdates: false,
     canViewReports: false,
@@ -190,7 +201,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
   sales: {
     canViewDashboard: false,
     canViewBudget: false,
-    canCreateTasks: true,
+    canCreateTasks: false,
     ...NO_INVENTORY_ACCESS,
     canSubmitSiteUpdates: false,
     canViewReports: false,
@@ -268,6 +279,7 @@ export function getPermissions(role?: string): Permissions {
 export function getInventoryAccessLevel(role?: string): InventoryAccessLevel {
   const permissions = getPermissions(role);
   if (permissions.canEditInventory || permissions.canAddInventory) return 'CAN_EDIT';
+  if (permissions.canLogInventoryUsage) return 'CAN_CONSUME';
   if (permissions.canViewInventory) return 'VIEW_ONLY';
   return 'NO_ACCESS';
 }
@@ -276,6 +288,7 @@ export const canViewInventory = (role?: string) => getPermissions(role).canViewI
 export const canAccessInventory = canViewInventory;
 export const canEditInventory = (role?: string) => getPermissions(role).canEditInventory;
 export const canAddInventory = (role?: string) => getPermissions(role).canAddInventory;
+export const canLogInventoryUsage = (role?: string) => getPermissions(role).canLogInventoryUsage;
 export const canCreateTask = (role?: string) => getPermissions(role).canCreateTasks;
 export const canUploadSiteProgress = (role?: string) => getPermissions(role).canSubmitSiteUpdates;
 export const canViewBudget = (role?: string) => getPermissions(role).canViewBudget;

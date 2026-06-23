@@ -6,6 +6,9 @@ export {
 } from './apiConfig';
 
 import { API_URL } from './apiConfig';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from './supabase';
+import { qaDebug } from '../utils/qaDebug';
 
 export const SERVER_UNREACHABLE_MESSAGE =
   'BuildSphere server is currently unreachable. Please try again later.';
@@ -50,8 +53,10 @@ export async function checkApiHealth(timeoutMs = 5000) {
     if (!response.ok) return false;
 
     const data = await response.json();
+    qaDebug('API health check', { endpoint: '/health', status: response.status });
     return data?.status === 'ok' && data?.service === 'BuildSphere API';
   } catch (error) {
+    qaDebug('API health check failed', { endpoint: '/health', status: 0 });
     return false;
   } finally {
     clearTimeout(timeout);
@@ -60,5 +65,47 @@ export async function checkApiHealth(timeoutMs = 5000) {
 
 export async function loadStoredApiUrl() {
   return API_URL;
+}
+
+export async function getSupabaseAccessToken() {
+  const { data } = await supabase.auth.getSession();
+  if (data.session?.access_token) return data.session.access_token;
+  return AsyncStorage.getItem('token');
+}
+
+export async function apiFetch(input: string, init: RequestInit = {}) {
+  const token = await getSupabaseAccessToken();
+  const headers = new Headers(init.headers || {});
+
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const method = init.method || 'GET';
+  const endpoint = typeof input === 'string' ? input.replace(API_URL, '') : 'unknown';
+  try {
+    const response = await fetch(input, {
+      ...init,
+      headers,
+    });
+
+    qaDebug('API request', {
+      method,
+      endpoint,
+      status: response.status,
+      authenticated: headers.has('Authorization'),
+    });
+
+    return response;
+  } catch (error) {
+    qaDebug('API request failed', {
+      method,
+      endpoint,
+      status: 0,
+      authenticated: headers.has('Authorization'),
+      reason: error instanceof Error ? error.message : 'network-error',
+    });
+    throw error;
+  }
 }
 

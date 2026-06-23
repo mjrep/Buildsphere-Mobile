@@ -14,7 +14,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { API_URL } from '../lib/api';
+import { API_URL, apiFetch } from '../lib/api';
 import { useAppTheme } from '../contexts/ThemeContext';
 
 interface ChangeProjectColorModalProps {
@@ -154,7 +154,7 @@ export default function ChangeProjectColorModal({
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/projects/${project.id}/color`, {
+      const res = await apiFetch(`${API_URL}/projects/${project.id}/color`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ color: finalColor }),

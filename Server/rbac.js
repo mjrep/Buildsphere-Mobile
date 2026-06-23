@@ -1,4 +1,5 @@
 const VIEW_ONLY_INVENTORY_MESSAGE = 'You have view-only access to Inventory.';
+const USAGE_ONLY_INVENTORY_MESSAGE = 'You can only log material consumption for assigned project inventory.';
 const NO_INVENTORY_ACCESS_MESSAGE = 'You do not have permission to access Inventory.';
 
 const ROLE_ALIASES = {
@@ -15,8 +16,8 @@ const INVENTORY_ACCESS = {
   ceo: 'VIEW_ONLY',
   coo: 'VIEW_ONLY',
   accounting: 'VIEW_ONLY',
-  foreman: 'VIEW_ONLY',
-  project_supervisor: 'VIEW_ONLY',
+  foreman: 'CAN_CONSUME',
+  project_supervisor: 'CAN_CONSUME',
   procurement: 'CAN_EDIT',
   project_engineer: 'CAN_EDIT',
   project_coordinator: 'CAN_EDIT',
@@ -56,10 +57,12 @@ function canAddInventory(role) {
   return canEditInventory(role);
 }
 
+function canLogInventoryUsage(role) {
+  return ['CAN_EDIT', 'CAN_CONSUME'].includes(getInventoryAccessLevel(role));
+}
+
 function canCreateTask(role) {
-  return ['ceo', 'coo', 'project_engineer', 'project_coordinator', 'procurement', 'sales', 'human_resource'].includes(
-    normalizeRole(role)
-  );
+  return ['ceo', 'coo', 'project_engineer', 'project_coordinator'].includes(normalizeRole(role));
 }
 
 function canUploadSiteProgress(role) {
@@ -84,6 +87,7 @@ function canEditUserRoles(role) {
 
 module.exports = {
   VIEW_ONLY_INVENTORY_MESSAGE,
+  USAGE_ONLY_INVENTORY_MESSAGE,
   NO_INVENTORY_ACCESS_MESSAGE,
   normalizeRole,
   getInventoryAccessLevel,
@@ -91,6 +95,7 @@ module.exports = {
   canAccessInventory,
   canEditInventory,
   canAddInventory,
+  canLogInventoryUsage,
   canCreateTask,
   canUploadSiteProgress,
   canViewBudget,

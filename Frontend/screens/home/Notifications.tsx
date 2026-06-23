@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, RefreshControl, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { NotificationSkeleton, SkeletonText } from '../../components/skeletons';
@@ -56,7 +56,7 @@ export default function Notifications({
   const fetchNotifications = useCallback(async () => {
     try {
       setError(null);
-      const res = await fetch(`${API_URL}/notifications?userId=${userId}`);
+      const res = await apiFetch(`${API_URL}/notifications`);
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(data?.message || data?.error || 'Failed to fetch notifications.');
@@ -204,7 +204,7 @@ export default function Notifications({
   const markAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     try {
-      const res = await fetch(`${API_URL}/notifications/read-all?userId=${userId}`, { method: 'PATCH' });
+      const res = await apiFetch(`${API_URL}/notifications/read-all`, { method: 'PATCH' });
       if (!res.ok) throw new Error('Failed to mark all as read.');
     } catch (err) {
       console.error('Failed to mark all as read:', err);
@@ -221,7 +221,7 @@ export default function Notifications({
         onPress: async () => {
           setNotifications((prev) => prev.filter((n) => n.id !== id));
           try {
-            const res = await fetch(`${API_URL}/notifications/${id}?userId=${userId}`, { method: 'DELETE' });
+            const res = await apiFetch(`${API_URL}/notifications/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error('Failed to delete notification.');
           } catch (err) {
             console.error('Failed to delete notification:', err);

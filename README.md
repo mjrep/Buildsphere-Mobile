@@ -38,7 +38,7 @@ Installing an iOS development build on a physical iPhone requires an Apple Devel
 1. Navigate to `Server` directory.
 2. Install dependencies: `npm install`.
 3. Copy `.env.example` to `.env`.
-4. Set `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3-flash-preview`, and `AI_ANALYSIS_MODE=gemini_only` in `Server/.env`.
+4. Set `GEMINI_API_KEY`, `GEMINI_API_KEY_2`, and `GEMINI_API_KEY_3`, plus `GEMINI_MODEL=gemini-3-flash-preview` and `AI_ANALYSIS_MODE=gemini_only` in `Server/.env`.
 5. Keep `SUPABASE_SERVICE_ROLE_KEY` backend-only in `Server/.env`.
 6. Apply the SQL files in `Server/migrations` to the database before starting the app.
 7. Run: `npm start`.
@@ -58,7 +58,9 @@ Required backend environment variables:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_ANON_KEY` if used
-- `GEMINI_API_KEY`
+- `GEMINI_API_KEY` primary Gemini key
+- `GEMINI_API_KEY_2` secondary Gemini fallback key
+- `GEMINI_API_KEY_3` tertiary Gemini fallback key
 - `GEMINI_MODEL=gemini-3-flash-preview`
 - `AI_ANALYSIS_MODE=gemini_only`
 - `JWT_SECRET`
@@ -67,7 +69,7 @@ Required backend environment variables:
 - `EMAIL_FROM`
 - `CORS_ORIGINS` for deployed browser clients, comma-separated
 
-Never put `SUPABASE_SERVICE_ROLE_KEY` or `GEMINI_API_KEY` in the mobile app. The mobile app should only use public `EXPO_PUBLIC_*` values.
+Never put `SUPABASE_SERVICE_ROLE_KEY` or any `GEMINI_API_KEY*` value in the mobile app. The mobile app should only use public `EXPO_PUBLIC_*` values.
 
 Render settings:
 
@@ -75,7 +77,8 @@ Render settings:
 - Build Command: `npm install`
 - Start Command: `npm start`
 - Health Check Path: `/health`
-- Add the backend environment variables in Render.
+- Add the backend environment variables in Render. For Gemini fallback, set `GEMINI_API_KEY`, `GEMINI_API_KEY_2`, and `GEMINI_API_KEY_3`.
+- After changing Render environment variables, redeploy the backend, open `/health`, and test image analysis from the app.
 
 Railway settings:
 
@@ -90,7 +93,7 @@ After deployment, open `https://buildsphere-mobile-server.onrender.com/health` o
 An APK can only be used from anywhere if the backend is also available from anywhere. Do not build a public APK with a local or temporary tunnel API URL.
 
 1. Deploy `Server` to a public host such as Render, Railway, Fly.io, or a VPS.
-2. Set the backend environment variables from `Server/.env.example` on the host. Keep `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, and `GEMINI_API_KEY` on the backend only.
+2. Set the backend environment variables from `Server/.env.example` on the host. Keep `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, and all `GEMINI_API_KEY*` values on the backend only.
 3. Confirm the public backend is live by opening its root URL in a browser. It should show `BuildSphere API is running`.
 4. In `Frontend/.env.production`, set `EXPO_PUBLIC_API_URL=https://buildsphere-mobile-server.onrender.com`, `EXPO_PUBLIC_SUPABASE_URL=https://gadhovevmzmzesiqgubb.supabase.co`, and `EXPO_PUBLIC_SUPABASE_ANON_KEY` to the public Supabase anon key.
 5. Rebuild the APK after every mobile env change with `eas build -p android --profile preview` or a local release build.

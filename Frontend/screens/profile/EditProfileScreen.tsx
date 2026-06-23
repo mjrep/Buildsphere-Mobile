@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import * as ImagePicker from 'expo-image-picker';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { UserInfo } from '../../App';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import {
@@ -111,7 +111,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
         type,
       } as any);
 
-      const res = await fetch(`${API_URL}/upload/${user.id}/photo`, {
+      const res = await apiFetch(`${API_URL}/upload/${user.id}/photo`, {
         method: 'POST',
         body: formData,
         headers: {
@@ -155,7 +155,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
       const newPhotoUrl = await uploadPhoto();
 
       // Save name
-      const res = await fetch(`${API_URL}/users/${user.id}/profile`, {
+      const res = await apiFetch(`${API_URL}/users/${user.id}/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomDatePicker from '../../components/CustomDatePicker';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 
 interface EditProjectScreenProps {
   visible: boolean;
@@ -59,7 +59,7 @@ export default function EditProjectScreen({
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/projects/${project.id}`, {
+      const res = await apiFetch(`${API_URL}/projects/${project.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

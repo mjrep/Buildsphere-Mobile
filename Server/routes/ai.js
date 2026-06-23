@@ -2,6 +2,12 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const jwt = require('jsonwebtoken');
+const { createClient } = require('@supabase/supabase-js');
+const pool = require('../db');
+const { normalizeRole } = require('../rbac');
+const { analyzeGlassImage } = require('../services/geminiClient');
+const { qaDebug } = require('../services/qaDebug');
 
 const router = express.Router();
 const upload = multer({
@@ -9,24 +15,127 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'buildsphere_dev_secret_key');
+const AI_ALLOWED_ROLES = new Set(['project_engineer', 'foreman', 'project_supervisor']);
+const AI_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const AI_RATE_LIMIT_MAX_REQUESTS = 20;
+const aiRateLimitBuckets = new Map();
+let supabaseAuthClient = null;
+
 const promptPath = path.join(__dirname, '../glass-panel-prompt.txt');
-
 const readPrompt = () => fs.readFileSync(promptPath, 'utf8');
-
-const stripJsonFences = (text) =>
-  text
-    .replace(/```json/gi, '')
-    .replace(/```/g, '')
-    .trim();
-
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-const normalizeBbox = (bbox) => {
+function getSupabaseAuthClient() {
+  if (supabaseAuthClient) return supabaseAuthClient;
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return null;
+
+  supabaseAuthClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  return supabaseAuthClient;
+}
+
+function getBearerToken(req) {
+  const authorization = req.get('authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+async function findAppUserByTokenPayload(payload) {
+  if (payload?.userId) {
+    const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [payload.userId]);
+    if (result.rows[0]) return result.rows[0];
+  }
+
+  if (payload?.email) {
+    const result = await pool.query('SELECT id, email, role FROM users WHERE LOWER(email) = LOWER($1)', [payload.email]);
+    if (result.rows[0]) return result.rows[0];
+  }
+
+  return null;
+}
+
+async function authenticateAiRequest(req, res, next) {
+  const token = getBearerToken(req);
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Authentication is required.' });
+  }
+
+  try {
+    if (JWT_SECRET) {
+      try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        const appUser = await findAppUserByTokenPayload(payload);
+        if (appUser) {
+          req.user = appUser;
+          return next();
+        }
+      } catch (jwtError) {
+        // Fall through to Supabase token validation.
+      }
+    }
+
+    const supabase = getSupabaseAuthClient();
+    if (!supabase) {
+      return res.status(401).json({ success: false, message: 'Authentication is required.' });
+    }
+
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user?.email) {
+      return res.status(401).json({ success: false, message: 'Authentication is required.' });
+    }
+
+    const appUser = await findAppUserByTokenPayload({ email: data.user.email });
+    if (!appUser) {
+      return res.status(403).json({ success: false, message: 'User profile is not allowed to use image analysis.' });
+    }
+
+    req.user = appUser;
+    return next();
+  } catch (error) {
+    console.error('AI_AUTH_ERROR:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Could not verify image analysis access.' });
+  }
+}
+
+function requireAiRole(req, res, next) {
+  const role = normalizeRole(req.user?.role);
+  if (!AI_ALLOWED_ROLES.has(role)) {
+    return res.status(403).json({ success: false, message: 'You do not have permission to use image analysis.' });
+  }
+
+  return next();
+}
+
+function rateLimitAiRequest(req, res, next) {
+  const now = Date.now();
+  const key = String(req.user?.id || req.ip || 'anonymous');
+  const bucket = aiRateLimitBuckets.get(key);
+
+  if (!bucket || now > bucket.resetAt) {
+    aiRateLimitBuckets.set(key, {
+      count: 1,
+      resetAt: now + AI_RATE_LIMIT_WINDOW_MS,
+    });
+    return next();
+  }
+
+  if (bucket.count >= AI_RATE_LIMIT_MAX_REQUESTS) {
+    return res.status(429).json({
+      success: false,
+      message: 'Too many image analysis requests. Please try again later.',
+    });
+  }
+
+  bucket.count += 1;
+  return next();
+}
+
+function normalizeBbox(bbox) {
   if (!Array.isArray(bbox) || bbox.length !== 4) return [];
   return bbox.map((value) => clamp(Number(value) || 0, 0, 1000));
-};
+}
 
-const normalizePanelType = (value) => {
+function normalizePanelType(value) {
   const allowed = new Set([
     'Residential Window',
     'Balcony Door Glass',
@@ -35,9 +144,9 @@ const normalizePanelType = (value) => {
   ]);
 
   return allowed.has(value) ? value : 'Fixed Glass Panel';
-};
+}
 
-const normalizeGeminiResult = (raw) => {
+function normalizeGeminiResult(raw) {
   const panels = Array.isArray(raw.panels)
     ? raw.panels.map((panel, index) => {
         const id = panel.id || `GP-${String(index + 1).padStart(3, '0')}`;
@@ -100,10 +209,13 @@ const normalizeGeminiResult = (raw) => {
         : 0;
 
   return {
+    success: true,
+    detected_count: totalVisibleGlassPanels,
     total_valid_panels: totalVisibleGlassPanels,
     ai_detected_count: totalVisibleGlassPanels,
     verified_panel_count: totalVisibleGlassPanels,
     summary,
+    confidence: detectionConfidence,
     detection_confidence: detectionConfidence,
     avg_confidence: detectionConfidence,
     detection_mode: 'gemini-only',
@@ -112,95 +224,65 @@ const normalizeGeminiResult = (raw) => {
     panels,
     uncertain_detections: uncertainDetections,
   };
-};
+}
 
-const callGemini = async ({ imageBuffer, mimeType }) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
-  const modelPath = model.startsWith('models/') ? model : `models/${model}`;
+function isSupportedImage(file) {
+  return /^image\/(jpeg|jpg|png|webp)$/i.test(file?.mimetype || '');
+}
 
-  if (!apiKey) {
-    const error = new Error('Gemini image analysis is not configured.');
-    error.status = 503;
-    throw error;
-  }
+router.post(
+  '/glass-analysis',
+  authenticateAiRequest,
+  requireAiRole,
+  rateLimitAiRequest,
+  upload.single('image'),
+  async (req, res) => {
+    try {
+      if ((process.env.AI_ANALYSIS_MODE || 'gemini_only') !== 'gemini_only') {
+        return res.status(400).json({ success: false, message: 'AI_ANALYSIS_MODE must be gemini_only.' });
+      }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { text: readPrompt() },
-              {
-                inlineData: {
-                  mimeType,
-                  data: imageBuffer.toString('base64'),
-                },
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.1,
-        },
-      }),
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'Image file is required.' });
+      }
+
+      if (!isSupportedImage(req.file)) {
+        return res.status(400).json({ success: false, message: 'Unsupported image type.' });
+      }
+
+      const geminiResult = await analyzeGlassImage({
+        imageBuffer: req.file.buffer,
+        mimeType: req.file.mimetype || 'image/jpeg',
+        prompt: readPrompt(),
+      });
+
+      const normalized = normalizeGeminiResult(geminiResult.result);
+      qaDebug('Gemini analysis response', {
+        success: true,
+        role: normalizeRole(req.user?.role),
+        detectedCount: normalized.ai_detected_count,
+      });
+      res.json(normalized);
+    } catch (error) {
+      qaDebug('Gemini analysis response', { success: false, status: error.status || 500 });
+      console.error('GEMINI_GLASS_ANALYSIS_ERROR:', error.message || error);
+      const status = error.status || 500;
+      const body = {
+        success: false,
+        message:
+          error.clientMessage ||
+          (status && status < 500
+            ? error.message
+            : 'Gemini glass analysis failed. Please try again or enter the panel count manually.'),
+      };
+
+      if (process.env.NODE_ENV !== 'production' && error.debugDetails) {
+        body.debug = error.debugDetails;
+      }
+
+      res.status(status).json(body);
     }
-  );
-
-  if (!response.ok) {
-    console.error('GEMINI_API_ERROR_STATUS:', response.status);
-    const error = new Error('Gemini image analysis is temporarily unavailable.');
-    error.status = response.status >= 500 ? 502 : 400;
-    throw error;
   }
-
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
-
-  if (!text) {
-    throw new Error('Gemini returned an empty analysis response.');
-  }
-
-  try {
-    return JSON.parse(stripJsonFences(text));
-  } catch (error) {
-    const parseError = new Error('Gemini returned an unreadable analysis response.');
-    parseError.status = 502;
-    throw parseError;
-  }
-};
-
-router.post('/glass-analysis', upload.single('image'), async (req, res) => {
-  try {
-    if ((process.env.AI_ANALYSIS_MODE || 'gemini_only') !== 'gemini_only') {
-      return res.status(400).json({ error: 'AI_ANALYSIS_MODE must be gemini_only.' });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'Image file is required.' });
-    }
-
-    const rawGeminiResult = await callGemini({
-      imageBuffer: req.file.buffer,
-      mimeType: req.file.mimetype || 'image/jpeg',
-    });
-
-    res.json(normalizeGeminiResult(rawGeminiResult));
-  } catch (error) {
-    console.error('GEMINI_GLASS_ANALYSIS_ERROR:', error.message || error);
-    res.status(error.status || 500).json({
-      message:
-        error.status && error.status < 500
-          ? error.message
-          : 'Gemini glass analysis failed. Please try again or enter the panel count manually.',
-    });
-  }
-});
+);
 
 module.exports = router;

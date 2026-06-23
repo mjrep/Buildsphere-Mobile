@@ -24,7 +24,7 @@ import AddTaskScreen from './AddTaskScreen';
 import TaskDetailScreen from './TaskDetailScreen';
 import InventoryScreen from './InventoryScreen';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import ChangeProjectColorModal from '../../components/ChangeProjectColorModal';
 import { UserInfo } from '../../App';
@@ -35,6 +35,9 @@ import { ProjectCardSkeleton, SkeletonBox, SkeletonText } from '../../components
 import { handleNotificationNavigation } from '../../utils/notificationNavigation';
 import { centeredContent } from '../../utils/responsive';
 import { BudgetValue, getProjectTotalBudget } from '../../utils/budget';
+import { normalizeProgress } from '../../utils/projectProgress';
+import { formatDisplayLabel } from '../../utils/display';
+import { qaDebug } from '../../utils/qaDebug';
 
 interface HomeScreenProps {
   onLogout: () => void;
@@ -54,6 +57,7 @@ interface Project {
   status: string;
   daysLeft?: number;
   progress?: number;
+  progress_percentage?: number;
   total_budget?: BudgetValue;
   contract_price?: BudgetValue;
   budget_for_materials?: BudgetValue;
@@ -137,17 +141,23 @@ const filterAssignedProjects = (allProjects: any[], assignedTasks: AssignedTaskP
 };
 
 const fetchProjectsFromSupabase = async () => {
-  let query = supabase.from('projects').select('*').order('created_at', { ascending: false });
+  let query = supabase.from('projects').select('*, progress_percentage').order('created_at', { ascending: false });
   let { data, error } = await query;
 
   if (error && error.message.toLowerCase().includes('created_at')) {
-    const fallback = await supabase.from('projects').select('*').order('id', { ascending: false });
+    const fallback = await supabase.from('projects').select('*, progress_percentage').order('id', { ascending: false });
     data = fallback.data;
     error = fallback.error;
   }
 
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  const projects = Array.isArray(data) ? data : [];
+
+  return projects.map((project: any) => ({
+    ...project,
+    progress_percentage: normalizeProgress(project),
+    progress: normalizeProgress(project),
+  }));
 };
 
 const fetchAssignedTasksFromSupabase = async (userId: number) => {
@@ -169,12 +179,55 @@ const fetchAssignedTasksFromSupabase = async (userId: number) => {
   return Array.isArray(byUserId.data) ? byUserId.data : [];
 };
 
+class ApiRequestError extends Error {
+  status: number;
+  endpoint: string;
+
+  constructor(label: string, endpoint: string, status: number, message: string) {
+    super(`${label} (${status}): ${message}`);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.endpoint = endpoint;
+  }
+}
+
+const safeErrorMessage = (message: unknown) => String(message || '').replace(/\s+/g, ' ').slice(0, 240);
+
+const logProjectRequest = (endpoint: string, status: number, message?: string, fallbackTriggered = false) => {
+  if (!__DEV__) return;
+  console.log('Projects API request', {
+    baseUrl: API_URL,
+    endpoint,
+    status,
+    error: message ? safeErrorMessage(message) : undefined,
+    fallbackTriggered,
+  });
+};
+
+const warnProjectsFallback = (error: unknown) => {
+  if (!__DEV__) return;
+  const status = error instanceof ApiRequestError ? error.status : 0;
+  const endpoint = error instanceof ApiRequestError ? error.endpoint : `${API_URL}/projects`;
+  const message = error instanceof Error ? error.message : String(error || 'Unknown error');
+  console.warn('Backend projects request failed. Using Supabase fallback.', {
+    status,
+    endpoint,
+    error: safeErrorMessage(message),
+  });
+};
+
+const shouldUseProjectsFallback = (error: unknown) => {
+  if (!(error instanceof ApiRequestError)) return true;
+  return error.status === 0 || error.status >= 500;
+};
+
 const fetchJsonArray = async (url: string, label: string) => {
-  const response = await fetch(url);
+  const response = await apiFetch(url);
   const text = await response.text();
+  logProjectRequest(url, response.status, response.ok ? undefined : text || response.statusText, false);
 
   if (!response.ok) {
-    throw new Error(`${label} (${response.status}): ${text || response.statusText}`);
+    throw new ApiRequestError(label, url, response.status, text || response.statusText);
   }
 
   const data = text ? JSON.parse(text) : [];
@@ -225,8 +278,12 @@ export default function HomeScreen({
     const actions = [];
     if (perms.canCreateTasks)
       actions.push({ label: 'Add new task', icon: 'add-circle-outline', key: 'task' });
-    if (perms.canEditInventory)
-      actions.push({ label: 'Update inventory', icon: 'cube-outline', key: 'inventory' });
+    if (perms.canViewInventory)
+      actions.push({
+        label: perms.canEditInventory ? 'Update inventory' : 'View inventory',
+        icon: 'cube-outline',
+        key: 'inventory',
+      });
     if (perms.canSubmitSiteUpdates)
       actions.push({ label: 'Upload Site Progress', icon: 'cloud-upload-outline', key: 'site' });
     return actions;
@@ -287,7 +344,7 @@ export default function HomeScreen({
   const [unreadCount, setUnreadCount] = useState(0);
 
   const fetchNotificationCount = () => {
-    fetch(`${API_URL}/notifications?userId=${user.id}`)
+    apiFetch(`${API_URL}/notifications`)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) {
@@ -328,7 +385,7 @@ export default function HomeScreen({
   const handleNotifNavigateToTask = async (taskId: number, _projectId?: number, _options?: { initialSection?: 'progress' | 'comments' }) => {
     try {
       // Fetch the task details so we can open TaskDetailScreen
-      const res = await fetch(`${API_URL}/tasks?userId=${user.id}`);
+      const res = await apiFetch(`${API_URL}/tasks`);
       const tasks = await res.json();
       const task = Array.isArray(tasks) ? tasks.find((t: any) => t.id === taskId) : null;
       if (task) {
@@ -407,7 +464,9 @@ export default function HomeScreen({
       try {
         allProjects = await fetchJsonArray(`${API_URL}/projects`, 'Backend projects fetch failed');
       } catch (backendError) {
-        console.warn('Backend projects unavailable, using Supabase fallback:', backendError);
+        if (!shouldUseProjectsFallback(backendError)) throw backendError;
+        logProjectRequest(`${API_URL}/projects`, backendError instanceof ApiRequestError ? backendError.status : 0, backendError instanceof Error ? backendError.message : String(backendError), true);
+        warnProjectsFallback(backendError);
         allProjects = await fetchProjectsFromSupabase();
       }
 
@@ -417,7 +476,7 @@ export default function HomeScreen({
 
       if (assignedProjectRoles.has(normalizedRole)) {
         try {
-          assignedTasks = await fetchJsonArray(`${API_URL}/tasks?userId=${user.id}`, 'Backend tasks fetch failed');
+          assignedTasks = await fetchJsonArray(`${API_URL}/tasks`, 'Backend tasks fetch failed');
         } catch (taskError) {
           console.warn('Dashboard task filter backend fetch failed, using Supabase fallback:', taskError);
           assignedTasks = await fetchAssignedTasksFromSupabase(user.id);
@@ -443,13 +502,18 @@ export default function HomeScreen({
           p.daysLeft = days > 0 ? days : 0;
         }
 
-        // Ensure progress is a number
-        p.progress = Number(p.progress) || 0;
+        const progress = normalizeProgress(p);
+        p.progress_percentage = progress;
+        p.progress = progress;
         p.total_budget = getProjectTotalBudget(p);
 
         return p;
       });
-      if (__DEV__) console.log('Projects loaded with colors:', mappedData.map((p: any) => p.color));
+      qaDebug('Projects loaded', {
+        role: user.role,
+        projectCount: mappedData.length,
+        assignedTaskCount: assignedTasks.length,
+      });
       setProjects(mappedData);
     } catch (err) {
       console.warn('Dashboard Projects Fetch Error:', err);
@@ -462,6 +526,12 @@ export default function HomeScreen({
   useEffect(() => {
     fetchProjects();
   }, [user.id, normalizedRole]);
+
+  useEffect(() => {
+    if (activeTab === 'home' && selectedProjectId === null) {
+      fetchProjects();
+    }
+  }, [activeTab, selectedProjectId]);
 
   useEffect(() => {
     if (!notificationData) return;
@@ -495,7 +565,6 @@ export default function HomeScreen({
               <ProjectDetailScreen
                 projectId={selectedProjectId}
                 userRole={user.role}
-                userId={user.id}
                 canViewHome={perms.canViewDashboard}
                 unreadCount={unreadCount}
                 canViewInventory={canAccessInventory}
@@ -524,7 +593,7 @@ export default function HomeScreen({
                 <View className="flex-row items-center justify-between">
                   <Text className="mb-1 text-[22px] font-bold" style={{ color: theme.primary }}>Home</Text>
                   <View className="px-3 py-1 rounded-full" style={{ backgroundColor: theme.primaryLight }}>
-                    <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }} numberOfLines={1}>{user.role}</Text>
+                    <Text className="text-[10px] font-bold" style={{ color: theme.primary }} numberOfLines={1}>{formatDisplayLabel(user.role)}</Text>
                   </View>
                 </View>
                 {loadingProjects && projects.length === 0 ? (
@@ -586,16 +655,12 @@ export default function HomeScreen({
                   projects.map((p: any) => (
                     <TouchableOpacity key={p.id} onPress={() => setSelectedProjectId(p.id)}>
                       <ProjectCard
-                        name={p.name}
-                        location={p.location}
+                        name={p.name || 'Untitled Project'}
                         clientName={p.client_name || p.clientName}
                         color={p.color}
                         status={p.status}
                         image={p.image}
                         progress={p.progress}
-                        daysLeft={p.daysLeft}
-                        totalBudget={p.total_budget}
-                        canViewBudget={perms.canViewBudget}
                         onAction={perms.canCreateTasks ? () => handleProjectAction(p) : undefined}
                       />
                     </TouchableOpacity>
@@ -744,7 +809,6 @@ export default function HomeScreen({
       <AddTaskScreen
         visible={showAddTask}
         onClose={() => setShowAddTask(false)}
-        userId={user.id}
         projects={projects}
         onTaskAdded={() => {
           setTaskRefreshKey((value) => value + 1);
@@ -829,8 +893,8 @@ export default function HomeScreen({
                         )}
                       </View>
                       <View className="ml-3 rounded-full px-2.5 py-1" style={{ backgroundColor: theme.input }}>
-                        <Text className="text-[10px] font-bold uppercase" style={{ color: theme.textSecondary }}>
-                          {project.status || 'active'}
+                        <Text className="text-[10px] font-bold" style={{ color: theme.textSecondary }}>
+                          {formatDisplayLabel(project.status, 'Active')}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -861,6 +925,10 @@ export default function HomeScreen({
           setSelectedTask(null);
           setShowAddTask(true);
         }}
+        onTaskUpdated={() => {
+          setTaskRefreshKey((value) => value + 1);
+          fetchProjects();
+        }}
         onViewInventory={(projectId) => {
 
           setSelectedTask(null);
@@ -876,7 +944,6 @@ export default function HomeScreen({
               setHighlightInventoryItemId(null);
             }}
             userRole={user.role}
-            userId={user.id}
             highlightItemId={highlightInventoryItemId}
             activeMainTab={activeTab === 'notifications' ? 'notifications' : activeTab === 'home' ? 'home' : 'mywork'}
             canViewHome={perms.canViewDashboard}

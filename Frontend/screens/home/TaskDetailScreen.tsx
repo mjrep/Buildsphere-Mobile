@@ -16,12 +16,13 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getPermissions, type UserRole } from '../../constants/roles';
-import { API_URL } from '../../lib/api';
+import { API_URL, apiFetch } from '../../lib/api';
 import { normalizeImageUrl } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
+import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
 
 
 interface TaskDetailScreenProps {
@@ -35,6 +36,7 @@ interface TaskDetailScreenProps {
   unreadCount?: number;
   onAddProgress?: (task: any) => void;
   onAddTask?: () => void;
+  onTaskUpdated?: () => void;
 }
 
 
@@ -67,7 +69,8 @@ export default function TaskDetailScreen({
   canViewHome = true,
   unreadCount = 0,
   onAddProgress,
-  onAddTask
+  onAddTask,
+  onTaskUpdated
 }: TaskDetailScreenProps) {
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -101,8 +104,12 @@ export default function TaskDetailScreen({
   useEffect(() => {
     if (visible && task?.id) {
       setLoadingHistory(true);
-      fetch(`${API_URL}/tasks/${task.id}/progress`)
-        .then(res => res.json())
+      apiFetch(`${API_URL}/tasks/${task.id}/progress`)
+        .then(async (res) => {
+          const data = await res.json().catch(() => []);
+          if (!res.ok) throw new Error((data as any)?.message || (data as any)?.error || 'Failed to load progress history.');
+          return data;
+        })
         .then(data => {
           setHistory(Array.isArray(data) ? data : []);
         })
@@ -124,29 +131,26 @@ export default function TaskDetailScreen({
 
 
   const getStatusStyle = (status: string) => {
-    switch (status?.toLowerCase()) {
+    switch (normalizeDisplayKey(status)) {
       case 'pending':
       case 'todo':
         return { bg: theme.mode === 'dark' ? '#3d1a1a' : '#FFEBEB', text: '#FF6B6B', label: 'To Do' };
       case 'in-progress':
-      case 'in progress':
-      case 'in_progress':
         return { bg: theme.mode === 'dark' ? '#2d2a4a' : '#EAE8FF', text: '#7370FF', label: 'In Progress' };
       case 'to-review':
-      case 'in review':
       case 'in-review':
-      case 'in_review':
         return { bg: theme.mode === 'dark' ? '#3d2e1a' : '#FFF4E5', text: '#FF9800', label: 'In Review' };
       case 'completed':
         return { bg: theme.mode === 'dark' ? '#1a3d24' : '#E8F5E9', text: '#4CAF50', label: 'Completed' };
       default:
-        return { bg: theme.surface, text: theme.textSecondary, label: status || 'To Do' };
+        return { bg: theme.surface, text: theme.textSecondary, label: formatDisplayLabel(status, 'To Do') };
     }
   };
 
   const statusStyle = getStatusStyle(task.status);
   const comments: Comment[] = [];
-  const priorityColor = task.priority?.toLowerCase() === 'high' ? '#FF6B6B' : '#FFA500';
+  const priorityKey = normalizeDisplayKey(task.priority);
+  const priorityColor = priorityKey === 'high' || priorityKey === 'high-priority' ? '#FF6B6B' : '#FFA500';
 
   const formatProgressTimestamp = (createdAt?: string) => {
     if (!createdAt) return 'Log';
@@ -169,7 +173,9 @@ export default function TaskDetailScreen({
 
   const FAB_ACTIONS = [
     ...(perms.canCreateTasks ? [{ label: 'Add new task', icon: 'add-circle-outline', key: 'task' }] : []),
-    ...(perms.canEditInventory ? [{ label: 'Update inventory', icon: 'cube-outline', key: 'inventory' }] : []),
+    ...(perms.canViewInventory
+      ? [{ label: perms.canEditInventory ? 'Update inventory' : 'View inventory', icon: 'cube-outline', key: 'inventory' }]
+      : []),
     ...(perms.canSubmitSiteUpdates ? [{ label: 'Upload Site Progress', icon: 'cloud-upload-outline', key: 'site' }] : []),
   ];
   const fabBottom = Math.max(insets.bottom + 80, 100);
@@ -230,7 +236,7 @@ export default function TaskDetailScreen({
                 className="rounded-full px-5 py-2 flex-row items-center"
                 style={{ backgroundColor: getStatusStyle(currentStatus).bg }}>
                 <Text
-                  className="text-[11px] font-bold uppercase tracking-wider"
+                  className="text-[11px] font-bold"
                   style={{ color: getStatusStyle(currentStatus).text }}>
                   {getStatusStyle(currentStatus).label}
                 </Text>
@@ -276,19 +282,19 @@ export default function TaskDetailScreen({
               <View className="flex-1">
                 <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Phase</Text>
                 <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
-                  {task.phase || 'Phase 1'}
+                  {formatDisplayLabel(task.phase ?? task.phase_key ?? task.phaseKey, 'Phase 1')}
                 </Text>
               </View>
               <View className="flex-1 items-center">
                 <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Milestone</Text>
                 <Text className="text-[15px] font-bold" style={{ color: theme.text }}>
-                  {task.milestone || 'Milestone 1'}
+                  {formatDisplayLabel(task.milestone ?? task.milestone_key ?? task.milestoneKey, 'Milestone 1')}
                 </Text>
               </View>
               <View className="flex-1 items-end">
                 <Text className="mb-1 text-[12px] font-medium" style={{ color: theme.textMuted }}>Priority</Text>
                 <Text className="text-[15px] font-bold" style={{ color: priorityColor }}>
-                  {task.priority || 'High'}
+                  {formatDisplayLabel(task.priority, 'High')}
                 </Text>
               </View>
             </View>
@@ -316,15 +322,15 @@ export default function TaskDetailScreen({
                 <View className="flex-row items-center rounded-lg px-3 py-2 self-start border" style={{ backgroundColor: theme.primaryLight, borderColor: theme.border }}>
                   <Ionicons
                     name={
-                      currentShift.toLowerCase() === 'afternoon' ? 'partly-sunny-outline' :
-                        currentShift.toLowerCase() === 'noon' ? 'sunny-outline' :
+                      normalizeDisplayKey(currentShift) === 'afternoon' ? 'partly-sunny-outline' :
+                        normalizeDisplayKey(currentShift) === 'noon' ? 'sunny-outline' :
                           'partly-sunny-outline'
                     }
                     size={16}
                     color={theme.primary}
                   />
                   <Text className="ml-1.5 text-[15px] font-bold" style={{ color: theme.text }}>
-                    {currentShift}
+                    {formatDisplayLabel(currentShift)}
                   </Text>
                   <Ionicons name="chevron-down" size={14} color={theme.textMuted} style={{ marginLeft: 6 }} />
                 </View>
@@ -363,7 +369,7 @@ export default function TaskDetailScreen({
               </View>
             ) : history.filter(item => !currentShift || item.shift === currentShift).length === 0 ? (
               <View className="items-center justify-center py-6 rounded-2xl border border-dashed" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
-                <Text className="text-[12px]" style={{ color: theme.textMuted }}>No {currentShift} progress recorded yet.</Text>
+              <Text className="text-[12px]" style={{ color: theme.textMuted }}>No {formatDisplayLabel(currentShift)} progress recorded yet.</Text>
               </View>
             ) : (
               history
@@ -417,7 +423,7 @@ export default function TaskDetailScreen({
                               {item.shift && (
                                 <View className="mb-1 rounded-full border px-2 py-0.5" style={{ backgroundColor: theme.primaryLight, borderColor: theme.border }}>
                                   <Text className="text-[10px] font-bold" style={{ color: theme.primary }} numberOfLines={1}>
-                                    {item.shift}
+                                    {formatDisplayLabel(item.shift)}
                                   </Text>
                                 </View>
                               )}
@@ -707,19 +713,26 @@ export default function TaskDetailScreen({
               <TouchableOpacity
                 key={item.label}
                 onPress={async () => {
+                  const oldShift = currentShift;
                   setCurrentShift(item.label);
                   setShowShiftModal(false);
                   // Update in database
                   try {
-                    await fetch(`${API_URL}/tasks/${task.id}`, {
+                    const res = await apiFetch(`${API_URL}/tasks/${task.id}`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ shift: item.label }),
                     });
+                    if (!res.ok) {
+                      const errorData = await res.json().catch(() => ({}));
+                      throw new Error(errorData.message || errorData.error || 'Failed to update shift.');
+                    }
+                    onTaskUpdated?.();
                     Alert.alert('Updated', `Shift changed to ${item.label}.`);
-                  } catch (err) {
+                  } catch (err: any) {
                     console.error('Failed to update shift:', err);
-                    Alert.alert('Update Failed', 'Could not update shift. Please try again.');
+                    setCurrentShift(oldShift);
+                    Alert.alert('Update Failed', err.message || 'Could not update shift. Please try again.');
                   }
                 }}
                 className="mb-3 flex-row items-center rounded-xl border p-4"
@@ -768,7 +781,7 @@ export default function TaskDetailScreen({
                   setShowStatusModal(false);
                   
                   try {
-                    const res = await fetch(`${API_URL}/tasks/${task.id}`, {
+                    const res = await apiFetch(`${API_URL}/tasks/${task.id}`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ status: item.value }),
@@ -778,6 +791,7 @@ export default function TaskDetailScreen({
                       const errorData = await res.json();
                       throw new Error(errorData.error || 'Failed to update status');
                     }
+                    onTaskUpdated?.();
                     Alert.alert('Updated', `Status changed to ${item.label}.`);
                   } catch (err: any) {
                     console.error('Failed to update status:', err);

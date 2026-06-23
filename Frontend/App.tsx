@@ -13,12 +13,13 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { UserRole } from './constants/roles';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
-import { API_URL, loadStoredApiUrl } from './lib/api';
+import { API_URL, apiFetch, getServerConnectionErrorMessage, loadStoredApiUrl } from './lib/api';
 import { clearInvalidSupabaseSession, isInvalidRefreshTokenError, supabase } from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
 import { getDeepLinkParams, isResetPasswordUrl } from './lib/passwordRecovery';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText } from './components/skeletons';
+import { qaDebug } from './utils/qaDebug';
 
 export interface UserInfo {
   id: number;
@@ -39,6 +40,19 @@ export interface UserInfo {
 }
 
 type AuthScreen = 'login' | 'forgot' | 'verify-reset-otp' | 'create-new-password' | 'reset';
+const PUSH_DEVICE_ID_KEY = 'buildsphere_push_device_id';
+const PUSH_TOKEN_REGISTER_RETRY_DELAYS_MS = [0, 2500, 6000];
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function getPushDeviceId() {
+  const existing = await AsyncStorage.getItem(PUSH_DEVICE_ID_KEY);
+  if (existing) return existing;
+
+  const next = `${Platform.OS}-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  await AsyncStorage.setItem(PUSH_DEVICE_ID_KEY, next);
+  return next;
+}
 
 function AppContent() {
   const [user, setUser] = useState<UserInfo | null>(null);
@@ -51,6 +65,7 @@ function AppContent() {
   const [resetEmail, setResetEmail] = useState('');
   const [resetOtp, setResetOtp] = useState('');
   const otpRecoveryFlowRef = useRef(false);
+  const registeredPushTokenRef = useRef<string | null>(null);
   const { theme, isDark } = useAppTheme();
 
   const clearAppSession = useCallback(async () => {
@@ -212,10 +227,35 @@ function AppContent() {
     await AsyncStorage.setItem('token', token);
     setAuthNotice('');
     setUser(loggedInUser);
+    qaDebug('Logged-in user role', { role: loggedInUser.role });
   };
 
   const handleLogout = async () => {
+    const userId = user?.id;
+    const expoPushToken = registeredPushTokenRef.current;
+
     try {
+      if (userId && expoPushToken) {
+        try {
+          const deviceId = await getPushDeviceId();
+          const response = await apiFetch(`${API_URL}/api/notifications/unregister-token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              expo_push_token: expoPushToken,
+              device_id: deviceId,
+            }),
+          });
+
+          if (!response.ok && __DEV__) {
+            const text = await response.text().catch(() => '');
+            console.warn('Push token unregister failed:', response.status, text.slice(0, 180));
+          }
+        } catch (tokenError) {
+          if (__DEV__) console.warn('Push token unregister request failed:', tokenError);
+        }
+      }
+
       await supabase.auth.signOut();
     } catch (error) {
       if (isInvalidRefreshTokenError(error)) {
@@ -224,6 +264,7 @@ function AppContent() {
         console.warn('Supabase signout failed:', error);
       }
     } finally {
+      registeredPushTokenRef.current = null;
       await clearAppSession();
     }
   };
@@ -331,18 +372,45 @@ function AppContent() {
       try {
         const expoPushToken = await registerForPushNotificationsAsync();
         if (!expoPushToken) return;
+        const deviceId = await getPushDeviceId();
+        let lastError: unknown = null;
 
-        await fetch(`${API_URL}/api/notifications/register-token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: user.id,
-            expo_push_token: expoPushToken,
-            device_type: Platform.OS === 'ios' ? 'ios' : 'android',
-          }),
-        });
+        for (const [attemptIndex, delayMs] of PUSH_TOKEN_REGISTER_RETRY_DELAYS_MS.entries()) {
+          if (delayMs > 0) await wait(delayMs);
+
+          try {
+            const response = await apiFetch(`${API_URL}/api/notifications/register-token`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                expo_push_token: expoPushToken,
+                device_id: deviceId,
+                device_type: Platform.OS === 'ios' ? 'ios' : 'android',
+              }),
+            });
+
+            if (!response.ok) {
+              const text = await response.text().catch(() => '');
+              throw new Error(`Push token registration failed (${response.status}): ${text.slice(0, 180)}`);
+            }
+
+            registeredPushTokenRef.current = expoPushToken;
+            qaDebug('Push token saved', { saved: true, userId: user.id, attempt: attemptIndex + 1 });
+            return;
+          } catch (registerError) {
+            lastError = registerError;
+            qaDebug('Push token save attempt failed', {
+              userId: user.id,
+              attempt: attemptIndex + 1,
+              willRetry: attemptIndex < PUSH_TOKEN_REGISTER_RETRY_DELAYS_MS.length - 1,
+            });
+          }
+        }
+
+        throw lastError || new Error('Push token registration failed.');
       } catch (err) {
-        console.error('Failed to register push token:', err);
+        qaDebug('Push token saved', { saved: false, userId: user.id });
+        console.warn('Push token registration skipped for now:', getServerConnectionErrorMessage(err));
       }
     };
 

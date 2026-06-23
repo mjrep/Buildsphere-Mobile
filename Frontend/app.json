@@ -45,6 +45,7 @@
         }
       ],
       "@react-native-community/datetimepicker",
+      "expo-notifications",
       "expo-font",
       "expo-web-browser"
     ],
