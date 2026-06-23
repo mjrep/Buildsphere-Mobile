@@ -28,6 +28,12 @@ function projectBudgetFields(project) {
   };
 }
 
+function normalizeProgressValue(value) {
+  const progress = Number(value);
+  if (!Number.isFinite(progress)) return 0;
+  return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
 async function fetchBasicProjects() {
   try {
     const result = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
@@ -39,14 +45,34 @@ async function fetchBasicProjects() {
 }
 
 function mapProjectForMobile(row, progress = row.progress) {
+  const progressPercentage = normalizeProgressValue(row.progress_percentage ?? progress);
   return {
     ...row,
     name: row.name || row.project_name || 'Unnamed Project',
     location: row.location || row.address || 'Unknown Location',
     color: row.color || '#FFDFF2',
-    progress: parseInt(progress) || 0,
+    progress_percentage: progressPercentage,
+    progress: progressPercentage,
     ...projectBudgetFields(row),
   };
+}
+
+async function calculateProjectProgressPercentage(projectId) {
+  const milestoneStats = await pool.query(
+    `SELECT
+      COUNT(*) as total,
+      COUNT(*) FILTER (WHERE
+        (has_quantity = true AND current_quantity >= target_quantity) OR
+        (has_quantity = false AND EXISTS (SELECT 1 FROM tasks t WHERE t.milestone_id = project_milestones.id AND t.status = 'completed'))
+      ) as completed
+     FROM project_milestones
+     WHERE project_id = $1`,
+    [projectId]
+  );
+
+  const totalMilestones = Number(milestoneStats.rows[0]?.total) || 0;
+  const completedMilestones = Number(milestoneStats.rows[0]?.completed) || 0;
+  return totalMilestones > 0 ? normalizeProgressValue((completedMilestones / totalMilestones) * 100) : 0;
 }
 
 // GET /projects
@@ -71,7 +97,7 @@ router.get('/', async (req, res) => {
              FROM project_milestones pm
              WHERE pm.project_id = p.id),
             0
-          ) as progress
+          ) as progress_percentage
         FROM projects p
         LEFT JOIN users u ON u.id = p.project_in_charge_id
         ORDER BY p.created_at DESC
@@ -82,7 +108,7 @@ router.get('/', async (req, res) => {
       rows = await fetchBasicProjects();
     }
 
-    const mapped = rows.map((row) => mapProjectForMobile(row));
+    const mapped = rows.map((row) => mapProjectForMobile(row, row.progress_percentage));
     
     res.json(mapped);
   } catch (err) {
@@ -125,24 +151,10 @@ router.get('/:id', async (req, res) => {
     
     const project = projectResult.rows[0];
 
-    // Calculate Progress dynamically from Milestones (matching web logic)
+    // Calculate progress dynamically from milestones. Home fallback mirrors this formula.
     let progress = 0;
     try {
-      const milestoneStats = await pool.query(
-        `SELECT
-          COUNT(*) as total,
-          COUNT(*) FILTER (WHERE
-            (has_quantity = true AND current_quantity >= target_quantity) OR
-            (has_quantity = false AND EXISTS (SELECT 1 FROM tasks t WHERE t.milestone_id = project_milestones.id AND t.status = 'completed'))
-          ) as completed
-         FROM project_milestones
-         WHERE project_id = $1`,
-        [req.params.id]
-      );
-
-      const totalMilestones = parseInt(milestoneStats.rows[0].total) || 0;
-      const completedMilestones = parseInt(milestoneStats.rows[0].completed) || 0;
-      progress = totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0;
+      progress = await calculateProjectProgressPercentage(req.params.id);
     } catch (progressError) {
       console.warn('PROJECT_DETAIL_PROGRESS_QUERY_FAILED:', progressError.message);
     }
@@ -153,6 +165,7 @@ router.get('/:id', async (req, res) => {
       name: project.name || project.project_name,
       location: project.location || project.address,
       color: project.color || '#FFDFF2',
+      progress_percentage: progress,
       progress,
       ...projectBudgetFields(project),
     });
