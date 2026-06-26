@@ -19,7 +19,7 @@ import { API_URL, apiFetch } from '../../lib/api';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { ACTION_TYPE_LABELS, ACTION_TYPE_COLORS } from '../../constants/constants';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
+import BottomNavigationBar, { getBottomNavContentPadding, MainTab } from '../../components/BottomNavigationBar';
 import { InventoryItemSkeleton, InventoryLogSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent } from '../../utils/responsive';
@@ -159,6 +159,8 @@ export default function InventoryScreen({
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
   const headerTopPadding = Math.max(insets.top + 10, Platform.OS === 'ios' ? 64 : 20);
+  const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
+  const screenBottomPadding = 100 + insets.bottom;
 
   const [activeTab, setActiveTab] = useState<'items' | 'logs'>('items');
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -820,7 +822,7 @@ export default function InventoryScreen({
       {loading ? (
         <ScrollView
           style={{ backgroundColor: theme.background }}
-          contentContainerStyle={{ paddingBottom: showBottomNav ? 180 + insets.bottom : 100 + insets.bottom }}
+          contentContainerStyle={{ paddingBottom: showBottomNav ? bottomNavContentPadding : screenBottomPadding }}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
@@ -848,7 +850,7 @@ export default function InventoryScreen({
       ) : (
         <ScrollView
           style={{ backgroundColor: theme.background }}
-          contentContainerStyle={{ paddingBottom: showBottomNav ? 180 + insets.bottom : 100 + insets.bottom }}
+          contentContainerStyle={{ paddingBottom: showBottomNav ? bottomNavContentPadding : screenBottomPadding }}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl

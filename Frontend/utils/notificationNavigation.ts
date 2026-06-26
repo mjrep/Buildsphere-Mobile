@@ -52,12 +52,19 @@ export interface NotificationLike {
 
 export type NotificationRoute =
   | { kind: 'inventory'; projectId?: number; inventoryItemId?: number }
-  | { kind: 'task'; projectId?: number; taskId?: number; initialSection?: 'progress' | 'comments' }
+  | { kind: 'task'; projectId?: number; taskId?: number; taskTitle?: string; initialSection?: 'progress' | 'comments' }
   | { kind: 'project'; projectId?: number }
   | { kind: 'unknown' };
 
+export interface TaskNavigationOptions {
+  initialSection?: 'progress' | 'comments';
+  progressId?: number;
+  commentId?: number;
+  taskTitle?: string;
+}
+
 export interface NotificationNavigationHandlers {
-  onNavigateToTask?: (taskId: number, projectId?: number, options?: { initialSection?: 'progress' | 'comments'; progressId?: number; commentId?: number }) => void;
+  onNavigateToTask?: (taskId: number, projectId?: number, options?: TaskNavigationOptions) => void;
   onNavigateToInventory?: (projectId?: number, inventoryItemId?: number) => void;
   onNavigateToProject?: (projectId: number) => void;
   onNavigateToTab?: (tab: MainNotificationTab) => void;
@@ -115,6 +122,20 @@ const pickNumber = (metadata: NotificationMetadata, keys: string[]) => {
   return undefined;
 };
 
+const pickText = (metadata: NotificationMetadata, keys: string[]) => {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+};
+
+const extractQuotedTaskTitle = (notification: NotificationLike) => {
+  const source = [notification.message, notification.body].find((value) => typeof value === 'string' && value.trim());
+  const match = source?.match(/"([^"]+)"/);
+  return match?.[1]?.trim() || undefined;
+};
+
 const parseReferenceUrl = (referenceUrl?: string | null): NotificationRoute | null => {
   if (!referenceUrl) return null;
   const path = referenceUrl.split('?')[0].replace(/^https?:\/\/[^/]+/i, '');
@@ -143,6 +164,7 @@ export function buildNotificationRoute(notification: NotificationLike): Notifica
 
   const projectId = pickNumber(metadata, ['project_id', 'projectId']);
   const taskId = pickNumber(metadata, ['task_id', 'taskId']);
+  const taskTitle = pickText(metadata, ['task_title', 'taskTitle', 'task_name', 'taskName']) || extractQuotedTaskTitle(notification);
   const inventoryItemId = pickNumber(metadata, ['inventory_item_id', 'inventoryItemId', 'item_id', 'itemId']);
 
   if (referenceType === 'inventory' || INVENTORY_TYPES.has(type)) {
@@ -161,23 +183,24 @@ export function buildNotificationRoute(notification: NotificationLike): Notifica
   }
 
   if (referenceType === 'comment' || COMMENT_TYPES.has(type)) {
-    return { kind: 'task', projectId, taskId, initialSection: 'comments' };
+    return { kind: 'task', projectId, taskId, taskTitle, initialSection: 'comments' };
   }
 
   if (referenceType === 'site_progress' || SITE_PROGRESS_TYPES.has(type)) {
-    return { kind: 'task', projectId, taskId, initialSection: 'progress' };
+    return { kind: 'task', projectId, taskId, taskTitle, initialSection: 'progress' };
   }
 
   if (referenceType === 'task' || TASK_TYPES.has(type)) {
     return {
       kind: 'task',
       projectId,
+      taskTitle,
       taskId: taskId || referenceId || (referenceRoute?.kind === 'task' ? referenceRoute.taskId : undefined),
     };
   }
 
   if (referenceRoute) return referenceRoute;
-  if (taskId) return { kind: 'task', projectId, taskId };
+  if (taskId) return { kind: 'task', projectId, taskId, taskTitle };
   if (projectId) return { kind: 'project', projectId };
 
   return { kind: 'unknown' };
@@ -211,7 +234,10 @@ export function routeNotification(route: NotificationRoute, handlers: Notificati
 
   if (route.kind === 'task') {
     if (route.taskId) {
-      handlers.onNavigateToTask?.(route.taskId, route.projectId, { initialSection: route.initialSection });
+      handlers.onNavigateToTask?.(route.taskId, route.projectId, {
+        initialSection: route.initialSection,
+        taskTitle: route.taskTitle,
+      });
       return true;
     }
   }

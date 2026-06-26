@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, RefreshControl, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL, apiFetch } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+import { getBottomNavContentPadding } from '../../components/BottomNavigationBar';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { NotificationSkeleton, SkeletonText } from '../../components/skeletons';
 import {
@@ -10,6 +12,7 @@ import {
   handleNotificationNavigation,
   normalizeNotificationType,
   type NotificationMetadata,
+  type TaskNavigationOptions,
 } from '../../utils/notificationNavigation';
 import { centeredContent } from '../../utils/responsive';
 
@@ -27,7 +30,7 @@ interface Notification {
 
 interface NotificationsProps {
   userId: number;
-  onNavigateToTask?: (taskId: number) => void;
+  onNavigateToTask?: (taskId: number, projectId?: number, options?: TaskNavigationOptions) => void;
   onNavigateToInventory?: (projectId?: number, inventoryItemId?: number) => void;
   onNavigateToProject?: (projectId: number) => void;
   onNavigateToSiteProgress?: (projectId?: number, taskId?: number, siteProgressId?: number) => void;
@@ -50,8 +53,10 @@ export default function Notifications({
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
+  const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -246,7 +251,7 @@ export default function Notifications({
           onNavigateToSiteProgress(undefined, taskId, undefined);
           return;
         }
-        onNavigateToTask?.(taskId);
+        onNavigateToTask?.(taskId, _projectId, options);
       },
     }).catch(async (err) => {
       console.error('Notification navigation failed:', err);
@@ -291,7 +296,7 @@ export default function Notifications({
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 160 }}
+        contentContainerStyle={{ paddingBottom: bottomNavContentPadding }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

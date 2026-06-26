@@ -19,7 +19,12 @@ import { getPermissions, type UserRole } from '../../constants/roles';
 import { API_URL, apiFetch } from '../../lib/api';
 import { normalizeImageUrl } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
+import BottomNavigationBar, {
+  getBottomNavContentPadding,
+  getBottomNavFabBottom,
+  getBottomNavFabMenuBottom,
+  MainTab,
+} from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
 import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
@@ -178,8 +183,9 @@ export default function TaskDetailScreen({
       : []),
     ...(perms.canSubmitSiteUpdates ? [{ label: 'Upload Site Progress', icon: 'cloud-upload-outline', key: 'site' }] : []),
   ];
-  const fabBottom = Math.max(insets.bottom + 80, 100);
-  const fabMenuBottom = Math.max(insets.bottom + 130, 150);
+  const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
+  const fabBottom = getBottomNavFabBottom(insets.bottom);
+  const fabMenuBottom = getBottomNavFabMenuBottom(insets.bottom);
 
   const handleInventoryPress = () => {
     const projectId = Number(task.project_id || task.projectId);
@@ -214,7 +220,7 @@ export default function TaskDetailScreen({
         <ScrollView
           className="flex-1"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 120 }}>
+          contentContainerStyle={{ paddingBottom: bottomNavContentPadding }}>
           <View style={screenContentStyle}>
           {/* Status & Title Card */}
           <View

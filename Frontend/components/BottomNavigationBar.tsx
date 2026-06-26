@@ -1,12 +1,33 @@
 import React from 'react';
-import { Text, TouchableOpacity, useWindowDimensions, View, Platform } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { floatingNavShadow } from '../constants/theme';
 import { useAppTheme } from '../contexts/ThemeContext';
-import { centeredWidth, NAV_CONTENT_MAX_WIDTH } from '../utils/responsive';
 
 export type MainTab = 'home' | 'mywork' | 'notifications' | 'more';
+
+export const BOTTOM_NAV_BASE_HEIGHT = 62;
+export const BOTTOM_NAV_EXTRA_CONTENT_GAP = 18;
+
+export function getBottomNavBottomOffset(bottomInset: number) {
+  return 0;
+}
+
+export function getBottomNavHeight(bottomInset: number) {
+  return BOTTOM_NAV_BASE_HEIGHT + bottomInset;
+}
+
+export function getBottomNavContentPadding(bottomInset: number) {
+  return getBottomNavHeight(bottomInset) + BOTTOM_NAV_EXTRA_CONTENT_GAP;
+}
+
+export function getBottomNavFabBottom(bottomInset: number) {
+  return getBottomNavHeight(bottomInset) + 16;
+}
+
+export function getBottomNavFabMenuBottom(bottomInset: number) {
+  return getBottomNavHeight(bottomInset) + 72;
+}
 
 interface BottomNavigationBarProps {
   activeTab: MainTab;
@@ -29,55 +50,81 @@ const NAV_ITEMS: {
 export default function BottomNavigationBar({
   activeTab,
   onTabPress,
-  canViewHome = true,
   unreadCount = 0,
 }: BottomNavigationBarProps) {
   const { theme } = useAppTheme();
-  const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const visibleItems = NAV_ITEMS.filter((item) => canViewHome || item.key !== 'home');
-  const navWidth = centeredWidth(width, NAV_CONTENT_MAX_WIDTH);
 
   return (
     <View
-      className="absolute h-[70px] flex-row items-center justify-between rounded-[30px] px-4"
+      className="absolute flex-row items-center justify-between"
       style={{
-        left: Math.max((width - navWidth) / 2, 16),
-        bottom: Platform.OS === 'ios' ? Math.max(insets.bottom, 2) : Math.max(insets.bottom, 8),
-        width: navWidth,
-        backgroundColor: theme.tabBar,
-        ...floatingNavShadow,
+        left: 0,
+        right: 0,
+        bottom: getBottomNavBottomOffset(insets.bottom),
+        height: getBottomNavHeight(insets.bottom),
+        paddingBottom: insets.bottom,
+        paddingHorizontal: 0,
+        backgroundColor: '#FFFFFF',
+        borderTopWidth: 1,
+        borderTopColor: theme.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(30,30,30,0.08)',
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+        elevation: 10,
+        zIndex: 50,
       }}>
-      {visibleItems.map((item) => {
+      {NAV_ITEMS.map((item) => {
         const isActive = activeTab === item.key;
         return (
           <TouchableOpacity
             key={item.key}
-            className="min-w-[58px] items-center rounded-full px-2 py-2"
-            style={{ backgroundColor: isActive ? theme.primaryLight : 'transparent' }}
+            className="flex-1 items-center justify-center"
+            style={{ height: BOTTOM_NAV_BASE_HEIGHT }}
             onPress={() => onTabPress(item.key)}
-            activeOpacity={0.8}>
-            <View>
-              <Ionicons
-                name={item.icon}
-                size={24}
-                color={isActive ? theme.primary : theme.textMuted}
-              />
-              {item.key === 'notifications' && unreadCount > 0 && (
-                <View className="absolute -right-1 -top-1 h-4 w-4 items-center justify-center rounded-full bg-[#FF6B6B]">
-                  <Text className="text-[10px] font-bold text-white">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </Text>
-                </View>
-              )}
+            activeOpacity={0.78}>
+            <View
+              className="items-center justify-center"
+              style={{
+                minWidth: 0,
+                paddingHorizontal: 4,
+                paddingTop: 6,
+              }}>
+              <View style={{ width: 34, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons
+                  name={item.icon}
+                  size={25}
+                  color={isActive ? theme.primary : '#9A9AA3'}
+                />
+                {item.key === 'notifications' && unreadCount > 0 && (
+                  <View
+                    className="absolute items-center justify-center rounded-full"
+                    style={{
+                      right: -7,
+                      top: -3,
+                      minWidth: 16,
+                      height: 16,
+                      paddingHorizontal: 3,
+                      backgroundColor: '#FF6B6B',
+                      borderWidth: 1.5,
+                      borderColor: '#FFFFFF',
+                    }}>
+                    <Text className="text-[9px] font-bold leading-[11px] text-white">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text
+                className={`mt-1 text-[11px] ${isActive ? 'font-semibold' : 'font-medium'}`}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.76}
+                style={{ color: isActive ? theme.primary : '#8F9098' }}>
+                {item.label}
+              </Text>
             </View>
-            <Text
-              className={`mt-1 text-[10px] ${isActive ? 'font-bold' : ''}`}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              style={{ color: isActive ? theme.primary : theme.textMuted }}>
-              {item.label}
-            </Text>
           </TouchableOpacity>
         );
       })}

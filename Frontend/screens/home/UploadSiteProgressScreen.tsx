@@ -112,7 +112,7 @@ export default function UploadSiteProgressScreen({
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [glassCount, setGlassCount] = useState<number>(0);
 
-  // ── AI detection state ──────────────────────────────
+  //  AI detection state 
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle');
   const [detectionMode, setDetectionMode] = useState<string>('gemini-only');
   const [avgConfidence, setAvgConfidence] = useState<number>(0);

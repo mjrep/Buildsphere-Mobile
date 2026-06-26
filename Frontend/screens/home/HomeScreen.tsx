@@ -23,7 +23,12 @@ import ProjectDetailScreen from './ProjectDetailScreen';
 import AddTaskScreen from './AddTaskScreen';
 import TaskDetailScreen from './TaskDetailScreen';
 import InventoryScreen from './InventoryScreen';
-import BottomNavigationBar, { MainTab } from '../../components/BottomNavigationBar';
+import BottomNavigationBar, {
+  getBottomNavContentPadding,
+  getBottomNavFabBottom,
+  getBottomNavFabMenuBottom,
+  MainTab,
+} from '../../components/BottomNavigationBar';
 import { API_URL, apiFetch } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import ChangeProjectColorModal from '../../components/ChangeProjectColorModal';
@@ -32,7 +37,7 @@ import { getPermissions, normalizeRole } from '../../constants/roles';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { softCardShadow } from '../../constants/theme';
 import { ProjectCardSkeleton, SkeletonBox, SkeletonText } from '../../components/skeletons';
-import { handleNotificationNavigation } from '../../utils/notificationNavigation';
+import { handleNotificationNavigation, type TaskNavigationOptions } from '../../utils/notificationNavigation';
 import { centeredContent } from '../../utils/responsive';
 import { BudgetValue, getProjectTotalBudget } from '../../utils/budget';
 import { normalizeProgress } from '../../utils/projectProgress';
@@ -222,8 +227,9 @@ export default function HomeScreen({
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
-  const fabBottom = Math.max(insets.bottom + 75, 85);
-  const fabMenuBottom = Math.max(insets.bottom + 125, 135);
+  const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
+  const fabBottom = getBottomNavFabBottom(insets.bottom);
+  const fabMenuBottom = getBottomNavFabMenuBottom(insets.bottom);
 
   // RBAC: Filtered FAB Actions 
   const perms = useMemo(() => getPermissions(user.role), [user.role]);
@@ -343,7 +349,7 @@ export default function HomeScreen({
   }, [user.id]);
 
   // Deep-link: Notification → Task Detail
-  const handleNotifNavigateToTask = async (taskId: number, _projectId?: number, _options?: { initialSection?: 'progress' | 'comments' }) => {
+  const handleNotifNavigateToTask = async (taskId: number, _projectId?: number, options?: TaskNavigationOptions) => {
     try {
       // Fetch the task details so we can open TaskDetailScreen
       const res = await apiFetch(`${API_URL}/tasks`);
@@ -353,7 +359,7 @@ export default function HomeScreen({
         setSelectedTask(task);
       } else {
         // Task not assigned to this user — still try to show basic info
-        setSelectedTask({ id: taskId, title: `Task #${taskId}`, status: 'pending' });
+        setSelectedTask({ id: taskId, title: options?.taskTitle || 'Task', status: 'pending' });
       }
     } catch (err) {
       console.error('Failed to navigate to task:', err);
@@ -541,7 +547,7 @@ export default function HomeScreen({
               />
             ) : (
               <ScrollView
-                contentContainerStyle={{ paddingBottom: 160 }}
+                contentContainerStyle={{ paddingBottom: bottomNavContentPadding }}
                 className="pt-4"
                 refreshControl={
                   <RefreshControl

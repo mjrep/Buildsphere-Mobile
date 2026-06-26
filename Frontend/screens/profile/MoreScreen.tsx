@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Image, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UserInfo } from '../../App';
 import EditInformationScreen from './EditInformationScreen';
 import { API_URL, apiFetch } from '../../lib/api';
+import { getBottomNavContentPadding } from '../../components/BottomNavigationBar';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ProfileSkeleton } from '../../components/skeletons';
 import { calculateAgeFromDateOnly, formatDateOnlyDisplay } from '../../utils/dateOnly';
@@ -21,8 +23,10 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
   const [profile, setProfile] = useState<UserInfo>(user);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const { theme, mode, setMode } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
+  const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
 
   useEffect(() => {
     setProfile(user);
@@ -88,7 +92,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <ScrollView className="flex-1 pt-14" contentContainerStyle={{ paddingBottom: 150 }}>
+      <ScrollView className="flex-1 pt-14" contentContainerStyle={{ paddingBottom: bottomNavContentPadding }}>
         <View style={screenContentStyle}>
         {loadingProfile ? (
           <ProfileSkeleton />

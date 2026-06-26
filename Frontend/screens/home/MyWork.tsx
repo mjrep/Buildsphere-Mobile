@@ -9,7 +9,9 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL, apiFetch } from '../../lib/api';
+import { getBottomNavContentPadding } from '../../components/BottomNavigationBar';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, TaskCardSkeleton } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
@@ -75,8 +77,10 @@ export default function MyWork({
   const [filterBy, setFilterBy] = useState<'all' | 'high_priority' | 'medium_priority' | 'low_priority'>('all');
   const [error, setError] = useState<string | null>(null);
   const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
+  const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
 
   const TABS: { label: Tab; color: string }[] = [
     { label: 'To Do', color: '#FF6B6B' },
@@ -303,7 +307,7 @@ export default function MyWork({
       <ScrollView
         className="mt-4 flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}>
+        contentContainerStyle={{ paddingBottom: bottomNavContentPadding }}>
         <View style={screenContentStyle}>
         {loading ? (
           <View style={{ marginTop: 4 }}>
