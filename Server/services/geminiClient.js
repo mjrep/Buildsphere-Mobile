@@ -14,6 +14,10 @@ function createGeminiError(message, { status = 502, retryable = false, clientMes
 function getGeminiApiKeys() {
   return [
     { key: process.env.GEMINI_API_KEY, keyIndex: 1 },
+    { key: process.env.GEMINI_API_KEY_2, keyIndex: 2 },
+    { key: process.env.GEMINI_API_KEY_3, keyIndex: 3 },
+    { key: process.env.GEMINI_API_KEY_4, keyIndex: 4 },
+    { key: process.env.GEMINI_API_KEY_5, keyIndex: 5 },
   ]
     .map((item) => ({ ...item, key: item.key?.trim() }))
     .filter((item) => Boolean(item.key));
