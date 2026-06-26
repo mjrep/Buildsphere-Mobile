@@ -1,5 +1,5 @@
 const RETRYABLE_GEMINI_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
-const GEMINI_REQUEST_TIMEOUT_MS = 90000;
+const GEMINI_REQUEST_TIMEOUT_MS = 180000;
 const { qaDebug } = require('./qaDebug');
 
 function createGeminiError(message, { status = 502, retryable = false, clientMessage, debugDetails } = {}) {
