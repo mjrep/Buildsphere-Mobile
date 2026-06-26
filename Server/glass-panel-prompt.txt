@@ -9,7 +9,8 @@ INSPECTION PROTOCOL:
    - Exclude aluminum louvers, AC vents, exhaust fan units, mechanical openings, frames, mullions, handles, pipes, shadows, stickers, concrete walls, and reflections.
    - Include frosted glass, fixed transoms, sliding panels, fixed panels, balcony door glass, and casement panels when the glass surface is visible.
 5. Visibility: Count a panel only when more than 50% of the glass surface is visible. If visibility or boundaries are unclear but the item is likely a real glass panel, include it and mark requires_manual_verification true.
-6. Numbering: Number panels top-to-bottom and left-to-right as GP-001, GP-002, GP-003.
+6. Dense Grids: CRITICAL! For multi-panel facades, you MUST count EVERY single panel. Scan systematically row by row, column by column. Do NOT skip or group panels. A 5x7 grid must output exactly 35 distinct panel objects. Double-check your final count to ensure no panels are missed.
+7. Numbering: Number panels top-to-bottom and left-to-right as GP-001, GP-002, GP-003.
 
 OUTPUT REQUIREMENTS:
 - Return ONLY valid JSON.

@@ -2,13 +2,15 @@ import { API_URL, apiFetch } from './api';
 import { qaDebug } from '../utils/qaDebug';
 import { Platform } from 'react-native';
 
-const withRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000): Promise<T> => {
+const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 4000): Promise<T> => {
   try {
     return await fn();
   } catch (error: any) {
-    if (retries > 0 && (error.message?.includes('503') || error.message?.includes('429'))) {
+    const msg = error?.message?.toLowerCase() || '';
+    if (retries > 0 && (msg.includes('503') || msg.includes('429') || msg.includes('unavailable') || msg.includes('timeout'))) {
+      console.warn(`AI Analysis failed. Retrying in ${delay}ms...`, error.message);
       await new Promise((res) => setTimeout(res, delay));
-      return withRetry(fn, retries - 1, delay * 2);
+      return withRetry(fn, retries - 1, delay * 1.5);
     }
     throw error;
   }
