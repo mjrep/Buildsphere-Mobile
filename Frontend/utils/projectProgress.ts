@@ -29,6 +29,11 @@ export function normalizeProjectStatus(status?: string | null) {
     .replace(/[\s_-]+/g, '_');
 }
 
+export function isOngoingProjectStatus(status?: string | null) {
+  const normalizedStatus = normalizeProjectStatus(status);
+  return normalizedStatus === 'ongoing' || normalizedStatus === 'in_progress' || normalizedStatus === 'inprogress';
+}
+
 export function getProjectStatusColor(status: string | null | undefined, theme: ProjectStatusPalette) {
   const normalizedStatus = normalizeProjectStatus(status);
 

@@ -40,7 +40,7 @@ import { ProjectCardSkeleton, SkeletonBox, SkeletonText } from '../../components
 import { handleNotificationNavigation, type TaskNavigationOptions } from '../../utils/notificationNavigation';
 import { centeredContent } from '../../utils/responsive';
 import { BudgetValue, getProjectTotalBudget } from '../../utils/budget';
-import { normalizeProgress } from '../../utils/projectProgress';
+import { isOngoingProjectStatus, normalizeProgress } from '../../utils/projectProgress';
 import { formatDisplayLabel } from '../../utils/display';
 import { qaDebug } from '../../utils/qaDebug';
 
@@ -230,6 +230,11 @@ export default function HomeScreen({
   const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
   const fabBottom = getBottomNavFabBottom(insets.bottom);
   const fabMenuBottom = getBottomNavFabMenuBottom(insets.bottom);
+  // Counts only active projects. Completed and proposed projects are excluded because this dashboard card represents ongoing work only.
+  const ongoingProjectCount = useMemo(
+    () => projects.filter((project) => isOngoingProjectStatus(project.status)).length,
+    [projects]
+  );
 
   // RBAC: Filtered FAB Actions 
   const perms = useMemo(() => getPermissions(user.role), [user.role]);
@@ -587,7 +592,7 @@ export default function HomeScreen({
                     {loadingProjects && projects.length === 0 ? (
                       <SkeletonBox width={42} height={34} borderRadius={10} />
                     ) : (
-                      <Text className="text-3xl font-bold" style={{ color: theme.warning }}>{projects.length}</Text>
+                      <Text className="text-3xl font-bold" style={{ color: theme.warning }}>{ongoingProjectCount}</Text>
                     )}
                   </View>
                 )}
