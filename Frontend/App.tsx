@@ -512,7 +512,12 @@ function AppContent() {
   if (user) {
     return (
       <SafeAreaProvider>
-        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
+        <SystemBars
+          backgroundColor={theme.background}
+          navigationBarColor="#FFFFFF"
+          navigationBarStyle="dark"
+          style={isDark ? 'light' : 'dark'}
+        />
         <HomeScreen
           user={user}
           onLogout={handleLogout}

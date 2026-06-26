@@ -655,7 +655,12 @@ export default function InventoryScreen({
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
+      <SystemBars
+        backgroundColor={theme.background}
+        navigationBarColor={showBottomNav ? '#FFFFFF' : theme.background}
+        navigationBarStyle={showBottomNav ? 'dark' : undefined}
+        style={isDark ? 'light' : 'dark'}
+      />
       <View
         className="flex-row items-center pb-3"
         style={[screenContentStyle, { paddingTop: headerTopPadding }]}>
