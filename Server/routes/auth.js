@@ -144,13 +144,19 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
   try {
-    const result = await pool.query('SELECT * FROM "public"."users" WHERE email = $1', [email]);
+    const normalizedEmail = normalizeEmail(email);
+    const result = await pool.query('SELECT * FROM "public"."users" WHERE LOWER(email) = LOWER($1)', [normalizedEmail]);
 
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'No account found with that email.' });
     }
     const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password);
+    const passwordHash = user.password || user.password_hash;
+    if (!passwordHash) {
+      return res.status(401).json({ error: 'Password login is not available for this account. Please use the registered app credentials.' });
+    }
+
+    const valid = await bcrypt.compare(password, passwordHash);
     if (!valid) {
       return res.status(401).json({ error: 'Incorrect password.' });
     }

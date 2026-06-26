@@ -657,8 +657,8 @@ export default function InventoryScreen({
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
       <SystemBars
         backgroundColor={theme.background}
-        navigationBarColor={showBottomNav ? '#FFFFFF' : theme.background}
-        navigationBarStyle={showBottomNav ? 'dark' : undefined}
+        navigationBarColor={showBottomNav ? theme.tabBar : theme.background}
+        navigationBarStyle={showBottomNav ? (isDark ? 'light' : 'dark') : undefined}
         style={isDark ? 'light' : 'dark'}
       />
       <View

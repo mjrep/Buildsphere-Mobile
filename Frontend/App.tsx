@@ -514,8 +514,8 @@ function AppContent() {
       <SafeAreaProvider>
         <SystemBars
           backgroundColor={theme.background}
-          navigationBarColor="#FFFFFF"
-          navigationBarStyle="dark"
+          navigationBarColor={theme.tabBar}
+          navigationBarStyle={isDark ? 'light' : 'dark'}
           style={isDark ? 'light' : 'dark'}
         />
         <HomeScreen

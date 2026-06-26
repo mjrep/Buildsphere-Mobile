@@ -37,7 +37,7 @@ export function getServerConnectionErrorMessage(error?: unknown) {
   }
 }
 
-export async function checkApiHealth(timeoutMs = 5000) {
+export async function checkApiHealth(timeoutMs = 15000) {
   if (!API_URL) return false;
 
   const controller = new AbortController();

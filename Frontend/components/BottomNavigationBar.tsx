@@ -52,8 +52,12 @@ export default function BottomNavigationBar({
   onTabPress,
   unreadCount = 0,
 }: BottomNavigationBarProps) {
-  const { theme } = useAppTheme();
+  const { isDark, theme } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const navBackground = theme.tabBar;
+  const activeColor = isDark ? '#A78BFA' : theme.primary;
+  const inactiveColor = isDark ? '#9CA3AF' : '#8F9098';
+  const borderColor = isDark ? theme.border : 'rgba(30,30,30,0.08)';
 
   return (
     <View
@@ -65,12 +69,12 @@ export default function BottomNavigationBar({
         height: getBottomNavHeight(insets.bottom),
         paddingBottom: insets.bottom,
         paddingHorizontal: 0,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: navBackground,
         borderTopWidth: 1,
-        borderTopColor: theme.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(30,30,30,0.08)',
+        borderTopColor: borderColor,
         shadowColor: '#000000',
         shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.08,
+        shadowOpacity: isDark ? 0.22 : 0.08,
         shadowRadius: 8,
         elevation: 10,
         zIndex: 50,
@@ -95,7 +99,7 @@ export default function BottomNavigationBar({
                 <Ionicons
                   name={item.icon}
                   size={25}
-                  color={isActive ? theme.primary : '#9A9AA3'}
+                  color={isActive ? activeColor : inactiveColor}
                 />
                 {item.key === 'notifications' && unreadCount > 0 && (
                   <View
@@ -108,7 +112,7 @@ export default function BottomNavigationBar({
                       paddingHorizontal: 3,
                       backgroundColor: '#FF6B6B',
                       borderWidth: 1.5,
-                      borderColor: '#FFFFFF',
+                      borderColor: navBackground,
                     }}>
                     <Text className="text-[9px] font-bold leading-[11px] text-white">
                       {unreadCount > 9 ? '9+' : unreadCount}
@@ -121,7 +125,7 @@ export default function BottomNavigationBar({
                 numberOfLines={1}
                 adjustsFontSizeToFit
                 minimumFontScale={0.76}
-                style={{ color: isActive ? theme.primary : '#8F9098' }}>
+                style={{ color: isActive ? activeColor : inactiveColor }}>
                 {item.label}
               </Text>
             </View>
