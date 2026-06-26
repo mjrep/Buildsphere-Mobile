@@ -202,7 +202,7 @@ export default function TaskDetailScreen({
         {/* Header */}
         <View
           className="flex-row items-center pb-4"
-          style={[screenContentStyle, { paddingTop: Math.max(insets.top + 12, 56) }]}>
+          style={[screenContentStyle, { paddingTop: insets.top + 16 }]}>
           <TouchableOpacity onPress={onClose} className="mr-3 -ml-2">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>

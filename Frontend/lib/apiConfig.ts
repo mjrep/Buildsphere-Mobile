@@ -7,7 +7,7 @@ const LOCAL_API_URL_PATTERN =
 
 const TEMPORARY_TUNNEL_URL_PATTERN = /trycloudflare\.com|loca\.lt|ngrok-free\.app|ngrok\.io/i;
 const PLACEHOLDER_API_URL_PATTERN = /YOUR_PUBLIC_BACKEND_URL|DEPLOYED_BACKEND_URL|your-buildsphere-api|YOUR_LAN_IP/i;
-const DEPLOYED_API_URL = 'https://buildsphere-mobile-server.onrender.com';
+const DEPLOYED_API_URL = 'https://buildsphere-api-b0gk.onrender.com';
 const ALLOW_LOCAL_API_URL = process.env.EXPO_PUBLIC_ALLOW_LOCAL_API === 'true';
 
 const isDevelopmentRuntime = () =>

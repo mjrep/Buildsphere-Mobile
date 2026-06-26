@@ -12,7 +12,6 @@ const {
   normalizeRole,
 } = require('../rbac');
 
-// ── Phase 2 Constants ───────────────────────────────────────────────────
 const VALID_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE', 'ADJUSTMENT'];
 
 let inventorySchemaReady = false;
@@ -24,6 +23,12 @@ function parseNumeric(value, fallback = 0) {
       ? value
       : Number(String(value).replace(/[^0-9.-]/g, ''));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseStrictNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(String(value).trim());
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parsePositiveInteger(value) {
@@ -60,10 +65,16 @@ function mapInventoryLog(row) {
 
 async function ensureInventoryColumns() {
   if (inventorySchemaReady) return;
+
   await pool.query(`
     ALTER TABLE project_inventory_items
       ADD COLUMN IF NOT EXISTS unit VARCHAR(30) DEFAULT 'pcs'
   `);
+  await pool.query(`
+    ALTER TABLE project_inventory_logs
+      ADD COLUMN IF NOT EXISTS reference_task_id INTEGER
+  `);
+
   inventorySchemaReady = true;
 }
 
@@ -90,19 +101,23 @@ function getActorId(req) {
   );
 }
 
+function canViewAllInventoryProjects(role) {
+  return ['ceo', 'coo', 'accounting', 'procurement'].includes(normalizeRole(role));
+}
+
 function rejectInventoryAccess(res, accessLevel) {
   if (accessLevel === 'VIEW_ONLY') {
-    res.status(403).json({ message: VIEW_ONLY_INVENTORY_MESSAGE });
+    res.status(403).json({ success: false, message: VIEW_ONLY_INVENTORY_MESSAGE });
     return true;
   }
 
   if (accessLevel === 'CAN_CONSUME') {
-    res.status(403).json({ message: USAGE_ONLY_INVENTORY_MESSAGE });
+    res.status(403).json({ success: false, message: USAGE_ONLY_INVENTORY_MESSAGE });
     return true;
   }
 
   if (accessLevel === 'NO_ACCESS') {
-    res.status(403).json({ message: NO_INVENTORY_ACCESS_MESSAGE });
+    res.status(403).json({ success: false, message: NO_INVENTORY_ACCESS_MESSAGE });
     return true;
   }
 
@@ -117,10 +132,6 @@ async function getActorInventoryAccess(userId) {
   };
 }
 
-function canViewAllInventoryProjects(role) {
-  return ['ceo', 'coo', 'accounting', 'procurement'].includes(normalizeRole(role));
-}
-
 async function canAccessProjectInventory(userId, role, projectId) {
   const parsedUserId = Number(userId);
   const parsedProjectId = Number(projectId);
@@ -128,29 +139,54 @@ async function canAccessProjectInventory(userId, role, projectId) {
   if (canViewAllInventoryProjects(role)) return true;
   if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) return false;
 
-  const result = await pool.query(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM projects p
-       WHERE p.id = $1
-         AND p.project_in_charge_id = $2
-     ) OR EXISTS (
-       SELECT 1
-       FROM tasks t
-       WHERE t.project_id = $1
-         AND (t.assigned_to = $2 OR t.assigned_by = $2 OR t.created_by = $2)
-         AND (t.deleted_at IS NULL OR t.deleted_at IS NOT DISTINCT FROM NULL)
-     ) AS allowed`,
-    [parsedProjectId, parsedUserId]
-  );
+  try {
+    const result = await pool.query(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM projects p
+         WHERE p.id = $1
+           AND p.project_in_charge_id = $2
+      ) OR EXISTS (
+         SELECT 1
+         FROM project_user pu
+         WHERE pu.project_id = $1
+           AND pu.user_id = $2
+      ) OR EXISTS (
+         SELECT 1
+         FROM tasks t
+         WHERE t.project_id = $1
+           AND (t.assigned_to = $2 OR t.assigned_by = $2 OR t.created_by = $2)
+      ) AS allowed`,
+      [parsedProjectId, parsedUserId]
+    );
 
-  return Boolean(result.rows[0]?.allowed);
+    return Boolean(result.rows[0]?.allowed);
+  } catch (error) {
+    if (error.code !== '42P01') throw error;
+
+    const fallbackResult = await pool.query(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM projects p
+         WHERE p.id = $1
+           AND p.project_in_charge_id = $2
+      ) OR EXISTS (
+         SELECT 1
+         FROM tasks t
+         WHERE t.project_id = $1
+           AND (t.assigned_to = $2 OR t.assigned_by = $2 OR t.created_by = $2)
+      ) AS allowed`,
+      [parsedProjectId, parsedUserId]
+    );
+
+    return Boolean(fallbackResult.rows[0]?.allowed);
+  }
 }
 
 async function rejectInventoryProjectAccess(req, res, projectId, context) {
   const actorId = getActorId(req);
   if (await canAccessProjectInventory(actorId, context.role, projectId)) return false;
-  res.status(403).json({ message: NO_INVENTORY_ACCESS_MESSAGE });
+  res.status(403).json({ success: false, message: NO_INVENTORY_ACCESS_MESSAGE });
   return true;
 }
 
@@ -159,7 +195,7 @@ async function rejectInventoryRead(req, res) {
   const context = await getActorInventoryAccess(actorId);
   const { projectId } = req.query;
   if (context.accessLevel === 'NO_ACCESS') {
-    res.status(403).json({ message: NO_INVENTORY_ACCESS_MESSAGE });
+    res.status(403).json({ success: false, message: NO_INVENTORY_ACCESS_MESSAGE });
     return true;
   }
   return rejectInventoryProjectAccess(req, res, projectId, context);
@@ -173,19 +209,35 @@ async function rejectInventoryWrite(req, res, options = {}) {
   return rejected ? null : context;
 }
 
+async function logInventoryActivitySafe(details) {
+  try {
+    await logProjectActivity(pool, details);
+  } catch (error) {
+    console.warn('INVENTORY_ACTIVITY_LOG_WARNING:', error.message || error);
+  }
+}
+
+async function sendInventoryNotificationSafe(userId, title, body, data) {
+  try {
+    await sendPushNotificationToUser(userId, title, body, data);
+  } catch (error) {
+    console.warn('INVENTORY_NOTIFICATION_WARNING:', error.message || error);
+  }
+}
+
 router.use(authenticateRequest);
 
-// GET /inventory?projectId=1&userId=1
 router.get('/', async (req, res) => {
   const { projectId } = req.query;
   try {
     const parsedProjectId = parsePositiveInteger(projectId);
     if (!parsedProjectId) {
-      return res.status(400).json({ message: 'A valid projectId is required.' });
+      return res.status(400).json({ success: false, message: 'A valid projectId is required.' });
     }
 
     if (await rejectInventoryRead(req, res)) return;
     await ensureInventoryColumns();
+
     const result = await pool.query(
       `SELECT id, project_id, item_name, category, current_stock AS quantity, critical_level, price, unit, created_at, updated_at
        FROM project_inventory_items
@@ -196,21 +248,21 @@ router.get('/', async (req, res) => {
     res.json(result.rows.map(mapInventoryItem));
   } catch (err) {
     console.error('Fetch GET error:', err);
-    res.status(500).json({ error: 'Failed to fetch inventory.' });
+    res.status(500).json({ success: false, message: 'Failed to fetch inventory.' });
   }
 });
 
-// GET /inventory/logs?projectId=1&userId=1&search=&actionType=
 router.get('/logs', async (req, res) => {
   const { projectId, search = '', actionType = 'all' } = req.query;
   try {
     const parsedProjectId = parsePositiveInteger(projectId);
     if (!parsedProjectId) {
-      return res.status(400).json({ message: 'A valid projectId is required.' });
+      return res.status(400).json({ success: false, message: 'A valid projectId is required.' });
     }
 
     if (await rejectInventoryRead(req, res)) return;
     await ensureInventoryColumns();
+
     const params = [parsedProjectId];
     let where = 'WHERE i.project_id = $1';
 
@@ -255,104 +307,106 @@ router.get('/logs', async (req, res) => {
     res.json(result.rows.map(mapInventoryLog));
   } catch (err) {
     console.error('Fetch logs error:', err);
-    res.status(500).json({ error: 'Failed to fetch inventory logs.' });
+    res.status(500).json({ success: false, message: 'Failed to fetch inventory logs.' });
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════
-// POST /inventory/:itemId/transaction  — Phase 2 Ledger Transaction
-// ═════════════════════════════════════════════════════════════════════════
-// This is the ONLY way to modify stock levels.
-// The DB trigger `trg_update_inventory_stock` handles current_stock updates.
-// ═════════════════════════════════════════════════════════════════════════
 router.post('/:itemId/transaction', async (req, res) => {
   const { itemId } = req.params;
-  const { action_type, quantity, reference_task_id, notes } = req.body;
-  const actorId = req.user.id;
+  const { action_type, actionType, quantity, qty, reference_task_id, referenceTaskId, notes } = req.body;
   const parsedItemId = parsePositiveInteger(itemId);
+  const actionTypeValue = String(action_type || actionType || '').trim().toUpperCase();
+  const taskId = reference_task_id || referenceTaskId || null;
+  const actorId = req.user.id;
 
   if (!parsedItemId) {
-    return res.status(400).json({ message: 'A valid inventory item id is required.' });
+    return res.status(400).json({ success: false, message: 'A valid inventory item id is required.' });
   }
 
-  // ── Validate action_type ──
-  if (!action_type || !VALID_ACTION_TYPES.includes(action_type)) {
+  if (!VALID_ACTION_TYPES.includes(actionTypeValue)) {
     return res.status(400).json({
-      error: `Invalid action_type. Must be one of: ${VALID_ACTION_TYPES.join(', ')}`,
+      success: false,
+      message: `Invalid action type. Must be one of: ${VALID_ACTION_TYPES.join(', ')}.`,
     });
   }
 
-  // ── Validate quantity ──
   const inventoryContext = await rejectInventoryWrite(req, res, {
-    allowConsumptionLog: action_type === 'CONSUMPTION',
+    allowConsumptionLog: actionTypeValue === 'CONSUMPTION',
   });
   if (!inventoryContext) return;
 
-  const numQty = parseNumeric(quantity);
-  if (!numQty || numQty <= 0) {
-    return res.status(400).json({ error: 'quantity must be a positive number.' });
-  }
-
-  // ── Enforce task-linking for CONSUMPTION ──
-  if (action_type === 'CONSUMPTION' && !reference_task_id) {
-    return res.status(400).json({
-      error: 'reference_task_id is REQUIRED when action_type is CONSUMPTION.',
-    });
+  const numQty = parseStrictNumber(quantity ?? qty);
+  if (numQty === null || numQty <= 0) {
+    return res.status(400).json({ success: false, message: 'Quantity must be a positive number.' });
   }
 
   try {
-    // Verify item exists
+    await ensureInventoryColumns();
+
     const itemCheck = await pool.query(
       'SELECT id, item_name, project_id, current_stock, critical_level FROM project_inventory_items WHERE id = $1',
       [parsedItemId]
     );
     if (itemCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Inventory item not found.' });
+      return res.status(404).json({ success: false, message: 'Inventory item not found.' });
     }
+
     const item = itemCheck.rows[0];
     if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
 
-    // Insert the transaction log — the DB trigger handles stock update
     const logResult = await pool.query(
       `INSERT INTO project_inventory_logs (item_id, action_type, quantity, reference_task_id, notes, created_by, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING *`,
-      [parsedItemId, action_type, numQty, reference_task_id || null, notes || null, actorId]
+      [parsedItemId, actionTypeValue, numQty, taskId || null, notes || null, actorId]
     );
 
-    // Refetch updated item to get the new stock level (updated by trigger)
-    const updatedItem = await pool.query(
-      'SELECT id, item_name, current_stock AS quantity, critical_level, unit FROM project_inventory_items WHERE id = $1',
+    const stockDelta = ['RECEIVING', 'ADJUSTMENT'].includes(actionTypeValue) ? numQty : -numQty;
+    let updatedItem = await pool.query(
+      'SELECT id, item_name, current_stock, current_stock AS quantity, critical_level, unit FROM project_inventory_items WHERE id = $1',
       [parsedItemId]
     );
+    const previousStock = parseNumeric(item.current_stock);
+    const currentStock = parseNumeric(updatedItem.rows[0]?.current_stock);
+
+    if (currentStock === previousStock) {
+      updatedItem = await pool.query(
+        `UPDATE project_inventory_items
+         SET current_stock = current_stock + $1,
+             updated_at = NOW()
+         WHERE id = $2
+         RETURNING id, item_name, current_stock, current_stock AS quantity, critical_level, unit`,
+        [stockDelta, parsedItemId]
+      );
+    }
+
     const refreshedItem = mapInventoryItem(updatedItem.rows[0]);
-    await logProjectActivity(pool, {
+    await logInventoryActivitySafe({
       projectId: item.project_id,
       userId: actorId,
       action: 'inventory_transaction_saved',
-      description: `${action_type} recorded for ${item.item_name}.`,
+      description: `${actionTypeValue} recorded for ${item.item_name}.`,
       metadata: {
         inventory_item_id: parsedItemId,
-        action_type,
+        action_type: actionTypeValue,
         quantity: numQty,
-        reference_task_id: reference_task_id || null,
+        reference_task_id: taskId || null,
       },
     });
 
-    // ── Low Stock Alert ──
     if (refreshedItem && Number(refreshedItem.quantity) <= Number(refreshedItem.critical_level)) {
-      const projectRes = await pool.query(
-        'SELECT project_in_charge_id, project_name FROM projects WHERE id = $1',
-        [item.project_id]
-      );
-      if (projectRes.rows.length > 0) {
-        const proj = projectRes.rows[0];
-        if (proj.project_in_charge_id) {
-          // Phase 2: Use sendPushNotificationToUser (handles both Push and DB persistence)
-          await sendPushNotificationToUser(
-            proj.project_in_charge_id,
+      try {
+        const projectRes = await pool.query(
+          'SELECT project_in_charge_id, project_name FROM projects WHERE id = $1',
+          [item.project_id]
+        );
+        const project = projectRes.rows[0];
+
+        if (project?.project_in_charge_id) {
+          await sendInventoryNotificationSafe(
+            project.project_in_charge_id,
             'Low Stock Alert',
-            `Item '${item.item_name}' in ${proj.project_name || 'Project'} is at ${refreshedItem.quantity} ${refreshedItem.unit || 'pcs'} (critical: ${refreshedItem.critical_level}).`,
+            `Item '${item.item_name}' in ${project.project_name || 'Project'} is at ${refreshedItem.quantity} ${refreshedItem.unit || 'pcs'} (critical: ${refreshedItem.critical_level}).`,
             {
               type: 'inventory_low_stock',
               reference_type: 'inventory',
@@ -363,7 +417,7 @@ router.post('/:itemId/transaction', async (req, res) => {
               item_id: String(parsedItemId),
             }
           );
-          await logProjectActivity(pool, {
+          await logInventoryActivitySafe({
             projectId: item.project_id,
             userId: actorId,
             action: 'low_stock_alert_generated',
@@ -375,67 +429,112 @@ router.post('/:itemId/transaction', async (req, res) => {
             },
           });
         }
+      } catch (error) {
+        console.warn('INVENTORY_LOW_STOCK_WARNING:', error.message || error);
       }
     }
 
     res.status(201).json({
-      transaction: logResult.rows[0],
+      success: true,
+      message: 'Inventory log saved successfully.',
+      transaction: mapInventoryLog(logResult.rows[0]),
       item: refreshedItem,
     });
   } catch (err) {
     console.error('Transaction error:', err);
-    res.status(500).json({ message: 'Failed to process inventory transaction.' });
+    res.status(500).json({ success: false, message: 'Failed to process inventory transaction.' });
   }
 });
 
-// POST /inventory  — Add new inventory item (unchanged, still allowed)
 router.post('/', async (req, res) => {
-  const { projectId, itemName, category, quantity, criticalLevel, price, unit } = req.body;
+  const {
+    projectId,
+    project_id,
+    itemName,
+    item_name,
+    name,
+    title,
+    category,
+    quantity,
+    stock,
+    current_stock,
+    criticalLevel,
+    critical_level,
+    minimumStock,
+    minimum_stock,
+    min_stock,
+    price,
+    unit_price,
+    unit,
+  } = req.body;
   const actorId = req.user.id;
-  const parsedProjectId = parsePositiveInteger(projectId);
+  const parsedProjectId = parsePositiveInteger(projectId ?? project_id);
+  const normalizedName = String(itemName ?? item_name ?? name ?? title ?? '').trim();
+  const normalizedCategory = String(category || '').trim();
 
   if (!parsedProjectId) {
-    return res.status(400).json({ message: 'A valid projectId is required.' });
+    return res.status(400).json({ success: false, message: 'Please select a project before adding an inventory item.' });
   }
 
-  if (!String(itemName || '').trim()) {
-    return res.status(400).json({ message: 'Item name is required.' });
+  if (!normalizedName) {
+    return res.status(400).json({ success: false, message: 'Item name is required.' });
+  }
+
+  if (!normalizedCategory) {
+    return res.status(400).json({ success: false, message: 'Category is required.' });
   }
 
   const inventoryContext = await rejectInventoryWrite(req, res);
   if (!inventoryContext) return;
   if (await rejectInventoryProjectAccess(req, res, parsedProjectId, inventoryContext)) return;
 
-  
-  // Parse numbers from strings (e.g. "P100 per bag" -> 100)
-  const numQty = parseNumeric(quantity);
-  const numCrit = parseNumeric(criticalLevel);
-  const numPrice = parseNumeric(price);
+  const numQty = parseStrictNumber(quantity ?? stock ?? current_stock ?? 0);
+  const numCrit = parseStrictNumber(criticalLevel ?? critical_level ?? minimumStock ?? minimum_stock ?? min_stock);
+  const numPrice = parseStrictNumber(price ?? unit_price);
 
-  if (numQty <= 0) {
-    return res.status(400).json({ message: 'Quantity must be greater than 0.' });
+  if (numQty === null) {
+    return res.status(400).json({ success: false, message: 'Quantity must be a valid number.' });
   }
 
-  if (numCrit < 0 || numPrice < 0) {
-    return res.status(400).json({ message: 'Critical level and price cannot be negative.' });
+  if (numCrit === null) {
+    return res.status(400).json({ success: false, message: 'Minimum stock must be a valid number.' });
+  }
+
+  if (numPrice === null) {
+    return res.status(400).json({ success: false, message: 'Price must be a valid number.' });
+  }
+
+  if (numQty < 0) {
+    return res.status(400).json({ success: false, message: 'Quantity cannot be negative.' });
+  }
+
+  if (numCrit < 0) {
+    return res.status(400).json({ success: false, message: 'Minimum stock cannot be negative.' });
+  }
+
+  if (numPrice < 0) {
+    return res.status(400).json({ success: false, message: 'Price cannot be negative.' });
   }
 
   try {
     await ensureInventoryColumns();
+
     const result = await pool.query(
       `INSERT INTO project_inventory_items (project_id, item_name, category, current_stock, critical_level, price, unit, created_by, updated_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *, current_stock AS quantity`,
-      [parsedProjectId, itemName.trim(), category, numQty, numCrit, numPrice, unit || 'pcs', actorId]
+      [parsedProjectId, normalizedName, normalizedCategory, numQty, numCrit, numPrice, unit || 'pcs', actorId]
     );
     const item = mapInventoryItem(result.rows[0]);
 
-    // Log the initial stock as a RECEIVING transaction
-    await pool.query(
-      `INSERT INTO project_inventory_logs (item_id, action_type, quantity, notes, created_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())`,
-      [item.id, 'RECEIVING', numQty, 'Initial stock - item added via mobile inventory.', actorId]
-    );
-    await logProjectActivity(pool, {
+    if (numQty > 0) {
+      await pool.query(
+        `INSERT INTO project_inventory_logs (item_id, action_type, quantity, notes, created_by, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [item.id, 'RECEIVING', numQty, 'Initial stock - item added via mobile inventory.', actorId]
+      );
+    }
+
+    await logInventoryActivitySafe({
       projectId: parsedProjectId,
       userId: actorId,
       action: 'inventory_item_added',
@@ -446,87 +545,100 @@ router.post('/', async (req, res) => {
         critical_level: numCrit,
       },
     });
-    res.json(item);
+
+    res.status(201).json({
+      success: true,
+      item,
+      message: 'Item added successfully.',
+    });
   } catch (err) {
     console.error('Fetch POST error:', err);
-    res.status(500).json({ error: 'Failed to add item.' });
+    res.status(500).json({ success: false, message: 'Unable to add item. Please try again.' });
   }
 });
 
-// PATCH /inventory/:id  — Update item metadata ONLY (name, category, etc.)
-// NOTE: Stock quantity updates are NO LONGER allowed here. Use POST /:itemId/transaction.
+async function rejectInventoryMetadataMutation(req, res) {
+  const inventoryContext = await rejectInventoryWrite(req, res);
+  if (!inventoryContext) return true;
+
+  const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
+  const item = itemResult.rows[0];
+  if (!item) {
+    res.status(404).json({ success: false, message: 'Inventory item not found.' });
+    return true;
+  }
+
+  return rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext);
+}
+
 router.patch('/:id', async (req, res) => {
   try {
-    const inventoryContext = await rejectInventoryWrite(req, res);
-    if (!inventoryContext) return;
-
-    const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
-    const item = itemResult.rows[0];
-    if (!item) return res.status(404).json({ error: 'Inventory item not found.' });
-    if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
+    if (await rejectInventoryMetadataMutation(req, res)) return;
 
     res.status(405).json({
-      error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
+      success: false,
+      message: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
     });
   } catch (err) {
     console.error('Inventory PATCH error:', err);
-    res.status(500).json({ error: 'Failed to update inventory item.' });
+    res.status(500).json({ success: false, message: 'Failed to update inventory item.' });
   }
 });
 
 router.put('/:id', async (req, res) => {
   try {
-    const inventoryContext = await rejectInventoryWrite(req, res);
-    if (!inventoryContext) return;
-
-    const itemResult = await pool.query('SELECT project_id FROM project_inventory_items WHERE id = $1', [req.params.id]);
-    const item = itemResult.rows[0];
-    if (!item) return res.status(404).json({ error: 'Inventory item not found.' });
-    if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
+    if (await rejectInventoryMetadataMutation(req, res)) return;
 
     res.status(405).json({
-      error: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
+      success: false,
+      message: 'Inventory items cannot be edited after saving. Add a new item or record an inventory log instead.',
     });
   } catch (err) {
     console.error('Inventory PUT error:', err);
-    res.status(500).json({ error: 'Failed to update inventory item.' });
+    res.status(500).json({ success: false, message: 'Failed to update inventory item.' });
   }
 });
 
-// DELETE /inventory/:id
 router.delete('/:id', async (req, res) => {
   const actorId = req.user.id;
   const inventoryContext = await rejectInventoryWrite(req, res);
   if (!inventoryContext) return;
 
   try {
+    await ensureInventoryColumns();
+
     const itemResult = await pool.query('SELECT id, project_id, current_stock FROM project_inventory_items WHERE id = $1', [req.params.id]);
     const item = itemResult.rows[0];
 
     if (item) {
       if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
-      await pool.query(
-        `INSERT INTO project_inventory_logs (item_id, action_type, quantity, notes, created_by, created_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())`,
-        [item.id, 'ADJUSTMENT', item.current_stock || 0, 'Item deleted from inventory.', actorId]
-      );
-      await logProjectActivity(pool, {
+      const deletedQuantity = parseNumeric(item.current_stock);
+
+      if (deletedQuantity > 0) {
+        await pool.query(
+          `INSERT INTO project_inventory_logs (item_id, action_type, quantity, notes, created_by, created_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())`,
+          [item.id, 'ADJUSTMENT', deletedQuantity, 'Item deleted from inventory.', actorId]
+        );
+      }
+
+      await logInventoryActivitySafe({
         projectId: item.project_id,
         userId: actorId,
         action: 'inventory_item_deleted',
         description: 'Inventory item was deleted.',
         metadata: {
           inventory_item_id: item.id,
-          quantity: item.current_stock || 0,
+          quantity: deletedQuantity,
         },
       });
     }
 
-    await pool.query('DELETE FROM project_inventory_items WHERE id=$1', [req.params.id]);
-    res.json({ success: true });
+    await pool.query('DELETE FROM project_inventory_items WHERE id = $1', [req.params.id]);
+    res.json({ success: true, message: 'Inventory item deleted.' });
   } catch (err) {
     console.error('Fetch DELETE error:', err);
-    res.status(500).json({ error: 'Failed to delete item.' });
+    res.status(500).json({ success: false, message: 'Failed to delete item.' });
   }
 });
 

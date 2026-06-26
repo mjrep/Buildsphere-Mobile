@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Text, TouchableOpacity, useWindowDimensions, View, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { floatingNavShadow } from '../constants/theme';
@@ -33,8 +33,8 @@ export default function BottomNavigationBar({
   unreadCount = 0,
 }: BottomNavigationBarProps) {
   const { theme } = useAppTheme();
-  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const visibleItems = NAV_ITEMS.filter((item) => canViewHome || item.key !== 'home');
   const navWidth = centeredWidth(width, NAV_CONTENT_MAX_WIDTH);
 
@@ -43,7 +43,7 @@ export default function BottomNavigationBar({
       className="absolute h-[70px] flex-row items-center justify-between rounded-[30px] px-4"
       style={{
         left: Math.max((width - navWidth) / 2, 16),
-        bottom: Math.max(insets.bottom + 4, 22),
+        bottom: Platform.OS === 'ios' ? Math.max(insets.bottom, 2) : Math.max(insets.bottom, 8),
         width: navWidth,
         backgroundColor: theme.tabBar,
         ...floatingNavShadow,

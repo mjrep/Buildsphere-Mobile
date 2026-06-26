@@ -1,5 +1,6 @@
 import { API_URL, apiFetch } from './api';
 import { qaDebug } from '../utils/qaDebug';
+import { Platform } from 'react-native';
 
 const withRetry = async <T>(fn: () => Promise<T>, retries = 2, delay = 2000): Promise<T> => {
   try {
@@ -55,6 +56,49 @@ interface BackendGlassAnalysisResponse {
   uncertain_detections: UncertainDetection[];
 }
 
+const getGlassAnalysisBaseUrls = () => {
+  const urls = [API_URL];
+
+  if (Platform.OS === 'android') {
+    const localhostUrl = API_URL.replace(
+      /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?/i,
+      (_match, port = '') => `http://127.0.0.1${port}`
+    );
+    const emulatorUrl = API_URL.replace(
+      /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?/i,
+      (_match, port = '') => `http://10.0.2.2${port}`
+    );
+
+    if (localhostUrl !== API_URL) {
+      urls.push(localhostUrl);
+    }
+
+    if (emulatorUrl !== API_URL) {
+      urls.push(emulatorUrl);
+    }
+  }
+
+  return Array.from(new Set(urls));
+};
+
+const isNetworkRequestError = (error: unknown) =>
+  error instanceof Error && /network request failed|failed to fetch|networkerror/i.test(error.message);
+
+const createGlassAnalysisFormData = (photoUri: string) => {
+  const filename = photoUri.split('/').pop() || 'photo.jpg';
+  const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
+  const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+  const formData = new FormData();
+
+  formData.append('image', {
+    uri: photoUri,
+    name: filename,
+    type: mimeType,
+  } as any);
+
+  return formData;
+};
+
 export const countGlassPanels = async (
   _base64Image: string,
   _mimeType: string,
@@ -65,45 +109,53 @@ export const countGlassPanels = async (
   }
 
   return withRetry(async () => {
-    const filename = photoUri.split('/').pop() || 'photo.jpg';
-    const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
-    const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-    const formData = new FormData();
+    const urls = getGlassAnalysisBaseUrls();
+    const failedUrls: string[] = [];
+    let lastError: any = null;
 
-    formData.append('image', {
-      uri: photoUri,
-      name: filename,
-      type: mimeType,
-    } as any);
+    for (const baseUrl of urls) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000);
+      try {
+        const response = await apiFetch(`${baseUrl}/api/ai/glass-analysis`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+          },
+          body: createGlassAnalysisFormData(photoUri),
+          signal: controller.signal,
+        });
 
-    try {
-      const response = await apiFetch(`${API_URL}/api/ai/glass-analysis`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-        },
-        body: formData,
-        signal: controller.signal,
-      });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          qaDebug('Gemini analysis failed', { status: response.status });
+          throw new Error(body?.message || `AI analysis failed (${response.status}).`);
+        }
 
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        qaDebug('Gemini analysis failed', { status: response.status });
-        throw new Error(body?.message || `AI analysis failed (${response.status}).`);
+        const result = await response.json();
+        qaDebug('Gemini analysis succeeded', {
+          status: response.status,
+          detectedCount: result?.ai_detected_count ?? result?.total_valid_panels,
+        });
+        return result;
+      } catch (error) {
+        lastError = error;
+        failedUrls.push(baseUrl);
+
+        if (!isNetworkRequestError(error) || baseUrl === urls[urls.length - 1]) {
+          break;
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      const result = await response.json();
-      qaDebug('Gemini analysis succeeded', {
-        status: response.status,
-        detectedCount: result?.ai_detected_count ?? result?.total_valid_panels,
-      });
-      return result;
-    } finally {
-      clearTimeout(timeoutId);
     }
+
+    if (isNetworkRequestError(lastError)) {
+      throw new Error(`Unable to reach BuildSphere backend for image analysis. Tried: ${failedUrls.join(', ')}`);
+    }
+
+    throw lastError;
   });
 };
 

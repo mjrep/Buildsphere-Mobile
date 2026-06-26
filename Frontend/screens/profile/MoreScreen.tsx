@@ -46,20 +46,31 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
     loadProfile();
   }, [user.id]);
 
-  const firstName = profile.firstName || '';
-  const middleName = profile.middleName || '';
-  const lastName = profile.lastName || '';
-  const suffix = profile.suffix || '';
-  const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
-
-  const photoUri = profile.profilePictureUrl
-    ? profile.profilePictureUrl.startsWith('http')
-      ? profile.profilePictureUrl
-      : `${API_URL}${profile.profilePictureUrl}`
-    : null;
-
+  const firstName = (profile.firstName || '').trim();
+  const middleName = (profile.middleName || '').trim();
+  const lastName = (profile.lastName || '').trim();
+  const suffix = (profile.suffix || '').trim();
+  const initials = `${firstName.charAt(0) || ''}${lastName.charAt(0) || ''}`.toUpperCase() || '?';
   const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ');
-  const age = calculateAgeFromDateOnly(profile.birthdate);
+
+  const getDisplayValue = (val: string | null | undefined) => {
+    if (val === null || val === undefined) return 'Not set';
+    const trimmed = val.trim();
+    return trimmed || 'Not set';
+  };
+
+  const gridItems = [
+    { icon: 'call-outline', label: 'Phone', value: getDisplayValue(profile.phoneNumber), color: '#4dabf7' },
+    { icon: 'calendar-outline', label: 'Birthdate', value: formatDateOnlyDisplay(profile.birthdate), color: '#ff922b' },
+    { icon: 'male-female-outline', label: 'Gender', value: getDisplayValue(profile.gender), color: '#f06595' },
+    { icon: 'briefcase-outline', label: 'Company Role', value: formatDisplayLabel(profile.role, 'Staff'), color: '#cc5de8' },
+    { icon: 'person-outline', label: 'First Name', value: getDisplayValue(profile.firstName), color: '#7370FF' },
+    { icon: 'person-outline', label: 'Middle Name', value: getDisplayValue(profile.middleName), color: '#9775fa' },
+    { icon: 'person-outline', label: 'Last Name', value: getDisplayValue(profile.lastName), color: '#339af0' },
+    { icon: 'ribbon-outline', label: 'Suffix', value: getDisplayValue(profile.suffix), color: '#15aabf' },
+    { icon: 'location-outline', label: 'Address', value: getDisplayValue(profile.address), color: '#51cf66' },
+    { blank: true }
+  ];
 
   if (screen === 'editInfo') {
     return (
@@ -83,38 +94,26 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
           <ProfileSkeleton />
         ) : (
           <>
-        {/* Avatar + Name */}
+        {/* Profile Header */}
         <View className="mb-10 mt-6 items-center">
-          {/* Avatar */}
-          {photoUri ? (
-            <Image
-              source={{ uri: photoUri }}
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: 40,
-                shadowColor: '#000',
-                shadowOpacity: 0.15,
-                shadowRadius: 8,
-              }}
-            />
-          ) : (
-            <View
-              className="h-20 w-20 items-center justify-center rounded-full bg-[#F0AEDE]"
-              style={{
-                shadowColor: '#F0AEDE',
-                shadowOpacity: 0.5,
-                shadowRadius: 12,
-                shadowOffset: { width: 0, height: 4 },
-                elevation: 6,
-              }}>
-              <Text className="text-[28px] font-bold text-white">{initials}</Text>
-            </View>
-          )}
+          {/* Avatar Initials Circle */}
+          <View
+            className="h-20 w-20 items-center justify-center rounded-full bg-[#F0AEDE] mb-4"
+            style={{
+              shadowColor: '#F0AEDE',
+              shadowOpacity: 0.5,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 6,
+            }}>
+            <Text className="text-[28px] font-bold text-white">{initials}</Text>
+          </View>
 
-          <Text className="mt-4 text-[20px] font-bold" style={{ color: theme.text }}>{fullName || 'Unnamed User'}</Text>
-          <Text className="mt-1 text-center text-[13px]" style={{ color: theme.textMuted }} numberOfLines={2}>{profile.email}</Text>
-          <Text className="mt-1 text-[12px]" style={{ color: theme.textSecondary }}>{formatDisplayLabel(profile.role, 'Staff')}</Text>
+          <Text className="text-[22px] font-extrabold" style={{ color: theme.text }}>{fullName || 'Unnamed User'}</Text>
+          <Text className="mt-1.5 text-center text-[14px]" style={{ color: theme.textMuted }} numberOfLines={2}>{profile.email}</Text>
+          <Text className="mt-1 text-center text-[14px] font-bold" style={{ color: theme.textSecondary }}>
+            {formatDisplayLabel(profile.role, 'Staff')}
+          </Text>
         </View>
 
         <View 
@@ -122,11 +121,31 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
           style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.04, shadowRadius: 15, elevation: 2 }}
         >
           <View className="mb-6 flex-row items-center justify-between">
-            <View>
-              <Text className="text-[16px] font-extrabold uppercase tracking-tight" style={{ color: theme.text }}>Profile Info</Text>
-              <View className="mt-1 flex-row items-center">
-                <View className={`h-1.5 w-1.5 rounded-full mr-1.5 ${normalizeDisplayKey(profile.accountStatus) === 'active' ? 'bg-[#4CAF50]' : 'bg-[#FF9800]'}`} />
-                <Text className="text-[10px] font-bold" style={{ color: theme.textMuted }}>{formatDisplayLabel(profile.accountStatus, 'Active')}</Text>
+            <View className="flex-row items-center">
+              <Text className="text-[16px] font-extrabold uppercase tracking-tight mr-3" style={{ color: theme.text }}>PROFILE INFO</Text>
+              <View className="flex-row items-center">
+                <View 
+                  className="h-2 w-2 rounded-full mr-1.5"
+                  style={{
+                    backgroundColor:
+                      normalizeDisplayKey(profile.accountStatus) === 'active' ||
+                      normalizeDisplayKey(profile.accountStatus) === 'active-account'
+                        ? theme.success
+                        : theme.warning,
+                  }}
+                />
+                <Text 
+                  className="text-[11px] font-bold uppercase"
+                  style={{
+                    color:
+                      normalizeDisplayKey(profile.accountStatus) === 'active' ||
+                      normalizeDisplayKey(profile.accountStatus) === 'active-account'
+                        ? theme.success
+                        : theme.warning,
+                  }}
+                >
+                  {formatDisplayLabel(profile.accountStatus || 'active-account', 'Active')}
+                </Text>
               </View>
             </View>
             
@@ -141,35 +160,36 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
           </View>
 
           <View className="flex-row flex-wrap">
-            {[
-              { icon: 'call-outline', label: 'Phone', value: profile.phoneNumber, color: '#4dabf7' },
-              { icon: 'calendar-outline', label: 'Birthdate', value: formatDateOnlyDisplay(profile.birthdate), color: '#ff922b' },
-              { icon: 'hourglass-outline', label: 'Age', value: age, color: '#51cf66' },
-              { icon: 'business-outline', label: 'Dept', value: profile.department, color: '#7370FF' },
-              { icon: 'briefcase-outline', label: 'Position', value: profile.position, color: '#f06595' },
-              { icon: 'location-outline', label: 'Address', value: profile.address, color: '#845ef7' },
-            ].map((item, idx) => (
-              <View key={idx} className="mb-6 w-1/2 pr-2">
-                <View className="flex-row items-center mb-1">
-                  <View className="mr-2 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: `${item.color}15` }}>
-                    <Ionicons name={item.icon as any} size={18} color={item.color} />
+            {gridItems.map((item, idx) => {
+              if ('blank' in item && item.blank) {
+                return (
+                  <View key={idx} className="mb-6 w-1/2 pr-2" />
+                );
+              }
+              return (
+                <View key={idx} className="mb-6 w-1/2 pr-2">
+                  <View className="flex-row items-center mb-1">
+                    <View className="mr-2 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: `${item.color}15` }}>
+                      <Ionicons name={item.icon as any} size={18} color={item.color} />
+                    </View>
+                    <Text className="text-[11px] font-medium" style={{ color: theme.textSecondary }}>{item.label}</Text>
                   </View>
-                  <Text className="text-[11px] font-medium" style={{ color: theme.textMuted }}>{item.label}</Text>
+                  <Text className="ml-10 text-[13px] font-bold" style={{ color: theme.text }} numberOfLines={1}>
+                    {item.value}
+                  </Text>
                 </View>
-                <Text className="ml-10 text-[13px] font-bold" style={{ color: theme.textSecondary }} numberOfLines={2}>
-                  {item.value || 'Not set'}
-                </Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
+          {/* Official Email Section */}
           <View className="mt-2 flex-row items-center border-t pt-4" style={{ borderColor: theme.border }}>
-            <View className="mr-3 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
-              <Ionicons name="mail-outline" size={16} color="#7370FF" />
+            <View className="mr-3 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: `${theme.primary}15` }}>
+              <Ionicons name="mail-outline" size={16} color={theme.primary} />
             </View>
             <View>
-              <Text className="text-[10px] font-bold uppercase tracking-wider" style={{ color: theme.textMuted }}>Official Email</Text>
-              <Text className="text-[14px] font-semibold" style={{ color: theme.text }} numberOfLines={2}>{profile.email}</Text>
+              <Text className="text-[10px] font-bold uppercase tracking-wider" style={{ color: theme.textMuted }}>OFFICIAL EMAIL</Text>
+              <Text className="text-[14px] font-semibold" style={{ color: theme.text }} numberOfLines={2}>{getDisplayValue(profile.email)}</Text>
             </View>
           </View>
         </View>

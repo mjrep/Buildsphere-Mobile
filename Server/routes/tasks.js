@@ -180,7 +180,7 @@ function validateTaskPayload(body) {
   if (!startDate) errors.start_date = 'Please select a task start date.';
   if (!dueDate) errors.due_date = 'Please select a task until date.';
   if (startDate && dueDate && dueDate < startDate) {
-    errors.due_date = 'Task until date cannot be earlier than task start date.';
+    errors.due_date = 'Due date cannot be earlier than the start date.';
   }
 
   return {
@@ -366,7 +366,28 @@ async function fetchAssignedTasks(userId) {
   );
 }
 
+let taskSchemaReady = false;
+
+async function ensureTaskColumns() {
+  if (taskSchemaReady) return;
+  await pool.query(`
+    ALTER TABLE "public"."tasks"
+      ADD COLUMN IF NOT EXISTS "shift" VARCHAR(40)
+  `);
+  taskSchemaReady = true;
+}
+
 router.use(authenticateRequest);
+
+router.use(async (req, res, next) => {
+  try {
+    await ensureTaskColumns();
+    next();
+  } catch (err) {
+    console.error('ensureTaskColumns failed:', err);
+    next();
+  }
+});
 
 // GET /tasks?userId=xxx
 router.get('/', async (req, res) => {
@@ -640,7 +661,7 @@ router.post(
         values.projectId,
         values.phaseId,
         values.milestoneId,
-        description || null,
+        description || '',
         actorId,
         values.assigneeId,
         values.priority,
@@ -860,10 +881,25 @@ router.patch('/:id', async (req, res) => {
       currentTask.assigned_to &&
       String(actorId || '') !== String(currentTask.assigned_to)
     ) {
+      const statusMap = {
+        todo: 'To Do',
+        pending: 'To Do',
+        in_progress: 'In Progress',
+        'in-progress': 'In Progress',
+        in_review: 'To Review',
+        'in-review': 'To Review',
+        to_review: 'To Review',
+        'to-review': 'To Review',
+        completed: 'Completed',
+        complete: 'Completed',
+        done: 'Completed'
+      };
+      const friendlyStatus = statusMap[String(updates.status).toLowerCase()] || updates.status;
+
       await sendPushNotificationToUser(
         currentTask.assigned_to,
         'Task Status Updated',
-        `Task "${currentTask.title}" is now ${updates.status}.`,
+        `Task "${currentTask.title}" is now ${friendlyStatus}.`,
         {
           type: 'task_updated',
           reference_type: 'task',

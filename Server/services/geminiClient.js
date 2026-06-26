@@ -14,8 +14,6 @@ function createGeminiError(message, { status = 502, retryable = false, clientMes
 function getGeminiApiKeys() {
   return [
     { key: process.env.GEMINI_API_KEY, keyIndex: 1 },
-    { key: process.env.GEMINI_API_KEY_2, keyIndex: 2 },
-    { key: process.env.GEMINI_API_KEY_3, keyIndex: 3 },
   ]
     .map((item) => ({ ...item, key: item.key?.trim() }))
     .filter((item) => Boolean(item.key));
@@ -102,8 +100,8 @@ async function fetchWithTimeout(url, options) {
   }
 }
 
-async function callGeminiWithKey({ apiKey, imageBuffer, mimeType, prompt }) {
-  const model = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+async function callGeminiWithKey({ apiKey, imageBuffer, mimeType, systemInstruction, prompt }) {
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const modelPath = model.startsWith('models/') ? model : `models/${model}`;
 
   const response = await fetchWithTimeout(
@@ -112,6 +110,9 @@ async function callGeminiWithKey({ apiKey, imageBuffer, mimeType, prompt }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: systemInstruction || prompt }],
+        },
         contents: [
           {
             role: 'user',
@@ -139,14 +140,15 @@ async function callGeminiWithKey({ apiKey, imageBuffer, mimeType, prompt }) {
     const retryable =
       RETRYABLE_GEMINI_STATUS_CODES.has(response.status) ||
       isInvalidOrExpiredApiKeyError(response.status, responseBody);
+    const debugDetails = `provider_status_${response.status}: ${responseBody.slice(0, 500)}`;
 
     throw createGeminiError(`Gemini request failed with status ${response.status}.`, {
       status: response.status >= 500 ? 502 : response.status,
       retryable,
       clientMessage: retryable
         ? 'Image analysis is temporarily unavailable. Please try again later.'
-        : 'Gemini image analysis request was rejected.',
-      debugDetails: `provider_status_${response.status}`,
+        : `Gemini image analysis request was rejected (${response.status}).`,
+      debugDetails,
     });
   }
 
@@ -172,10 +174,37 @@ async function callGeminiWithKey({ apiKey, imageBuffer, mimeType, prompt }) {
   }
 }
 
-async function analyzeGlassImage({ imageBuffer, mimeType, prompt }) {
+async function analyzeGlassImage({ imageBuffer, mimeType, prompt, userPrompt }) {
   const geminiApiKeys = getGeminiApiKeys();
 
   if (geminiApiKeys.length === 0) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('No Gemini API keys configured. Returning mock glass analysis response.');
+      return {
+        result: {
+          total_valid_panels: 6,
+          ai_detected_count: 6,
+          verified_panel_count: 6,
+          summary: 'Mock Gemini Glass Analysis: 6 glass panels detected.',
+          avg_confidence: 0.95,
+          detection_mode: 'gemini-only',
+          has_warnings: false,
+          warning_message: '',
+          panels: Array.from({ length: 6 }).map((_, i) => ({
+            id: `panel_${i + 1}`,
+            bbox: [10 + i * 20, 10 + i * 20, 50 + i * 20, 50 + i * 20],
+            visibility_percentage: 100,
+            panel_type: 'Fixed Glass Panel',
+            confidence: 0.95,
+            requires_manual_verification: false,
+          })),
+          uncertain_detections: [],
+        },
+        keyIndex: 1,
+        configuredKeyCount: 0,
+      };
+    }
+
     throw createGeminiError('Gemini API key is not configured.', {
       status: 503,
       clientMessage: 'Gemini API key is not configured.',
@@ -200,7 +229,8 @@ async function analyzeGlassImage({ imageBuffer, mimeType, prompt }) {
         apiKey: key,
         imageBuffer,
         mimeType,
-        prompt,
+        systemInstruction: prompt,
+        prompt: userPrompt || prompt,
       });
       qaDebug('Gemini analysis result', {
         success: true,

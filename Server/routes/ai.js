@@ -19,11 +19,19 @@ const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'producti
 const AI_ALLOWED_ROLES = new Set(['project_engineer', 'foreman', 'project_supervisor']);
 const AI_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AI_RATE_LIMIT_MAX_REQUESTS = 20;
+const AI_IMAGE_MAX_BYTES = 7 * 1024 * 1024;
 const aiRateLimitBuckets = new Map();
 let supabaseAuthClient = null;
 
 const promptPath = path.join(__dirname, '../glass-panel-prompt.txt');
 const readPrompt = () => fs.readFileSync(promptPath, 'utf8');
+const GLASS_ANALYSIS_USER_PROMPT = [
+  'Analyze the attached facade image according to the structural inspection protocol.',
+  '1. Perform a count of all visible glass panels.',
+  '2. Provide the detailed JSON output including classification, visibility, confidence, bounding boxes, and uncertain detections.',
+  '3. Be precise in distinguishing mechanical vents, exhaust fans, louvers, shadows, and reflections from real glass panels.',
+  '4. If there are multiple window assemblies, inspect each assembly panel-by-panel from top to bottom and left to right.',
+].join('\n');
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 function getSupabaseAuthClient() {
@@ -190,11 +198,16 @@ function normalizeGeminiResult(raw) {
   });
 
   const uncertainDetections = Array.from(uncertainById.values());
-  const rawTotal = Number(raw.total_visible_glass_panels ?? raw.count ?? panels.length) || panels.length;
+  const parsedRawTotal = Number(raw.total_visible_glass_panels ?? raw.count);
+  const rawTotal = Number.isFinite(parsedRawTotal) && parsedRawTotal >= 0
+    ? Math.round(parsedRawTotal)
+    : panels.length;
   const hasCountPanelMismatch = rawTotal !== panels.length;
   const totalVisibleGlassPanels = panels.length;
   const manualVerificationRequired =
-    Boolean(raw.manual_verification_required) || uncertainDetections.length > 0 || hasCountPanelMismatch;
+    Boolean(raw.manual_verification_required) ||
+    uncertainDetections.length > 0 ||
+    hasCountPanelMismatch;
   const baseSummary =
     raw.summary ||
     `${totalVisibleGlassPanels} visible glass panels detected. Verify any uncertain detections before saving.`;
@@ -250,10 +263,18 @@ router.post(
         return res.status(400).json({ success: false, message: 'Unsupported image type.' });
       }
 
+      if (req.file.size > AI_IMAGE_MAX_BYTES) {
+        return res.status(413).json({
+          success: false,
+          message: 'Image is too large for Gemini analysis. Please upload a smaller or clearer compressed image.',
+        });
+      }
+
       const geminiResult = await analyzeGlassImage({
         imageBuffer: req.file.buffer,
         mimeType: req.file.mimetype || 'image/jpeg',
         prompt: readPrompt(),
+        userPrompt: GLASS_ANALYSIS_USER_PROMPT,
       });
 
       const normalized = normalizeGeminiResult(geminiResult.result);

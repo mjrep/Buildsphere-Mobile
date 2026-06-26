@@ -6,20 +6,20 @@ import ForgotPasswordScreen from './screens/auth/ForgotPasswordScreen';
 import VerifyResetOtpScreen from './screens/auth/VerifyResetOtpScreen';
 import CreateNewPasswordScreen from './screens/auth/CreateNewPasswordScreen';
 import ResetPasswordScreen from './screens/auth/ResetPasswordScreen';
-import { StatusBar } from 'expo-status-bar';
 import { View, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { UserRole } from './constants/roles';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
-import { API_URL, apiFetch, getServerConnectionErrorMessage, loadStoredApiUrl } from './lib/api';
+import { API_URL, apiFetch, getServerConnectionErrorMessage, loadStoredApiUrl, addUnauthorizedListener } from './lib/api';
 import { clearInvalidSupabaseSession, isInvalidRefreshTokenError, supabase } from './lib/supabase';
 import { addNotificationListeners, registerForPushNotificationsAsync } from './lib/notifications';
 import { getDeepLinkParams, isResetPasswordUrl } from './lib/passwordRecovery';
 import { BuildSphereThemeProvider, useAppTheme } from './contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText } from './components/skeletons';
 import { qaDebug } from './utils/qaDebug';
+import SystemBars from './components/SystemBars';
 
 export interface UserInfo {
   id: number;
@@ -170,7 +170,7 @@ function AppContent() {
             await clearInvalidSupabaseSession();
             await AsyncStorage.multiRemove(['user', 'token']);
             setUser(null);
-            setAuthNotice('Your session expired. Please log in again.');
+            setAuthNotice('');
             return;
           }
           throw error;
@@ -189,8 +189,34 @@ function AppContent() {
             if (parsed.last_name && !parsed.lastName) parsed.lastName = parsed.last_name;
             if (parsed.phone_number && !parsed.phoneNumber) parsed.phoneNumber = parsed.phone_number;
             if (!parsed.role) parsed.role = 'general_staff';
-            setUser(parsed);
-            return;
+
+            try {
+              const checkUrl = parsed.id ? `${API_URL}/users/${parsed.id}` : `${API_URL}/projects`;
+              const response = await fetch(checkUrl, {
+                headers: {
+                  'Authorization': `Bearer ${storedToken}`
+                }
+              });
+
+              if (response.ok) {
+                setUser(parsed);
+                return;
+              } else if (response.status === 401 || response.status === 403) {
+                await AsyncStorage.multiRemove(['user', 'token']);
+                setUser(null);
+                setAuthNotice('');
+                return;
+              } else {
+                // Keep the session for other errors to avoid false signouts on minor API errors
+                setUser(parsed);
+                return;
+              }
+            } catch (validationError) {
+              // Keep the session on network failure to support offline state or transient backend errors
+              console.warn('Could not validate stored session against backend:', validationError);
+              setUser(parsed);
+              return;
+            }
           }
 
           await AsyncStorage.multiRemove(['user', 'token']);
@@ -215,7 +241,7 @@ function AppContent() {
           await clearInvalidSupabaseSession();
           await AsyncStorage.multiRemove(['user', 'token']);
           setUser(null);
-          setAuthNotice('Your session expired. Please log in again.');
+          setAuthNotice('');
         } else {
           console.warn('Could not restore auth session:', error);
         }
@@ -303,6 +329,16 @@ function AppContent() {
     await AsyncStorage.setItem('user', JSON.stringify(updated));
     setUser(updated);
   };
+
+  useEffect(() => {
+    const removeListener = addUnauthorizedListener(async () => {
+      await clearAppSession();
+      setAuthNotice('');
+    });
+    return () => {
+      removeListener();
+    };
+  }, [clearAppSession]);
 
   useEffect(() => {
     const cleanup = addNotificationListeners(
@@ -441,6 +477,7 @@ function AppContent() {
   if (loading) {
     return (
       <SafeAreaProvider>
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: theme.background }}>
           <View style={{ alignItems: 'center', marginBottom: 28 }}>
             <SkeletonBox width={72} height={72} borderRadius={20} />
@@ -461,7 +498,7 @@ function AppContent() {
   if (authScreen === 'reset') {
     return (
       <SafeAreaProvider>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <ResetPasswordScreen
           recoveryLoading={recoveryLoading}
           recoveryError={recoveryError}
@@ -475,7 +512,7 @@ function AppContent() {
   if (user) {
     return (
       <SafeAreaProvider>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <HomeScreen
           user={user}
           onLogout={handleLogout}
@@ -491,7 +528,7 @@ function AppContent() {
   if (authScreen === 'forgot') {
     return (
       <SafeAreaProvider>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <ForgotPasswordScreen
           onBackToLogin={handleBackToLogin}
           onOtpSent={(email) => {
@@ -508,7 +545,7 @@ function AppContent() {
   if (authScreen === 'verify-reset-otp') {
     return (
       <SafeAreaProvider>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <VerifyResetOtpScreen
           email={resetEmail}
           onBack={() => {
@@ -528,7 +565,7 @@ function AppContent() {
   if (authScreen === 'create-new-password') {
     return (
       <SafeAreaProvider>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <CreateNewPasswordScreen email={resetEmail} otp={resetOtp} onBackToLogin={handleBackToLogin} />
       </SafeAreaProvider>
     );
@@ -536,7 +573,7 @@ function AppContent() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
       <LoginScreen
         onLogin={handleLogin}
         onForgotPassword={() => setAuthScreen('forgot')}

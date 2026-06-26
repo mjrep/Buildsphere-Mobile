@@ -76,6 +76,20 @@ export async function loadStoredApiUrl() {
   return API_URL;
 }
 
+type UnauthorizedListener = () => void;
+const listeners = new Set<UnauthorizedListener>();
+
+export function addUnauthorizedListener(listener: UnauthorizedListener) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function notifyUnauthorized() {
+  listeners.forEach((listener) => listener());
+}
+
 export async function getSupabaseAccessToken() {
   const { data } = await supabase.auth.getSession();
   if (data.session?.access_token) return data.session.access_token;
@@ -104,6 +118,11 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
       status: response.status,
       authenticated: headers.has('Authorization'),
     });
+
+    if (response.status === 401) {
+      await AsyncStorage.multiRemove(['user', 'token']);
+      notifyUnauthorized();
+    }
 
     return response;
   } catch (error) {

@@ -174,6 +174,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     const taskRes = await pool.query(
       `SELECT
          t.id,
+         t.title,
          t.project_id,
          t.assigned_to,
          t.assigned_by,
@@ -248,11 +249,13 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       }
     }
 
+    const taskTitle = taskMilestone.title || 'Untitled Task';
+
     await logProjectActivity(pool, {
       projectId: parsedProjectId,
       userId: parsedUserId,
       action: 'site_progress_uploaded',
-      description: `Site progress uploaded for task #${parsedTaskId}.`,
+      description: `Site progress uploaded for task "${taskTitle}".`,
       metadata: {
         task_id: parsedTaskId,
         milestone_id: milestoneId,
@@ -270,7 +273,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       projectId: parsedProjectId,
       userId: parsedUserId,
       action: 'verified_panel_count_saved',
-      description: `Verified panel count saved as ${savedQuantity} for task #${parsedTaskId}.`,
+      description: `Verified panel count saved as ${savedQuantity} for task "${taskTitle}".`,
       metadata: {
         task_id: parsedTaskId,
         milestone_id: milestoneId,
@@ -284,7 +287,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
         projectId: parsedProjectId,
         userId: parsedUserId,
         action: 'ai_analysis_completed',
-        description: `AI analysis detected ${parseInt(ai_detected_count) || 0} glass panels for task #${parsedTaskId}.`,
+        description: `AI analysis detected ${parseInt(ai_detected_count) || 0} glass panels for task "${taskTitle}".`,
         metadata: {
           task_id: parsedTaskId,
           site_progress_id: progress.id,
@@ -297,7 +300,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     }
 
     const notifTitle = 'Task Progress Recorded';
-    const notifMessage = `Progress of ${savedQuantity} units recorded for task #${parsedTaskId}.`;
+    const notifMessage = `Progress of ${savedQuantity} units recorded for "${taskTitle}".`;
 
     // Notifications should never make a successfully saved progress upload look failed.
     try {

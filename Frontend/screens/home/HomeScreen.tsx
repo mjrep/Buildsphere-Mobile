@@ -222,8 +222,8 @@ export default function HomeScreen({
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
-  const fabBottom = Math.max(insets.bottom + 80, 100);
-  const fabMenuBottom = Math.max(insets.bottom + 130, 150);
+  const fabBottom = Math.max(insets.bottom + 75, 85);
+  const fabMenuBottom = Math.max(insets.bottom + 125, 135);
 
   // RBAC: Filtered FAB Actions 
   const perms = useMemo(() => getPermissions(user.role), [user.role]);
@@ -515,11 +515,12 @@ export default function HomeScreen({
   };
 
   // Only show FAB if current tab allows it (More tab hides it) and there are actions available for the role
-  const showFab = activeTab !== 'more' && FAB_ACTIONS.length > 0;
+  const isModalActive = showInventory || !!selectedTask || showSiteProgress || showAddTask || showInventoryProjectPicker;
+  const showFab = activeTab !== 'more' && FAB_ACTIONS.length > 0 && !isModalActive;
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <SafeAreaView className="flex-1">
+      <SafeAreaView className="flex-1" edges={['top', 'left', 'right']}>
         {activeTab === 'home' ? (
           <View className="flex-1">
             {selectedProjectId ? (
@@ -655,6 +656,15 @@ export default function HomeScreen({
           <MoreScreen user={user} onLogout={onLogout} onUserUpdated={onUserUpdated} />
         )}
 
+        <View style={{ display: isModalActive ? 'none' : 'flex' }}>
+          <BottomNavigationBar
+            activeTab={activeTab}
+            onTabPress={handleMainTabPress}
+            canViewHome={perms.canViewDashboard}
+            unreadCount={unreadCount}
+          />
+        </View>
+
         {/* FAB Action Menu */}
         {fabOpen && (
           <TouchableOpacity
@@ -664,12 +674,13 @@ export default function HomeScreen({
               fabAnim.setValue(0);
             }}
             activeOpacity={1}
+            style={{ zIndex: 10 }}
           />
         )}
 
         {/* FAB Actions (Strictly filtered by RBAC) */}
         {fabOpen && (
-          <View className="absolute right-5 items-end" style={{ bottom: fabMenuBottom }}>
+          <View className="absolute right-5 items-end" style={{ bottom: fabMenuBottom, zIndex: 11 }}>
             {FAB_ACTIONS.map((action, index) => (
               <Animated.View
                 key={action.label}
@@ -722,12 +733,13 @@ export default function HomeScreen({
             className="absolute right-5 h-14 w-14 items-center justify-center rounded-full"
             style={{
               bottom: fabBottom,
+              zIndex: 12,
               backgroundColor: theme.primary,
               shadowColor: theme.primary,
               shadowOpacity: 0.5,
               shadowRadius: 12,
               shadowOffset: { width: 0, height: 9 },
-              elevation: 8,
+              elevation: 12,
             }}>
             <Animated.View
               style={{
@@ -744,13 +756,6 @@ export default function HomeScreen({
             </Animated.View>
           </TouchableOpacity>
         )}
-
-        <BottomNavigationBar
-          activeTab={activeTab}
-          onTabPress={handleMainTabPress}
-          canViewHome={perms.canViewDashboard}
-          unreadCount={unreadCount}
-        />
       </SafeAreaView>
 
       {/* Modals */}

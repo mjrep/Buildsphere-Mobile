@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   TouchableWithoutFeedback,
   useWindowDimensions,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiFetch } from '../../lib/api';
@@ -25,6 +26,8 @@ import { centeredContent } from '../../utils/responsive';
 import { formatCurrencyPHP } from '../../utils/budget';
 import { formatDisplayLabel } from '../../utils/display';
 import { qaDebug } from '../../utils/qaDebug';
+import SuccessModal from '../../components/SuccessModal';
+import SystemBars from '../../components/SystemBars';
 
 interface InventoryItem {
   id: number;
@@ -92,15 +95,33 @@ function stockStatus(qty: number | string, critical: number | string): { label: 
   return { label: 'In Stock', bg: '#5DBF50' };
 }
 
+function normalizeCategoryName(cat: string) {
+  const c = String(cat || '').trim().toLowerCase();
+  if (c === 'equipment' || c === 'equipments') return 'equipment';
+  if (c === 'tools' || c === 'others') return 'others';
+  return c;
+}
+
+function formatCategory(cat: string) {
+  const c = String(cat || '').trim().toLowerCase();
+  if (c === 'materials') return 'Materials';
+  if (c === 'equipment' || c === 'equipments') return 'Equipment';
+  if (c === 'tools' || c === 'others') return 'Others';
+  return cat;
+}
+
 const PREDEFINED_ITEMS: Record<string, string> = {
   Cement: 'Materials',
-  'Extension Wire': 'Tools',
+  'Extension Wire': 'Others',
   'Glass Panels': 'Materials',
   'Welding Machine': 'Equipment',
 };
 
-const ACTION_LABELS: Record<string, string> = {
-  ...ACTION_TYPE_LABELS,
+const LOCAL_ACTION_LABELS: Record<string, string> = {
+  RECEIVING: 'Receiving',
+  CONSUMPTION: 'Consumption',
+  SPOILAGE: 'Defective',
+  ADJUSTMENT: 'Adjustment',
   add_item: 'Added',
   update_stock: 'Stock Updated',
   delete_item: 'Deleted',
@@ -133,7 +154,7 @@ export default function InventoryScreen({
   const canLogUsage = perms.canLogInventoryUsage && !canEdit;
   const canRecordInventoryLog = canEdit || canLogUsage;
   const canWriteInventory = canEdit || canAdd || canLogUsage;
-  const { theme } = useAppTheme();
+  const { theme, isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
@@ -148,17 +169,15 @@ export default function InventoryScreen({
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedAction, setSelectedAction] = useState('all');
-  const [dateRange, setDateRange] = useState<'all' | '7d' | '30d'>('all');
+  const [showLogTypeDropdown, setShowLogTypeDropdown] = useState(false);
 
   const [showAdd, setShowAdd] = useState(false);
-  const [showItemPicker, setShowItemPicker] = useState(false);
   const [addName, setAddName] = useState('');
   const [addCategory, setAddCategory] = useState('Materials');
-  const [addQty, setAddQty] = useState('');
   const [addCritical, setAddCritical] = useState('');
   const [addPrice, setAddPrice] = useState('');
-  const [addUnit, setAddUnit] = useState('pcs');
   const [saving, setSaving] = useState(false);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   // Transaction modal state
   const [showTransaction, setShowTransaction] = useState(false);
   const [txnItem, setTxnItem] = useState<InventoryItem | null>(null);
@@ -174,7 +193,16 @@ export default function InventoryScreen({
   const [logNotes, setLogNotes] = useState('');
   const [logTaskId, setLogTaskId] = useState('');
 
-  const categories = ['All', 'Materials', 'Equipment', 'Tools'];
+  // Success modal state
+  const [successModal, setSuccessModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttonLabel: string;
+    onPress: () => void;
+  }>({ visible: false, title: '', message: '', buttonLabel: '', onPress: () => {} });
+
+  const categories = ['All', 'Materials', 'Equipment', 'Others'];
   const actionTypes = ['all', ...MOBILE_ACTION_TYPES];
 
   const readErrorMessage = async (response: Response, fallback: string) => {
@@ -274,13 +302,11 @@ export default function InventoryScreen({
   }, [highlightItemId]);
 
   const resetAddItemForm = () => {
-    setShowItemPicker(false);
     setAddName('');
     setAddCategory('Materials');
-    setAddQty('');
     setAddCritical('');
     setAddPrice('');
-    setAddUnit('pcs');
+    setShowCategoryDropdown(false);
   };
 
   const resetTransactionForm = () => {
@@ -302,11 +328,9 @@ export default function InventoryScreen({
   const hasAddItemDraft = () =>
     Boolean(
       addName.trim() ||
-      addQty.trim() ||
       addCritical.trim() ||
       addPrice.trim() ||
-      addCategory !== 'Materials' ||
-      addUnit !== 'pcs'
+      addCategory !== 'Materials'
     );
 
   const hasTransactionDraft = () =>
@@ -379,7 +403,7 @@ export default function InventoryScreen({
       case 'SPOILAGE':
         return {
           title: 'Confirm inventory log?',
-          message: 'This will permanently reduce stock for spoilage. Inventory logs cannot be edited after saving, so please check that the item, quantity, and notes are correct.',
+          message: 'This will permanently reduce stock for defective items. Inventory logs cannot be edited after saving, so please check that the item, quantity, and notes are correct.',
         };
       default:
         return {
@@ -400,17 +424,26 @@ export default function InventoryScreen({
           projectId,
           itemName: addName,
           category: addCategory,
-          quantity: parseInventoryNumber(addQty) ?? 0,
+          quantity: 0,
           criticalLevel: parseInventoryNumber(addCritical) ?? 0,
           price: parseInventoryNumber(addPrice) ?? 0,
-          unit: addUnit,
+          unit: 'pcs',
         }),
       });
       if (!res.ok) throw new Error(await readErrorMessage(res, 'Unable to add inventory item.'));
-      Alert.alert('Success', 'Inventory item added.');
       setShowAdd(false);
       resetAddItemForm();
       await load();
+      setSuccessModal({
+        visible: true,
+        title: 'Item added!',
+        message: "Item is now visible in this project's inventory.",
+        buttonLabel: 'Back to Inventory',
+        onPress: () => {
+          setSuccessModal((prev) => ({ ...prev, visible: false }));
+          setActiveTab('items');
+        },
+      });
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Failed to add item.');
     } finally {
@@ -421,9 +454,12 @@ export default function InventoryScreen({
   const handleAdd = async () => {
     if (!ensureCanAddInventory()) return;
     if (!addName.trim()) return Alert.alert('Required', 'Item name is required.');
-    const qty = parseInventoryNumber(addQty);
-    if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
-    if (!addUnit.trim()) return Alert.alert('Required', 'Unit is required.');
+    
+    const crit = parseInventoryNumber(addCritical);
+    if (crit === null || crit < 0) return Alert.alert('Required', 'Minimum stock must be a non-negative number.');
+    
+    const price = parseInventoryNumber(addPrice);
+    if (price === null || price < 0) return Alert.alert('Required', 'Price must be a non-negative number.');
 
     Alert.alert(
       'Confirm inventory item?',
@@ -455,10 +491,19 @@ export default function InventoryScreen({
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || err.error || 'Transaction failed.');
       }
-      Alert.alert('Success', `${ACTION_TYPE_LABELS[txnAction]} recorded.`);
       setShowTransaction(false);
       resetTransactionForm();
       await load();
+      setSuccessModal({
+        visible: true,
+        title: 'Log added!',
+        message: 'Inventory log has been recorded successfully.',
+        buttonLabel: 'Back to Logs',
+        onPress: () => {
+          setSuccessModal((prev) => ({ ...prev, visible: false }));
+          setActiveTab('logs');
+        },
+      });
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Failed to record transaction.');
     } finally {
@@ -524,10 +569,19 @@ export default function InventoryScreen({
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || err.error || 'Transaction failed.');
       }
-      Alert.alert('Success', `${ACTION_TYPE_LABELS[logActionType]} recorded.`);
       setShowAddLog(false);
       resetAddLogForm();
       await load();
+      setSuccessModal({
+        visible: true,
+        title: 'Log added!',
+        message: 'Inventory log has been recorded successfully.',
+        buttonLabel: 'Back to Logs',
+        onPress: () => {
+          setSuccessModal((prev) => ({ ...prev, visible: false }));
+          setActiveTab('logs');
+        },
+      });
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Failed to create transaction.');
     } finally {
@@ -556,25 +610,18 @@ export default function InventoryScreen({
   const filteredItems = useMemo(
     () =>
       items
-        .filter((i) => selectedCategory === 'All' || i.category === selectedCategory)
+        .filter((i) => selectedCategory === 'All' || normalizeCategoryName(i.category || '') === normalizeCategoryName(selectedCategory))
         .filter((i) => i.item_name.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => Number(b.id) - Number(a.id)),
     [items, selectedCategory, search]
   );
 
   const filteredLogs = useMemo(() => {
-    const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
     return logs.filter((l) => {
       if (!search.trim()) return true;
       return l.item_name?.toLowerCase().includes(search.toLowerCase());
-    }).filter((l) => {
-      if (dateRange === 'all') return true;
-      const createdAt = new Date(l.created_at).getTime();
-      const threshold = dateRange === '7d' ? now - 7 * dayMs : now - 30 * dayMs;
-      return createdAt >= threshold;
     });
-  }, [logs, search, dateRange]);
+  }, [logs, search]);
 
   const inputStyle = {
     borderWidth: 1,
@@ -592,6 +639,7 @@ export default function InventoryScreen({
   if (!canView) {
     return (
       <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: theme.background }}>
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <Ionicons name="lock-closed-outline" size={42} color={theme.textMuted} />
         <Text className="mt-4 text-center text-[16px] font-semibold" style={{ color: theme.text }}>
           {INVENTORY_NO_ACCESS_MESSAGE}
@@ -605,6 +653,7 @@ export default function InventoryScreen({
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
+      <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
       <View
         className="flex-row items-center pb-3"
         style={[screenContentStyle, { paddingTop: headerTopPadding }]}>
@@ -622,32 +671,41 @@ export default function InventoryScreen({
             <Text className="text-[10px] font-bold" style={{ color: theme.primary }}>Usage only</Text>
           </View>
         )}
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity
+          onPress={refresh}
+          className="h-10 w-10 items-center justify-center rounded-full"
+          style={{ backgroundColor: theme.input }}
+          accessibilityLabel="Refresh"
+        >
+          <Ionicons name="refresh" size={20} color={theme.text} />
+        </TouchableOpacity>
       </View>
 
-      <View className="pb-3" style={screenContentStyle}>
-        <View className="mb-2 flex-row rounded-full border p-1" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
+      <View className="pb-2" style={screenContentStyle}>
+        <View className="mb-1.5 flex-row rounded-full border p-1" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
           <TouchableOpacity
-            className="flex-1 rounded-full py-2"
+            className="flex-1 rounded-full py-1.5"
             style={{ backgroundColor: activeTab === 'items' ? theme.primary : 'transparent' }}
             onPress={() => setActiveTab('items')}>
-            <Text className="text-center font-semibold" style={{ color: activeTab === 'items' ? '#FFFFFF' : theme.textSecondary }}>Items</Text>
+            <Text className="text-center text-[13px] font-semibold" style={{ color: activeTab === 'items' ? '#FFFFFF' : theme.textSecondary }}>Items</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            className="flex-1 rounded-full py-2"
+            className="flex-1 rounded-full py-1.5"
             style={{ backgroundColor: activeTab === 'logs' ? theme.primary : 'transparent' }}
             onPress={() => setActiveTab('logs')}>
-            <Text className="text-center font-semibold" style={{ color: activeTab === 'logs' ? '#FFFFFF' : theme.textSecondary }}>Logs</Text>
+            <Text className="text-center text-[13px] font-semibold" style={{ color: activeTab === 'logs' ? '#FFFFFF' : theme.textSecondary }}>Logs</Text>
           </TouchableOpacity>
         </View>
 
-        <View className="mb-2 flex-row items-center rounded-xl border px-3" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
-          <Ionicons name="search" size={16} color={theme.textMuted} />
+        <View className="mb-1.5 flex-row items-center rounded-xl border px-3" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
+          <Ionicons name="search" size={15} color={theme.textMuted} />
           <TextInput
             value={search}
             onChangeText={setSearch}
             placeholder={activeTab === 'items' ? 'Search item name...' : 'Search log item...'}
             placeholderTextColor={theme.textMuted}
-            className="ml-2 h-11 flex-1 text-[14px]"
+            className="ml-2 h-10 flex-1 text-[13px]"
             style={{ color: theme.text }}
           />
         </View>
@@ -665,27 +723,73 @@ export default function InventoryScreen({
             ))}
           </ScrollView>
         ) : (
-          <View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
-              {actionTypes.map((action) => (
-                <TouchableOpacity
-                  key={action}
-                  onPress={() => setSelectedAction(action)}
-                  className="mr-2 rounded-full border px-4 py-2"
-                  style={{ backgroundColor: selectedAction === action ? theme.primary : theme.surface, borderColor: selectedAction === action ? theme.primary : theme.border }}>
-                  <Text className="text-[12px] font-semibold" style={{ color: selectedAction === action ? '#FFFFFF' : theme.textSecondary }}>
-                    {action === 'all' ? 'All actions' : ACTION_LABELS[action] || action}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <View className="flex-row">
-              {(['all', '7d', '30d'] as const).map((d) => (
-                <TouchableOpacity key={d} onPress={() => setDateRange(d)} className="mr-2 rounded-lg px-3 py-1" style={{ backgroundColor: dateRange === d ? theme.primaryLight : theme.input }}>
-                  <Text className="text-[12px]" style={{ color: dateRange === d ? theme.primary : theme.textSecondary }}>{d === 'all' ? 'All time' : d === '7d' ? 'Last 7d' : 'Last 30d'}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          <View style={{ zIndex: 1000 }}>
+            <TouchableOpacity
+              onPress={() => setShowLogTypeDropdown((prev) => !prev)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderWidth: 1,
+                borderColor: theme.border,
+                borderRadius: 10,
+                paddingHorizontal: 12,
+                height: 42,
+                backgroundColor: theme.input,
+                marginBottom: 4,
+              }}
+            >
+              <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: '600' }}>Log Type: </Text>
+              <Text style={{ color: theme.text, fontSize: 13, flex: 1 }}>
+                {selectedAction === 'all' ? 'All Actions' : LOCAL_ACTION_LABELS[selectedAction] || selectedAction}
+              </Text>
+              <Ionicons name={showLogTypeDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={theme.textSecondary} />
+            </TouchableOpacity>
+
+            {showLogTypeDropdown && (
+               <View
+                 className="mb-2 rounded-lg border overflow-hidden"
+                 style={{
+                   borderColor: theme.border,
+                   backgroundColor: theme.elevated,
+                   shadowColor: theme.shadow,
+                   shadowOffset: { width: 0, height: 2 },
+                   shadowOpacity: 0.1,
+                   shadowRadius: 4,
+                   elevation: 3,
+                 }}
+               >
+                {[
+                  { label: 'All Actions', value: 'all' },
+                  { label: 'Receiving', value: 'RECEIVING' },
+                  { label: 'Consumption', value: 'CONSUMPTION' },
+                  { label: 'Defective', value: 'SPOILAGE' },
+                ].map((opt) => (
+                  <TouchableOpacity
+                    key={opt.value}
+                    onPress={() => {
+                      setSelectedAction(opt.value);
+                      setShowLogTypeDropdown(false);
+                    }}
+                    className="border-b px-3 py-2.5 flex-row items-center justify-between"
+                    style={{
+                      borderBottomColor: theme.border,
+                      backgroundColor: selectedAction === opt.value ? theme.primaryLight : 'transparent',
+                    }}
+                  >
+                    <Text style={{
+                      color: selectedAction === opt.value ? theme.primary : theme.text,
+                      fontWeight: selectedAction === opt.value ? 'bold' : 'normal',
+                    }}>
+                      {opt.label}
+                    </Text>
+                    {selectedAction === opt.value && (
+                      <Ionicons name="checkmark" size={16} color={theme.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -706,15 +810,27 @@ export default function InventoryScreen({
               if (canLogUsage) setLogActionType('CONSUMPTION');
               setShowAddLog(true);
             }}
-            className="mb-3 h-[44px] items-center justify-center rounded-[12px]"
+            className="mb-2 h-[40px] items-center justify-center rounded-[10px]"
             style={{ backgroundColor: theme.primaryPressed }}>
-            <Text className="text-[14px] font-bold text-white">{canLogUsage ? 'Record Material Usage' : 'Add Log Entry'}</Text>
+            <Text className="text-[13px] font-bold text-white">{canLogUsage ? 'Record Material Usage' : 'Add Log Entry'}</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {loading ? (
-        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }}>
+        <ScrollView
+          style={{ backgroundColor: theme.background }}
+          contentContainerStyle={{ paddingBottom: showBottomNav ? 180 + insets.bottom : 100 + insets.bottom }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refresh}
+              colors={[theme.primary]}
+              tintColor={theme.primary}
+            />
+          }
+        >
           <View style={screenContentStyle}>
           {activeTab === 'items'
             ? Array.from({ length: 5 }).map((_, index) => <InventoryItemSkeleton key={index} />)
@@ -730,11 +846,20 @@ export default function InventoryScreen({
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: showBottomNav ? 150 : 110 }}>
+        <ScrollView
+          style={{ backgroundColor: theme.background }}
+          contentContainerStyle={{ paddingBottom: showBottomNav ? 180 + insets.bottom : 100 + insets.bottom }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refresh}
+              colors={[theme.primary]}
+              tintColor={theme.primary}
+            />
+          }
+        >
           <View style={screenContentStyle}>
-          <TouchableOpacity onPress={refresh} className="mb-2 self-end rounded-md px-3 py-1" style={{ backgroundColor: theme.primaryLight }}>
-            <Text className="text-[12px]" style={{ color: theme.primary }}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
-          </TouchableOpacity>
 
           {activeTab === 'items' &&
             (filteredItems.length === 0 ? (
@@ -784,10 +909,10 @@ export default function InventoryScreen({
                         <Text className="text-[10px] font-semibold text-white">{status.label}</Text>
                       </View>
                     </View>
-                    <Text className="text-[12px]" style={{ color: theme.textMuted }}>{item.category}</Text>
+                    <Text className="text-[12px]" style={{ color: theme.textMuted }}>{formatCategory(item.category)}</Text>
                     <View className="mt-2 flex-row justify-between">
                       <Text className="text-[13px]" style={{ color: theme.textSecondary }}>Qty: <Text className="font-semibold">{displayInventoryNumber(item.quantity)} {item.unit || 'pcs'}</Text></Text>
-                      <Text className="text-[13px]" style={{ color: theme.textSecondary }}>Critical: <Text className="font-semibold">{displayInventoryNumber(item.critical_level)}</Text></Text>
+                      <Text className="text-[13px]" style={{ color: theme.textSecondary }}>Min Stock: <Text className="font-semibold">{displayInventoryNumber(item.critical_level)}</Text></Text>
                     </View>
                     <Text className="mt-1 text-[13px]" style={{ color: theme.textSecondary }}>Price: <Text className="font-semibold">{formatCurrencyPHP(item.price)}</Text></Text>
                   </TouchableOpacity>
@@ -799,7 +924,17 @@ export default function InventoryScreen({
             (filteredLogs.length === 0 ? (
               <View className="mt-14 items-center">
                 <Ionicons name="document-text-outline" size={38} color={theme.textMuted} />
-                <Text className="mt-2" style={{ color: theme.textMuted }}>No inventory logs found.</Text>
+                <Text className="mt-2 text-center text-[14px]" style={{ color: theme.textMuted }}>
+                  {selectedAction === 'all'
+                    ? 'No inventory logs yet.'
+                    : selectedAction === 'RECEIVING'
+                    ? 'No inventory logs for Receiving.'
+                    : selectedAction === 'CONSUMPTION'
+                    ? 'No inventory logs for Consumption.'
+                    : selectedAction === 'SPOILAGE'
+                    ? 'No inventory logs for Defective.'
+                    : 'No inventory logs found.'}
+                </Text>
               </View>
             ) : (
               <View className="ml-2">
@@ -882,7 +1017,7 @@ export default function InventoryScreen({
                             </View>
                             <View className="mb-1 rounded-md px-2 py-1" style={{ backgroundColor: theme.input }}>
                               <Text className="text-[9px] font-bold" style={{ color: theme.textMuted }} numberOfLines={1}>
-                                {ACTION_LABELS[log.action_type] || formatDisplayLabel(log.action_type, 'Activity')}
+                                {LOCAL_ACTION_LABELS[log.action_type] || formatDisplayLabel(log.action_type, 'Activity')}
                               </Text>
                             </View>
                           </View>
@@ -907,35 +1042,73 @@ export default function InventoryScreen({
             <TouchableOpacity activeOpacity={1} onPress={closeAddItemModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
               <View className="max-h-[86%] w-full rounded-3xl" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
-                <View className="flex-row items-center justify-between border-b px-6 py-4" style={{ borderColor: theme.border }}>
-                  <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Add Inventory Item</Text>
+                 <View className="flex-row items-center justify-between border-b px-6 py-4" style={{ borderColor: theme.border }}>
+                  <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Add a new item</Text>
                   <TouchableOpacity onPress={closeAddItemModal} className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: theme.input }}>
                     <Ionicons name="close" size={20} color={theme.text} />
                   </TouchableOpacity>
                 </View>
-                <ScrollView className="px-6 pt-5" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 12 }}>
-                  <TouchableOpacity onPress={() => setShowItemPicker((prev) => !prev)} style={inputStyle} className="flex-row items-center justify-between">
-                    <Text style={{ color: addName ? theme.text : theme.textMuted }}>{addName || 'Select item...'}</Text>
-                    <Ionicons name={showItemPicker ? 'chevron-up' : 'chevron-down'} size={20} color={theme.primary} />
+                <ScrollView className="px-6 pt-5" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
+                  <Text className="mb-1.5 text-[14px] font-bold" style={{ color: theme.text }}>Item Name</Text>
+                  <TextInput
+                    value={addName}
+                    onChangeText={setAddName}
+                    style={inputStyle}
+                    placeholder="Enter the title of the item here"
+                    placeholderTextColor={theme.textMuted}
+                  />
+
+                  <Text className="mb-1.5 text-[14px] font-bold" style={{ color: theme.text }}>Category</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowCategoryDropdown((prev) => !prev)}
+                    style={[inputStyle, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                    className="flex-row items-center justify-between"
+                  >
+                    <Text style={{ color: theme.text }}>{addCategory}</Text>
+                    <Ionicons name={showCategoryDropdown ? "chevron-up" : "chevron-down"} size={18} color={theme.textSecondary} />
                   </TouchableOpacity>
-                  {showItemPicker && (
-                    <View className="mb-2 overflow-hidden rounded-xl border" style={{ borderColor: theme.border }}>
-                      {Object.keys(PREDEFINED_ITEMS).map((name) => (
-                        <TouchableOpacity key={name} className="border-b px-4 py-3" style={{ borderBottomColor: theme.border }} onPress={() => { setAddName(name); setAddCategory(PREDEFINED_ITEMS[name]); setShowItemPicker(false); }}>
-                          <Text style={{ color: theme.text }}>{name}</Text>
+
+                  {showCategoryDropdown && (
+                    <View className="mb-3 overflow-hidden rounded-xl border" style={{ borderColor: theme.border, backgroundColor: theme.surface }}>
+                      {['Materials', 'Equipment', 'Others'].map((cat) => (
+                        <TouchableOpacity
+                          key={cat}
+                          onPress={() => {
+                            setAddCategory(cat);
+                            setShowCategoryDropdown(false);
+                          }}
+                          className="border-b px-4 py-3"
+                          style={{ borderBottomColor: theme.border, backgroundColor: addCategory === cat ? theme.primaryLight : 'transparent' }}
+                        >
+                          <Text style={{ color: addCategory === cat ? theme.primary : theme.text }}>{cat}</Text>
                         </TouchableOpacity>
                       ))}
                     </View>
                   )}
-                  <TextInput value={addCategory} onChangeText={setAddCategory} style={inputStyle} placeholder="Category" placeholderTextColor={theme.textMuted} />
-                  <TextInput value={addUnit} onChangeText={setAddUnit} style={inputStyle} placeholder="Unit (e.g. pcs, bag)" placeholderTextColor={theme.textMuted} />
-                  <TextInput value={addPrice} onChangeText={(value) => setAddPrice(inventoryNumberInput(value))} style={inputStyle} placeholder="Price" keyboardType="decimal-pad" placeholderTextColor={theme.textMuted} />
-                  <TextInput value={addCritical} onChangeText={(value) => setAddCritical(inventoryNumberInput(value))} style={inputStyle} placeholder="Critical level" keyboardType="decimal-pad" placeholderTextColor={theme.textMuted} />
-                  <TextInput value={addQty} onChangeText={(value) => setAddQty(inventoryNumberInput(value))} style={inputStyle} placeholder="Current stock" keyboardType="decimal-pad" placeholderTextColor={theme.textMuted} />
+
+                  <Text className="mb-1.5 text-[14px] font-bold" style={{ color: theme.text }}>Minimum Stock</Text>
+                  <TextInput
+                    value={addCritical}
+                    onChangeText={(value) => setAddCritical(inventoryNumberInput(value))}
+                    style={inputStyle}
+                    placeholder="e.g. 5"
+                    keyboardType="numeric"
+                    placeholderTextColor={theme.textMuted}
+                  />
+
+                  <Text className="mb-1.5 text-[14px] font-bold" style={{ color: theme.text }}>Price</Text>
+                  <TextInput
+                    value={addPrice}
+                    onChangeText={(value) => setAddPrice(inventoryNumberInput(value))}
+                    style={inputStyle}
+                    placeholder="0.00"
+                    keyboardType="numeric"
+                    placeholderTextColor={theme.textMuted}
+                  />
                 </ScrollView>
                 <View className="border-t px-6 pb-6 pt-4" style={{ borderColor: theme.border }}>
                   <TouchableOpacity onPress={handleAdd} disabled={saving} className="h-12 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primary }}>
-                    {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Save Item</Text>}
+                    {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Save</Text>}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -966,7 +1139,7 @@ export default function InventoryScreen({
                   <TouchableOpacity key={a} onPress={() => { setTxnAction(a); if (a !== 'CONSUMPTION') setTxnTaskId(''); }}
                     className="mr-2 rounded-full px-3 py-2"
                     style={{ backgroundColor: txnAction === a ? theme.primaryLight : theme.input }}>
-                    <Text className="text-[12px] font-semibold" style={{ color: txnAction === a ? theme.primary : theme.textSecondary }}>{ACTION_TYPE_LABELS[a]}</Text>
+                    <Text className="text-[12px] font-semibold" style={{ color: txnAction === a ? theme.primary : theme.textSecondary }}>{LOCAL_ACTION_LABELS[a]}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -988,7 +1161,7 @@ export default function InventoryScreen({
               )}
               <TextInput value={txnNotes} onChangeText={setTxnNotes} style={inputStyle} placeholder="Notes (optional)" placeholderTextColor={theme.textMuted} />
               <TouchableOpacity onPress={handleTransaction} disabled={saving} className="mt-2 h-12 items-center justify-center rounded-xl" style={{ backgroundColor: ACTION_TYPE_COLORS[txnAction] }}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Submit {ACTION_TYPE_LABELS[txnAction]}</Text>}
+                {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Submit {LOCAL_ACTION_LABELS[txnAction]}</Text>}
               </TouchableOpacity>
             </View>
             </TouchableWithoutFeedback>
@@ -1011,7 +1184,7 @@ export default function InventoryScreen({
                   <Ionicons name="close" size={20} color={theme.text} />
                 </TouchableOpacity>
               </View>
-              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 8 }}>
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={false}>
               <Text className="mb-1 text-[12px]" style={{ color: theme.textSecondary }}>Item</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
                 {items.map((item) => (
@@ -1032,7 +1205,7 @@ export default function InventoryScreen({
                     onPress={() => { setLogActionType(action); if (action !== 'CONSUMPTION') setLogTaskId(''); }}
                     className="mr-2 rounded-full px-3 py-2"
                     style={{ backgroundColor: logActionType === action ? theme.primaryLight : theme.input }}>
-                    <Text className="text-[12px]" style={{ color: logActionType === action ? theme.primary : theme.textSecondary }}>{ACTION_TYPE_LABELS[action]}</Text>
+                    <Text className="text-[12px]" style={{ color: logActionType === action ? theme.primary : theme.textSecondary }}>{LOCAL_ACTION_LABELS[action]}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -1060,6 +1233,13 @@ export default function InventoryScreen({
             </TouchableWithoutFeedback>
           </KeyboardAvoidingView>
         </Modal>
+      <SuccessModal
+        visible={successModal.visible}
+        title={successModal.title}
+        message={successModal.message}
+        buttonLabel={successModal.buttonLabel}
+        onPress={successModal.onPress}
+      />
       {showBottomNav && onNavigate && (
         <BottomNavigationBar
           activeTab={activeMainTab}

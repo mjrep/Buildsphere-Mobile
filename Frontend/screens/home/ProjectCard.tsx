@@ -3,7 +3,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { softCardShadow } from '../../constants/theme';
 import { formatDisplayLabel } from '../../utils/display';
-import { getProjectStatusColor } from '../../utils/projectProgress';
+import { getProjectStatusColor, getProjectStatusBadgeStyle } from '../../utils/projectProgress';
 
 interface ProjectCardProps {
   name: string;
@@ -30,9 +30,9 @@ export default function ProjectCard({
   const bannerHeight = width >= 768 ? 220 : width <= 360 ? 150 : 180;
   const safeName = String(name || '').trim() || 'Untitled Project';
   const safeClientName = String(clientName || '').trim() || 'No client set';
-  const safeStatus = formatDisplayLabel(status, 'Unknown');
   const safeProgress = Math.max(0, Math.min(100, Number.isFinite(Number(progress)) ? Math.round(Number(progress)) : 0));
   const statusColor = getProjectStatusColor(status, theme);
+  const badgeStyle = getProjectStatusBadgeStyle(status, theme);
 
   return (
     <View
@@ -58,11 +58,23 @@ export default function ProjectCard({
           </TouchableOpacity>
         ) : null}
         <View
-          className="absolute right-3 top-3 rounded-full px-3 py-1"
-          style={{ backgroundColor: image ? 'rgba(255,255,255,0.9)' : `${statusColor}1A` }}
+          className="absolute right-3 top-3 rounded-full px-2.5 py-0.5 flex-row items-center border"
+          style={{
+            backgroundColor: badgeStyle.backgroundColor,
+            borderColor: badgeStyle.borderColor,
+            shadowColor: '#000000',
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.08,
+            shadowRadius: 1.5,
+            elevation: 1,
+          }}
         >
-          <Text className="text-[10px] font-bold" style={{ color: statusColor }} numberOfLines={1}>
-            {safeStatus}
+          <View
+            className="mr-1 h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: badgeStyle.dotColor }}
+          />
+          <Text className="text-[10px] font-extrabold" style={{ color: badgeStyle.textColor }} numberOfLines={1}>
+            {badgeStyle.label}
           </Text>
         </View>
       </View>

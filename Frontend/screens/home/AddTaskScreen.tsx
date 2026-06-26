@@ -21,6 +21,7 @@ import { API_URL, apiFetch, getServerConnectionErrorMessage } from '../../lib/ap
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 import { formatDisplayLabel } from '../../utils/display';
+import SuccessModal from '../../components/SuccessModal';
 
 interface ProjectOption {
   id: number;
@@ -254,6 +255,7 @@ export default function AddTaskScreen({
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [selector, setSelector] = useState<SelectorKind | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const [projectId, setProjectId] = useState('');
   const [phaseId, setPhaseId] = useState('');
@@ -754,10 +756,8 @@ export default function AddTaskScreen({
         return;
       }
 
-      resetForm();
       onTaskAdded();
-      Alert.alert('Task added successfully.', 'Task added successfully.');
-      onClose();
+      setShowSuccessModal(true);
     } catch (error) {
       console.error('Error adding task:', error);
       Alert.alert('Connection Error', getServerConnectionErrorMessage(error));
@@ -1106,6 +1106,18 @@ export default function AddTaskScreen({
         </View>
         <SelectorSheet />
       </KeyboardAvoidingView>
+
+      <SuccessModal
+        visible={showSuccessModal}
+        title="Task Added."
+        message="Task added. Please inform the assignee."
+        buttonLabel="Back to Task"
+        onPress={() => {
+          setShowSuccessModal(false);
+          resetForm();
+          onClose();
+        }}
+      />
     </Modal>
   );
 }

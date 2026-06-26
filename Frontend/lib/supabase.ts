@@ -34,12 +34,24 @@ const authStorage =
 
 const originalConsoleError = console.error;
 
+function isExpoGoNotificationError(arg: unknown) {
+  const str = arg instanceof Error ? arg.message : typeof arg === 'string' ? arg : '';
+  return str.includes('Android Push notifications') && str.includes('removed from Expo Go');
+}
+
 console.error = (...args: Parameters<typeof console.error>) => {
   if (args.some(isInvalidRefreshTokenError)) {
     console.warn('Supabase session expired. Clearing stale local auth session.');
     setTimeout(() => {
       clearInvalidSupabaseSession();
     }, 0);
+    return;
+  }
+
+  if (args.some(isExpoGoNotificationError)) {
+    console.warn(
+      'expo-notifications: Android Remote push notifications are not supported in Expo Go on SDK 53+. Please use a development build to test remote notifications.'
+    );
     return;
   }
 

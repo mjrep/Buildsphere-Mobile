@@ -80,9 +80,11 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
       case 'in-progress':
         return { color: '#7370FF', bg: '#F0EFFF', label: 'In Progress' };
       case 'in-review':
-        return { color: '#FF9800', bg: '#FFF3E0', label: 'Review' };
+      case 'to-review':
+      case 'to_review':
+        return { color: '#FF9800', bg: '#FFF3E0', label: 'To Review' };
       case 'completed':
-        return { color: '#4CAF50', bg: '#E8F5E9', label: 'Done' };
+        return { color: '#4CAF50', bg: '#E8F5E9', label: 'Completed' };
       default:
         return { color: '#A3A3A3', bg: '#F5F5F5', label: formatDisplayLabel(status, 'Unknown') };
     }
@@ -159,13 +161,13 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
             
             if (filter === 'pending') {
               color = '#FF6B6B';
-              label = 'Pending';
+              label = 'To Do';
             } else if (filter === 'in-progress') {
               color = '#7370FF';
               label = 'In Progress';
             } else if (filter === 'in-review') {
               color = '#FF9800';
-              label = 'In Review';
+              label = 'To Review';
             } else if (filter === 'completed') {
               color = '#4CAF50';
               label = 'Completed';

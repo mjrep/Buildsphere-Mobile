@@ -28,6 +28,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
+import SystemBars from '../../components/SystemBars';
 
 interface Props {
   visible: boolean;
@@ -35,6 +36,8 @@ interface Props {
   onClose: () => void;
   projects: { id: number; name: string }[];
   initialTask?: any;
+  initialShift?: 'Morning' | 'Noon' | 'Afternoon';
+  initialProjectId?: number;
 }
 
 interface SelectedPhoto {
@@ -58,6 +61,7 @@ interface PhotoAnalysisResult {
 }
 
 const PRIMARY = '#7370FF';
+const AI_IMAGE_PICKER_QUALITY = 0.75;
 
 // Step 1: Pick photo + basic info
 // Step 2: Full photo preview + AI analysis
@@ -75,14 +79,22 @@ type AnalysisStatus =
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-export default function UploadSiteProgressScreen({ visible, user, onClose, projects, initialTask }: Props) {
-  const { theme } = useAppTheme();
+export default function UploadSiteProgressScreen({
+  visible,
+  user,
+  onClose,
+  projects,
+  initialTask,
+  initialShift,
+  initialProjectId,
+}: Props) {
+  const { theme, isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const formContentStyle = centeredContent(width, FORM_CONTENT_MAX_WIDTH);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
-  const [projectId, setProjectId] = useState<number | null>(initialTask?.project_id || null);
+  const [projectId, setProjectId] = useState<number | null>(initialTask?.project_id || initialProjectId || null);
   const [taskId, setTaskId] = useState<number | null>(initialTask?.id || null);
   const [userTasks, setUserTasks] = useState<any[]>([]);
   const [quantityInstalled, setQuantityInstalled] = useState('');
@@ -95,7 +107,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [isTaskModalVisible, setIsTaskModalVisible] = useState(false);
   const [isShiftModalVisible, setIsShiftModalVisible] = useState(false);
-  const [shift, setShift] = useState('Morning');
+  const [shift, setShift] = useState(initialShift || 'Morning');
   const [workDate, setWorkDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [glassCount, setGlassCount] = useState<number>(0);
@@ -116,9 +128,9 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   const reset = () => {
     setStep(1);
     setSelectedPhotos([]);
-    setProjectId(projects[0]?.id || null);
-    setTaskId(null);
-    setShift('Morning');
+    setProjectId(initialTask?.project_id || initialProjectId || null);
+    setTaskId(initialTask?.id || null);
+    setShift(initialShift || 'Morning');
     setWorkDate(new Date());
     setQuantityInstalled('');
     setNotes('');
@@ -156,7 +168,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       const tasks = Array.isArray(data) ? data : [];
 
       setUserTasks(tasks);
-      if (!initialTask && tasks.length > 0) {
+      if (!initialTask && !initialProjectId && tasks.length > 0) {
         setTaskId(tasks[0].id);
         setProjectId(tasks[0].project_id);
       }
@@ -172,6 +184,12 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
   React.useEffect(() => {
     loadUserTasks();
   }, [user.id, initialTask, visible]);
+
+  React.useEffect(() => {
+    if (visible) {
+      reset();
+    }
+  }, [visible, initialShift, initialProjectId, initialTask]);
 
   const handleClose = () => {
     if (step === 4 || recordSaved || !hasUnsavedChanges) {
@@ -207,8 +225,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: false,
-      quality: 1,
-      base64: true,
+      quality: AI_IMAGE_PICKER_QUALITY,
+      base64: false,
       allowsMultipleSelection: multiple,
       selectionLimit: remainingLimit,
     });
@@ -236,8 +254,8 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
     }
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: false,
-      quality: 1,
-      base64: true,
+      quality: AI_IMAGE_PICKER_QUALITY,
+      base64: false,
     });
     if (!result.canceled && result.assets[0]) {
       setSelectedPhotos(prev => [...prev, {
@@ -497,9 +515,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={handleClose}>
+      <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
+        style={{ flex: 1, backgroundColor: theme.background }}
       >
         <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* ── STEP 1: Upload photo + quick info ── */}
@@ -515,7 +534,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               <View style={{ width: 24 }} />
             </View>
 
-            <ScrollView className="flex-1 pt-5" contentContainerStyle={{ paddingBottom: 40 }}>
+            <ScrollView
+              className="flex-1 pt-5"
+              style={{ backgroundColor: theme.background }}
+              contentContainerStyle={{ paddingBottom: 40 + insets.bottom, backgroundColor: theme.background }}
+            >
               <View style={formContentStyle}>
               {/* Photo Grid / List */}
               {selectedPhotos.length > 0 ? (
@@ -686,7 +709,10 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             </ScrollView>
 
             {/* Footer Buttons */}
-            <View className="flex-row gap-3 border-t pb-10 pt-3" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
+            <View
+              className="flex-row gap-3 border-t pt-3"
+              style={[formContentStyle, { paddingBottom: Math.max(insets.bottom + 12, 40), borderColor: theme.border, backgroundColor: theme.background }]}
+            >
               <TouchableOpacity
                 onPress={handleClose}
                 className="h-12 flex-1 items-center justify-center rounded-[14px] border"
@@ -756,7 +782,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
             </View>
 
             {/* Footer Buttons */}
-            <View className="border-t px-5 pb-10 pt-4" style={{ backgroundColor: theme.background, borderColor: theme.border }}>
+            <View className="border-t px-5 pt-4" style={{ paddingBottom: Math.max(insets.bottom + 12, 40), backgroundColor: theme.background, borderColor: theme.border }}>
               {/* Analysis status banner */}
               {analysisStatus === 'complete' && (
                 <View className="mb-3 flex-row items-center rounded-xl bg-[#E8F5E9] px-4 py-3">
@@ -876,7 +902,11 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               </View>
             )}
 
-            <ScrollView className="flex-1" contentContainerStyle={{ paddingTop: 20, paddingBottom: 40 }}>
+            <ScrollView
+              className="flex-1"
+              style={{ backgroundColor: theme.background }}
+              contentContainerStyle={{ paddingTop: 20, paddingBottom: 40 + insets.bottom, backgroundColor: theme.background }}
+            >
               <View style={formContentStyle}>
               <Text className="mb-1.5 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Task</Text>
               <TouchableOpacity
@@ -1175,7 +1205,7 @@ export default function UploadSiteProgressScreen({ visible, user, onClose, proje
               </TouchableOpacity>
             </View>
 
-            {['Morning', 'Afternoon', 'Noon'].map((item) => (
+            {(['Morning', 'Afternoon', 'Noon'] as const).map((item) => (
               <TouchableOpacity
                 key={item}
                 onPress={() => {

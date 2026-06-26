@@ -14,7 +14,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { API_URL, apiFetch } from '../../lib/api';
@@ -25,6 +24,7 @@ import { formatDateOnlyDisplay, normalizeDateOnlyString, parseDateOnly, toDateOn
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 import { formatDisplayLabel } from '../../utils/display';
+import SystemBars from '../../components/SystemBars';
 
 interface EditInformationScreenProps {
   user: UserInfo;
@@ -33,29 +33,9 @@ interface EditInformationScreenProps {
 }
 
 const PRIMARY = '#7370FF';
-const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
-const ALLOWED_PROFILE_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say', 'Other'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^[+()\-\d\s]{7,20}$/;
-
-const getPhotoUri = (url?: string | null) => {
-  if (!url) return null;
-  return url.startsWith('http') ? url : `${API_URL}${url}`;
-};
-
-const getAssetMimeType = (asset: ImagePicker.ImagePickerAsset) => {
-  const explicitType = asset.mimeType?.toLowerCase();
-  if (explicitType === 'image/jpg') return 'image/jpeg';
-  if (explicitType) return explicitType;
-
-  const filename = asset.fileName || asset.uri.split('/').pop() || '';
-  const extension = filename.split('.').pop()?.toLowerCase();
-  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
-  if (extension === 'png') return 'image/png';
-  if (extension === 'webp') return 'image/webp';
-  return '';
-};
 
 const isFutureDate = (date: Date | null) => {
   if (!date) return false;
@@ -67,7 +47,7 @@ const isFutureDate = (date: Date | null) => {
 };
 
 export default function EditInformationScreen({ user, onBack, onSaved }: EditInformationScreenProps) {
-  const { theme } = useAppTheme();
+  const { theme, isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const formContentStyle = centeredContent(width, FORM_CONTENT_MAX_WIDTH);
@@ -87,12 +67,9 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
-  const [localImageUri, setLocalImageUri] = useState<string | null>(null);
-  const [currentPhotoUrl, setCurrentPhotoUrl] = useState<string | null>(user.profilePictureUrl || null);
-  const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showGenderPicker, setShowGenderPicker] = useState(false);
 
   const roleLabel = formatDisplayLabel(user.role, 'Staff');
   const birthdateValue = toDateOnlyString(birthdate);
@@ -119,139 +96,15 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
   };
 
   const getBackendToken = async () => {
-    const storedToken = await AsyncStorage.getItem('token');
-    if (storedToken) return storedToken;
-
     const { data } = await supabase.auth.getSession();
-    return data.session?.access_token || null;
+    if (data.session?.access_token) {
+      await AsyncStorage.setItem('token', data.session.access_token);
+      return data.session.access_token;
+    }
+    return AsyncStorage.getItem('token');
   };
 
-  const uploadSelectedPhoto = async (asset: ImagePicker.ImagePickerAsset) => {
-    const mimeType = getAssetMimeType(asset);
-    const fileSize = asset.fileSize || 0;
 
-    if (!ALLOWED_PROFILE_PHOTO_TYPES.has(mimeType)) {
-      Alert.alert('Unsupported Photo', 'Please select a JPEG, PNG, or WebP image.');
-      return;
-    }
-
-    if (fileSize > PROFILE_PHOTO_MAX_BYTES) {
-      Alert.alert('Photo Too Large', 'Please choose an image smaller than 5 MB.');
-      return;
-    }
-
-    setUploading(true);
-    setLocalImageUri(asset.uri);
-
-    try {
-      const token = await getBackendToken();
-      if (!token) {
-        Alert.alert('Session expired', 'Please log in again before updating your profile photo.');
-        return;
-      }
-
-      const filename = asset.fileName || asset.uri.split('/').pop() || `profile-photo.${mimeType.split('/')[1] || 'jpg'}`;
-      const formData = new FormData();
-      formData.append('photo', {
-        uri: asset.uri,
-        name: filename,
-        type: mimeType,
-      } as any);
-
-      const res = await apiFetch(`${API_URL}/api/users/me/profile-photo`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        Alert.alert('Upload Error', data?.message || data?.error || 'Could not update profile photo. Please try again.');
-        return;
-      }
-
-      const nextPhotoUrl = data.profilePictureUrl || data.profile_photo_url || null;
-      setCurrentPhotoUrl(nextPhotoUrl);
-      setImageLoadFailed(false);
-      onSaved({ ...user, profilePictureUrl: nextPhotoUrl });
-      Alert.alert('Updated', 'Profile photo updated.');
-    } catch (err) {
-      console.error('Profile photo upload failed:', err);
-      Alert.alert('Upload Error', 'Could not update profile photo. Please try again.');
-    } finally {
-      setLocalImageUri(null);
-      setUploading(false);
-    }
-  };
-
-  const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Please allow access to your photo library.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-    if (!result.canceled && result.assets[0]) {
-      await uploadSelectedPhoto(result.assets[0]);
-    }
-  };
-
-  const confirmRemovePhoto = () => {
-    if (!currentPhotoUrl) return;
-
-    Alert.alert('Remove profile photo?', '', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: removePhoto,
-      },
-    ]);
-  };
-
-  const removePhoto = async () => {
-    setUploading(true);
-    try {
-      const token = await getBackendToken();
-      if (!token) {
-        Alert.alert('Session expired', 'Please log in again before updating your profile photo.');
-        return;
-      }
-
-      const res = await apiFetch(`${API_URL}/api/users/me/profile-photo`, {
-        method: 'DELETE',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        Alert.alert('Remove Error', data?.message || data?.error || 'Could not remove profile photo. Please try again.');
-        return;
-      }
-
-      setCurrentPhotoUrl(null);
-      setLocalImageUri(null);
-      setImageLoadFailed(false);
-      onSaved({ ...user, profilePictureUrl: undefined });
-      Alert.alert('Removed', 'Profile photo removed.');
-    } catch (err) {
-      console.error('Profile photo remove failed:', err);
-      Alert.alert('Remove Error', 'Could not remove profile photo. Please try again.');
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const validateForm = () => {
     const trimmedEmail = email.trim();
@@ -276,19 +129,36 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
       return false;
     }
 
-    if (newPassword || confirmNewPassword) {
+    const isChangingPassword = !!currentPassword || !!newPassword || !!confirmNewPassword;
+
+    if (isChangingPassword) {
       if (!currentPassword) {
         Alert.alert('Error', 'Current password is required.');
         return false;
       }
 
-      if (newPassword !== confirmNewPassword) {
-        Alert.alert('Error', 'New passwords do not match.');
+      if (!newPassword) {
+        Alert.alert('Error', 'New password is required.');
+        return false;
+      }
+
+      if (!confirmNewPassword) {
+        Alert.alert('Error', 'Confirm new password is required.');
         return false;
       }
 
       if (newPassword.length < 8) {
         Alert.alert('Error', 'Password must be at least 8 characters.');
+        return false;
+      }
+
+      if (newPassword !== confirmNewPassword) {
+        Alert.alert('Error', 'Passwords do not match.');
+        return false;
+      }
+
+      if (newPassword === currentPassword) {
+        Alert.alert('Error', 'New password cannot be the same as current password.');
         return false;
       }
     }
@@ -297,6 +167,13 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
   };
 
   const handleSave = async () => {
+    // Confirm auth session before any updates
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session?.access_token) {
+      Alert.alert('Error', 'Your session has expired. Please log in again.');
+      return;
+    }
+
     if (!validateForm()) return;
 
     setSaving(true);
@@ -307,7 +184,9 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
       let passwordUpdated = false;
       let emailConfirmationPending = false;
 
-      if (newPassword) {
+      const isChangingPassword = !!currentPassword || !!newPassword || !!confirmNewPassword;
+
+      if (isChangingPassword) {
         const { error: reauthError } = await supabase.auth.signInWithPassword({
           email: originalEmail,
           password: currentPassword,
@@ -324,6 +203,17 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
           return;
         }
         passwordUpdated = true;
+
+        // Clear password fields upon success
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+
+        // Sync fresh token with AsyncStorage so backend calls are correctly authenticated
+        const { data: freshSessionData } = await supabase.auth.getSession();
+        if (freshSessionData.session?.access_token) {
+          await AsyncStorage.setItem('token', freshSessionData.session.access_token);
+        }
       }
 
       if (trimmedEmail.toLowerCase() !== originalEmail.toLowerCase()) {
@@ -343,7 +233,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
 
       const token = await getBackendToken();
       if (!token) {
-        Alert.alert('Session expired', 'Please log in again before updating your profile.');
+        Alert.alert('Error', 'Your session has expired. Please log in again.');
         return;
       }
 
@@ -363,8 +253,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
           phoneNumber: phoneNumber.trim() || null,
           gender,
           birthdate: birthdate ? toDateOnlyString(birthdate) : null,
-          address: address.trim() || null,
-          profilePictureUrl: currentPhotoUrl,
+          profilePictureUrl: user.profilePictureUrl,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -374,7 +263,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
         return;
       }
 
-      const updatedUser = { ...user, ...data.user, profilePictureUrl: data.user.profilePictureUrl || currentPhotoUrl || undefined };
+      const updatedUser = { ...user, ...data.user };
       onSaved(updatedUser);
 
       const messages = ['Profile updated successfully.'];
@@ -402,8 +291,8 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
   } as const;
 
   const labelStyle = 'mb-2 text-[11px] font-bold uppercase tracking-widest';
-  const displayImageUri = imageLoadFailed ? null : localImageUri || getPhotoUri(currentPhotoUrl);
   const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+
 
   const renderTextField = (
     label: string,
@@ -446,6 +335,8 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
           placeholderTextColor={theme.textMuted}
           secureTextEntry={!visible}
           autoCapitalize="none"
+          autoComplete="off"
+          textContentType="none"
         />
         <TouchableOpacity
           onPress={() => setVisible(!visible)}
@@ -461,18 +352,34 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <View className="relative flex-row items-center justify-between pb-3 border-b" style={[formContentStyle, { paddingTop: Math.max(insets.top + 10, 44), borderColor: theme.border, backgroundColor: theme.background }]}>
-        <TouchableOpacity onPress={handleBackPress} className="z-10 -ml-2 -mt-1">
+      <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
+      <View
+        className="relative flex-row items-center justify-between px-4 border-b"
+        style={[
+          formContentStyle,
+          {
+            height: 56,
+            borderColor: theme.border,
+            backgroundColor: theme.background,
+          },
+        ]}
+      >
+        <View
+          className="absolute left-0 right-0 top-0 bottom-0 items-center justify-center"
+          pointerEvents="none"
+        >
+          <Text className="text-[17px] font-bold" style={{ color: theme.text }}>
+            Edit Profile
+          </Text>
+        </View>
+
+        <TouchableOpacity onPress={handleBackPress} className="z-10 -ml-2">
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
 
-        <View className="absolute left-0 right-0 pt-8 pb-3 items-center justify-center">
-          <Text className="text-[17px] font-bold" style={{ color: theme.text }}>Edit Profile</Text>
-        </View>
-
-        <TouchableOpacity onPress={handleSave} disabled={saving || uploading} className="z-10">
-          <View className="px-4 py-1.5 rounded-full" style={{ backgroundColor: saving || uploading ? theme.input : theme.primaryLight }}>
-            {saving || uploading ? (
+        <TouchableOpacity onPress={handleSave} disabled={saving} className="z-10">
+          <View className="px-4 py-1.5 rounded-full" style={{ backgroundColor: saving ? theme.input : theme.primaryLight }}>
+            {saving ? (
               <ActivityIndicator size="small" color={PRIMARY} />
             ) : (
               <Text className="text-[14px] font-bold" style={{ color: theme.primary }}>Update</Text>
@@ -485,49 +392,26 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        style={{ backgroundColor: theme.background }}
       >
-        <ScrollView className="flex-1 pt-4" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+        <ScrollView
+          className="flex-1 pt-4"
+          style={{ backgroundColor: theme.background }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 150 + insets.bottom, backgroundColor: theme.background }}
+        >
           <View style={formContentStyle}>
-            <View className="mb-4 mt-2 items-center">
-              <View className="items-center">
-                {displayImageUri ? (
-                  <Image
-                    source={{ uri: displayImageUri }}
-                    onError={() => setImageLoadFailed(true)}
-                    style={{ width: 100, height: 100, borderRadius: 50 }}
-                  />
-                ) : (
-                  <View className="h-[100px] w-[100px] items-center justify-center rounded-full bg-[#F0AEDE]">
-                    <Text className="text-[36px] font-bold text-white">{initials || '?'}</Text>
-                  </View>
-                )}
-                {uploading && (
-                  <View className="absolute h-[100px] w-[100px] items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}>
-                    <ActivityIndicator color="#FFFFFF" />
-                  </View>
-                )}
-                <View className="mt-4 flex-row items-center">
-                  <TouchableOpacity
-                    onPress={pickImage}
-                    disabled={uploading}
-                    className="mr-2 flex-row items-center rounded-full px-4 py-2"
-                    style={{ backgroundColor: theme.primaryLight }}
-                  >
-                    <Ionicons name="camera-outline" size={16} color={theme.primary} />
-                    <Text className="ml-1.5 text-[12px] font-bold" style={{ color: theme.primary }}>Change Photo</Text>
-                  </TouchableOpacity>
-                  {currentPhotoUrl ? (
-                    <TouchableOpacity
-                      onPress={confirmRemovePhoto}
-                      disabled={uploading}
-                      className="flex-row items-center rounded-full px-4 py-2"
-                      style={{ backgroundColor: theme.input }}
-                    >
-                      <Ionicons name="trash-outline" size={16} color="#FF6B6B" />
-                      <Text className="ml-1.5 text-[12px] font-bold text-[#FF6B6B]">Remove Photo</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
+            {/* Initials Placeholder Avatar Circle */}
+            <View className="mb-6 mt-2 items-center">
+              <View className="h-[100px] w-[100px] items-center justify-center rounded-full bg-[#F0AEDE]"
+                style={{
+                  shadowColor: '#F0AEDE',
+                  shadowOpacity: 0.5,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 6,
+                }}>
+                <Text className="text-[36px] font-bold text-white">{initials || '?'}</Text>
               </View>
             </View>
 
@@ -545,24 +429,41 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
               {renderTextField('Phone Number', phoneNumber, setPhoneNumber, '+63...', { keyboardType: 'phone-pad' })}
 
               <Text className={labelStyle} style={{ color: theme.textMuted }}>Gender</Text>
-              <View className="mb-5 flex-row flex-wrap">
-                {GENDER_OPTIONS.map((option) => {
-                  const selected = gender === option;
-                  return (
+              <TouchableOpacity
+                onPress={() => setShowGenderPicker((prev) => !prev)}
+                className="mb-5 flex-row items-center justify-between rounded-xl border px-4"
+                style={{
+                  backgroundColor: theme.input,
+                  borderColor: showGenderPicker ? theme.primary : theme.border,
+                  height: 52,
+                }}
+              >
+                <Text className="text-[15px]" style={{ color: theme.text }}>{gender}</Text>
+                <Ionicons name={showGenderPicker ? 'chevron-up-outline' : 'chevron-down-outline'} size={20} color={PRIMARY} />
+              </TouchableOpacity>
+              
+              {showGenderPicker && (
+                <View className="mb-5 -mt-3 overflow-hidden rounded-xl border" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                  {GENDER_OPTIONS.map((option, index) => (
                     <TouchableOpacity
                       key={option}
-                      onPress={() => setGender(option)}
-                      className="mb-2 mr-2 rounded-full border px-4 py-2"
-                      style={{
-                        backgroundColor: selected ? theme.primaryLight : theme.input,
-                        borderColor: selected ? theme.primary : theme.border,
+                      className="px-4 py-3"
+                      style={{ borderBottomWidth: index === GENDER_OPTIONS.length - 1 ? 0 : 1, borderBottomColor: theme.border }}
+                      onPress={() => {
+                        setGender(option);
+                        setShowGenderPicker(false);
                       }}
                     >
-                      <Text className="text-[12px] font-bold" style={{ color: selected ? theme.primary : theme.textSecondary }}>{option}</Text>
+                      <Text
+                        className="text-[14px] font-medium"
+                        style={{ color: gender === option ? theme.primary : theme.text }}
+                      >
+                        {option}
+                      </Text>
                     </TouchableOpacity>
-                  );
-                })}
-              </View>
+                  ))}
+                </View>
+              )}
 
               <Text className={labelStyle} style={{ color: theme.textMuted }}>Birthdate</Text>
               <TouchableOpacity
@@ -602,11 +503,11 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
 
               <TouchableOpacity
                 onPress={handleSave}
-                disabled={saving || uploading}
+                disabled={saving}
                 className="mt-2 h-[52px] items-center justify-center rounded-xl"
-                style={{ backgroundColor: saving || uploading ? theme.input : theme.primary }}
+                style={{ backgroundColor: saving ? theme.input : theme.primary }}
               >
-                {saving || uploading ? (
+                {saving ? (
                   <ActivityIndicator color={PRIMARY} />
                 ) : (
                   <Text className="text-[15px] font-bold text-white">Update Profile</Text>

@@ -5,18 +5,22 @@ import {
   TouchableOpacity,
   ScrollView,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { API_URL, apiFetch, getServerConnectionErrorMessage } from '../../lib/api';
 import SiteUpdatesScreen from './SiteUpdatesScreen';
 import { getPermissions, type UserRole } from '../../constants/roles';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { UserInfo } from '../../App';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { MainTab } from '../../components/BottomNavigationBar';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
 import { normalizeProgress } from '../../utils/projectProgress';
 import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
+import SystemBars from '../../components/SystemBars';
 
 interface Project {
   id: number;
@@ -46,6 +50,8 @@ interface Props {
   projectId: number;
   onBack: () => void;
   userRole?: UserRole;
+  user?: UserInfo;
+  projects?: { id: number; name: string }[];
   onNavigate?: (tab: MainTab) => void;
   canViewHome?: boolean;
   unreadCount?: number;
@@ -58,13 +64,15 @@ const PRIMARY = '#7370FF';
 function ProjectDetailSkeleton({ onBack }: { onBack: () => void }) {
   const { theme } = useAppTheme();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const screenContentStyle = centeredContent(width);
+  const headerTopPadding = Math.max(insets.top + 10, Platform.OS === 'ios' ? 54 : 16);
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 + insets.bottom }}>
         <View style={screenContentStyle}>
-        <View className="flex-row items-center px-5 pb-4 pt-12">
+        <View className="flex-row items-center px-5 pb-4" style={{ paddingTop: headerTopPadding }}>
           <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 -mt-1">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
@@ -160,14 +168,18 @@ export default function ProjectDetailScreen({
   projectId,
   onBack,
   userRole,
+  user,
+  projects,
   canViewHome = true,
   unreadCount = 0,
   onViewInventory,
   canViewInventory,
 }: Props) {
-  const { theme } = useAppTheme();
+  const { theme, isDark } = useAppTheme();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const screenContentStyle = centeredContent(width);
+  const headerTopPadding = Math.max(insets.top + 10, Platform.OS === 'ios' ? 54 : 16);
   const [project, setProject] = useState<Project | null>(null);
   const [activities, setActivities] = useState<ProjectActivity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -213,6 +225,7 @@ export default function ProjectDetailScreen({
   if (error || !project) {
     return (
       <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: theme.background }}>
+        <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
         <Ionicons name="alert-circle-outline" size={34} color={theme.danger} />
         <Text className="mt-2 text-center" style={{ color: theme.textSecondary }}>{error || 'Project not found.'}</Text>
         <TouchableOpacity onPress={loadProject} className="mt-4 rounded-xl px-4 py-2" style={{ backgroundColor: theme.primary }}>
@@ -237,12 +250,14 @@ export default function ProjectDetailScreen({
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
+      <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
       <ScrollView
         className="flex-1"
+        style={{ backgroundColor: theme.background }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}>
+        contentContainerStyle={{ paddingBottom: 100 + insets.bottom, backgroundColor: theme.background }}>
         <View style={screenContentStyle}>
-        <View className="flex-row items-center px-5 pb-4 pt-12">
+        <View className="flex-row items-center px-5 pb-4" style={{ paddingTop: headerTopPadding }}>
           <TouchableOpacity onPress={onBack} className="mr-3 -ml-2 -mt-1">
             <Ionicons name="caret-back-outline" size={24} color={theme.text} />
           </TouchableOpacity>
@@ -287,23 +302,19 @@ export default function ProjectDetailScreen({
 
         {/* Progress Card */}
         <View
-          className="mb-4 rounded-[24px] border p-6"
-          style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
-          <View className="mb-4 flex-row items-center justify-between">
-            <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Project Progress</Text>
+          className="mb-4 rounded-[20px] border p-5"
+          style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 }}>
+          <View className="mb-3 flex-row items-center justify-between">
+            <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Project Progress</Text>
             <Text className="text-[11px]" style={{ color: theme.textMuted }}>
               as of {new Date().toLocaleDateString()}
             </Text>
           </View>
 
-          <View className="mb-6 flex-row items-center">
-            <Text className="text-[48px] font-extrabold text-[#5DBF50]">{progress}%</Text>
-            <View className="ml-4 h-[30px] flex-row items-end">
-              <Ionicons name="trending-up" size={32} color="#FF9F1C" />
-              <View
-                className="-ml-2 mb-[14px] h-[2px] w-[50px] bg-[#FF9F1C]"
-                style={{ transform: [{ rotate: '-15deg' }] }}
-              />
+          <View className="mb-2 flex-row items-center">
+            <Text className="text-[40px] font-extrabold text-[#5DBF50]">{progress}%</Text>
+            <View className="ml-3">
+              <Ionicons name="trending-up" size={28} color="#FF9F1C" />
             </View>
           </View>
         </View>
@@ -328,45 +339,16 @@ export default function ProjectDetailScreen({
           ))}
         </View>
 
-        {activities.length > 0 ? (
-          <View
-            className="mb-4 rounded-[24px] border p-6"
-            style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 15, elevation: 3 }}>
-            <View className="mb-4 flex-row items-center">
-              <View className="mr-3 h-9 w-9 items-center justify-center rounded-xl" style={{ backgroundColor: theme.primaryLight }}>
-                <Ionicons name="time-outline" size={18} color={theme.primary} />
-              </View>
-              <Text className="text-[18px] font-bold" style={{ color: theme.text }}>Recent Activity</Text>
-            </View>
-            {activities.slice(0, 5).map((activity) => (
-              <View key={activity.id} className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surfaceAlt, borderColor: theme.border }}>
-                <Text className="text-[12px] font-bold" style={{ color: theme.text }} numberOfLines={1}>
-                  {formatDisplayLabel(activity.action, 'Activity')}
-                </Text>
-                <Text className="mt-1 text-[12px]" style={{ color: theme.textSecondary }} numberOfLines={2}>
-                  {activity.description || 'Project activity recorded.'}
-                </Text>
-                {activity.created_at ? (
-                  <Text className="mt-1 text-[10px]" style={{ color: theme.textMuted }}>
-                    {new Date(activity.created_at).toLocaleString()}
-                  </Text>
-                ) : null}
-              </View>
-            ))}
-          </View>
-        ) : null}
         </View>
       </ScrollView>
 
-
-
-      {/* Bottom space to avoid overlap with Dashboard nav if needed, or just let ScrollView handle it */}
-      <View style={{ height: 100 }} />
 
       {project && (
         <SiteUpdatesScreen
           visible={showSiteUpdates}
           projectName={project.name}
+          user={user}
+          projects={projects}
           onClose={() => {
             setShowSiteUpdates(false);
             loadProject();
