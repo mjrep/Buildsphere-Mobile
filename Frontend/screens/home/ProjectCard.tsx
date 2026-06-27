@@ -1,9 +1,15 @@
+/**
+ * ProjectCard
+ *
+ * Compact dashboard card for one project. It normalizes status/progress display
+ * and falls back to project initials when no image is available.
+ */
 import { View, Text, TouchableOpacity, Image, ImageSourcePropType, useWindowDimensions } from 'react-native';
-import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { softCardShadow } from '../../constants/theme';
-import { formatDisplayLabel } from '../../utils/display';
 import { getProjectStatusColor, getProjectStatusBadgeStyle } from '../../utils/projectProgress';
+import { getProjectAvatarColors, getProjectInitials } from '../../utils/projectAvatar';
 
 interface ProjectCardProps {
   name: string;
@@ -31,8 +37,12 @@ export default function ProjectCard({
   const safeName = String(name || '').trim() || 'Untitled Project';
   const safeClientName = String(clientName || '').trim() || 'No client set';
   const safeProgress = Math.max(0, Math.min(100, Number.isFinite(Number(progress)) ? Math.round(Number(progress)) : 0));
+  // Status badges are formatted for users instead of exposing raw database enum labels.
   const statusColor = getProjectStatusColor(status, theme);
   const badgeStyle = getProjectStatusBadgeStyle(status, theme);
+  const projectInitials = getProjectInitials(safeName);
+  // Deterministic avatar colors keep cards recognizable when no project image exists.
+  const avatarColors = getProjectAvatarColors(safeName);
 
   return (
     <View
@@ -82,10 +92,15 @@ export default function ProjectCard({
       <View className="px-5 pt-4">
         <View className="mb-3 flex-row items-center">
           <View
-            style={{ backgroundColor: `${bannerColor}26` }}
-            className="mr-3 h-10 w-10 items-center justify-center rounded-full"
+            style={{
+              backgroundColor: avatarColors.backgroundColor,
+              borderColor: avatarColors.borderColor,
+            }}
+            className="mr-3 h-11 w-11 items-center justify-center rounded-full border"
           >
-            <FontAwesome5 name="building" size={20} color={bannerColor} />
+            <Text className="text-[14px] font-extrabold" style={{ color: avatarColors.textColor }} numberOfLines={1}>
+              {projectInitials}
+            </Text>
           </View>
 
           <View className="flex-1">

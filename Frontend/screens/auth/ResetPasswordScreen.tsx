@@ -1,3 +1,9 @@
+/**
+ * ResetPasswordScreen
+ *
+ * Lets users set a new password from a Supabase recovery session. Password inputs
+ * start empty and are never prefilled to avoid storing sensitive values in UI state.
+ */
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -24,6 +30,7 @@ interface ResetPasswordScreenProps {
 }
 
 const MIN_PASSWORD_LENGTH = 6;
+// Keep password validation client-side for quick feedback; the backend/Supabase also validates.
 
 export default function ResetPasswordScreen({
   recoveryLoading = false,
@@ -58,16 +65,19 @@ export default function ResetPasswordScreen({
   } as const;
 
   const handleSavePassword = async () => {
+    const normalizedNewPassword = newPassword.trim();
+    const normalizedConfirmPassword = confirmPassword.trim();
+
     if (recoveryLoading) return;
     if (recoveryError) {
       setErrorMessage('Please request a new password reset email before saving a new password.');
       return;
     }
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    if (normalizedNewPassword.length < MIN_PASSWORD_LENGTH) {
       setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
-    if (newPassword !== confirmPassword) {
+    if (normalizedNewPassword !== normalizedConfirmPassword) {
       setErrorMessage('Passwords do not match.');
       return;
     }
@@ -86,7 +96,7 @@ export default function ResetPasswordScreen({
       }
 
       const { error } = await supabase.auth.updateUser({
-        password: newPassword,
+        password: normalizedNewPassword,
       });
 
       if (error) throw error;
@@ -171,6 +181,10 @@ export default function ResetPasswordScreen({
                     placeholder="Enter new password"
                     placeholderTextColor={theme.textMuted}
                     secureTextEntry={!showNewPassword}
+                    textContentType="newPassword"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
                     className="h-[52px] flex-1 pl-4 pr-2"
                     style={{ color: theme.text }}
                   />
@@ -191,6 +205,10 @@ export default function ResetPasswordScreen({
                     placeholder="Confirm new password"
                     placeholderTextColor={theme.textMuted}
                     secureTextEntry={!showConfirmPassword}
+                    textContentType="newPassword"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
                     className="h-[52px] flex-1 pl-4 pr-2"
                     style={{ color: theme.text }}
                   />

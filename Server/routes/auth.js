@@ -1,3 +1,9 @@
+/**
+ * Auth routes
+ *
+ * Handles login-compatible JWT issuance and password reset OTP flows. Password
+ * reset tokens expire quickly and role/status decisions remain outside self-service auth.
+ */
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
@@ -8,6 +14,7 @@ const { isPasswordResetEmailConfigured, sendPasswordResetOtp } = require('../ser
 
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'buildsphere_dev_secret_key');
 const OTP_EXPIRY_MS = 15 * 60 * 1000;
+// Password reset OTPs are short-lived to reduce account takeover risk.
 const MIN_PASSWORD_LENGTH = 6;
 const supabaseAdmin =
   process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -16,6 +23,7 @@ const supabaseAdmin =
 let passwordResetTableReady = false;
 
 function signAuthToken(user) {
+  // Mobile API requests use this JWT when a Supabase access token is not available.
   if (!JWT_SECRET) {
     throw new Error('Missing JWT_SECRET environment variable.');
   }
@@ -46,6 +54,7 @@ function isExpiredToken(row) {
 }
 
 async function ensurePasswordResetTable() {
+  // The reset table is created defensively so fresh deployments can support OTP reset flows.
   if (passwordResetTableReady) return;
 
   await pool.query(`
@@ -151,7 +160,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'No account found with that email.' });
     }
     const user = result.rows[0];
-    const passwordHash = user.password || user.password_hash;
+    const passwordHash = user.password_hash || user.password;
     if (!passwordHash) {
       return res.status(401).json({ error: 'Password login is not available for this account. Please use the registered app credentials.' });
     }

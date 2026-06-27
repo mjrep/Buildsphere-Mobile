@@ -1,3 +1,9 @@
+/**
+ * Supabase client
+ *
+ * Owns the mobile auth session and local token storage used by apiFetch.
+ * Session cleanup handles stale refresh tokens without exposing credentials.
+ */
 import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
@@ -7,6 +13,7 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
 export function isInvalidRefreshTokenError(error: unknown) {
+  // Supabase can leave stale refresh tokens locally; detecting them lets us clear session state.
   const message =
     error instanceof Error
       ? error.message
@@ -30,6 +37,7 @@ const noopStorage = {
 };
 
 const authStorage =
+  // Server-side/web prerender contexts cannot use AsyncStorage, so use a harmless no-op store there.
   Platform.OS === 'web' && typeof window === 'undefined' ? noopStorage : AsyncStorage;
 
 const originalConsoleError = console.error;

@@ -1,3 +1,10 @@
+/**
+ * RBAC helper
+ *
+ * Central source for mobile/backend role decisions. Executive and operations roles
+ * receive broader visibility, field roles can upload/log assigned work, and staff
+ * roles are limited to the modules they are allowed to use.
+ */
 const VIEW_ONLY_INVENTORY_MESSAGE = 'You have view-only access to Inventory.';
 const USAGE_ONLY_INVENTORY_MESSAGE = 'You can only log material consumption for assigned project inventory.';
 const NO_INVENTORY_ACCESS_MESSAGE = 'You do not have permission to access Inventory.';
@@ -13,6 +20,7 @@ const ROLE_ALIASES = {
 };
 
 const INVENTORY_ACCESS = {
+  // CEO/COO/accounting/procurement can inspect inventory; operations roles edit/log as needed.
   ceo: 'VIEW_ONLY',
   coo: 'VIEW_ONLY',
   accounting: 'VIEW_ONLY',
@@ -66,6 +74,7 @@ function canCreateTask(role) {
 }
 
 function canUploadSiteProgress(role) {
+  // Site progress uploads are limited to field-facing roles responsible for site evidence.
   return ['project_engineer', 'foreman', 'project_supervisor'].includes(normalizeRole(role));
 }
 

@@ -1,3 +1,9 @@
+/**
+ * API helper
+ *
+ * Centralizes API base URL usage, Supabase/Auth token attachment, health checks,
+ * and user-friendly connection errors for all mobile screens.
+ */
 export {
   API_URL,
   getApiConfigurationError,
@@ -91,6 +97,7 @@ function notifyUnauthorized() {
 }
 
 export async function getSupabaseAccessToken() {
+  // Supabase session is preferred; AsyncStorage token remains as a fallback for older sessions.
   const { data } = await supabase.auth.getSession();
   if (data.session?.access_token) return data.session.access_token;
   return AsyncStorage.getItem('token');
@@ -101,6 +108,7 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers || {});
 
   if (token && !headers.has('Authorization')) {
+    // Mobile uses the backend as the source of truth, so protected calls carry auth.
     headers.set('Authorization', `Bearer ${token}`);
   }
 

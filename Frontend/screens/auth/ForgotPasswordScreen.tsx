@@ -1,3 +1,9 @@
+/**
+ * Forgot Password Screen sa login view ito
+ *
+ * Starts the password reset flow by sending an OTP to the user's email. The screen
+ * validates email format locally and shows user-safe errors for rate limits/network failures.
+ */
 import React, { useState } from 'react';
 import {
   View,
@@ -28,6 +34,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function getRecoveryErrorMessage(error: unknown) {
+  // Convert Supabase/email provider errors into clear messages without exposing internals.
   const message = getErrorMessage(error);
   const lowerMessage = message.toLowerCase();
 

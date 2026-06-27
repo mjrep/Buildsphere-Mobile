@@ -1,3 +1,9 @@
+/**
+ * Inventory routes
+ *
+ * Authenticated inventory APIs for project stock items and movement logs. Access
+ * level determines whether a role can view, edit stock, or only log consumption.
+ */
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
@@ -13,6 +19,7 @@ const {
 } = require('../rbac');
 
 const VALID_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE', 'ADJUSTMENT'];
+// SPOILAGE remains the stored action type; the mobile UI labels it as Defective for users.
 
 let inventorySchemaReady = false;
 
@@ -106,6 +113,7 @@ function canViewAllInventoryProjects(role) {
 }
 
 function rejectInventoryAccess(res, accessLevel) {
+  // NOTE: View-only/no-access roles receive a clear 403 instead of partial write behavior.
   if (accessLevel === 'VIEW_ONLY') {
     res.status(403).json({ success: false, message: VIEW_ONLY_INVENTORY_MESSAGE });
     return true;
@@ -312,6 +320,7 @@ router.get('/logs', async (req, res) => {
 });
 
 router.post('/:itemId/transaction', async (req, res) => {
+  // NOTE: Inventory transactions validate action type and quantity before changing stock.
   const { itemId } = req.params;
   const { action_type, actionType, quantity, qty, reference_task_id, referenceTaskId, notes } = req.body;
   const parsedItemId = parsePositiveInteger(itemId);
@@ -335,6 +344,7 @@ router.post('/:itemId/transaction', async (req, res) => {
   });
   if (!inventoryContext) return;
 
+  // NOTE: Quantity must be positive for Receiving, Consumption, Defective, and Adjustment logs.
   const numQty = parseStrictNumber(quantity ?? qty);
   if (numQty === null || numQty <= 0) {
     return res.status(400).json({ success: false, message: 'Quantity must be a positive number.' });

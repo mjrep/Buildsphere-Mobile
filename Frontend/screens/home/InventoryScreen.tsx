@@ -1,3 +1,9 @@
+/**
+ * InventoryScreen
+ *
+ * Project inventory module for mobile. Shows Items and Logs, supports receiving,
+ * consumption, and defective/spoilage logs, and applies role-based edit/log rules.
+ */
 import React, { useMemo, useState, useEffect } from 'react';
 import {
   View,
@@ -67,6 +73,7 @@ interface Props {
 }
 
 function parseInventoryNumber(value: number | string | null | undefined) {
+  // Inventory values can arrive as strings from SQL/JSON; normalize before validation or display.
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const parsed =
     typeof value === 'number'
@@ -118,6 +125,7 @@ const PREDEFINED_ITEMS: Record<string, string> = {
 };
 
 const LOCAL_ACTION_LABELS: Record<string, string> = {
+  // "SPOILAGE" is stored as the system action but shown as "Defective" for users.
   RECEIVING: 'Receiving',
   CONSUMPTION: 'Consumption',
   SPOILAGE: 'Defective',
@@ -131,6 +139,7 @@ const LOCAL_ACTION_LABELS: Record<string, string> = {
 };
 
 const MOBILE_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE'] as const;
+// NOTE: Mobile inventory logs support Receiving, Consumption, and Defective (stored as SPOILAGE).
 type MobileActionType = (typeof MOBILE_ACTION_TYPES)[number];
 
 const INVENTORY_VIEW_ONLY_MESSAGE = 'You have view-only access to Inventory.';
@@ -151,6 +160,7 @@ export default function InventoryScreen({
   const canView = perms.canViewInventory;
   const canEdit = perms.canEditInventory;
   const canAdd = perms.canAddInventory;
+  // Some field roles can log consumption for assigned inventory without full edit permission.
   const canLogUsage = perms.canLogInventoryUsage && !canEdit;
   const canRecordInventoryLog = canEdit || canLogUsage;
   const canWriteInventory = canEdit || canAdd || canLogUsage;
@@ -163,6 +173,7 @@ export default function InventoryScreen({
   const screenBottomPadding = 100 + insets.bottom;
 
   const [activeTab, setActiveTab] = useState<'items' | 'logs'>('items');
+  // NOTE: Items and Logs are separated so stock levels and audit history stay easy to explain.
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [logs, setLogs] = useState<InventoryLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -369,6 +380,7 @@ export default function InventoryScreen({
   const ensureCanAddInventory = () => (canAdd ? true : blockInventoryWrite());
   const ensureCanEditInventory = () => (canEdit ? true : blockInventoryWrite());
   const ensureCanRecordInventoryLog = (action: MobileActionType) => {
+    // NOTE: Usage-only roles may record Consumption, but cannot receive, spoil, or edit stock.
     if (canEdit) return true;
     if (canLogUsage && action === 'CONSUMPTION') return true;
     return blockInventoryWrite();
@@ -514,6 +526,7 @@ export default function InventoryScreen({
   };
 
   const handleTransaction = async () => {
+    // NOTE: Consumption logs require a task link so material usage is traceable to work performed.
     if (!ensureCanRecordInventoryLog(txnAction)) return;
     if (!txnItem) return;
     const qty = parseInventoryNumber(txnQty);

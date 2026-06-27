@@ -1,3 +1,9 @@
+/**
+ * API config
+ *
+ * Chooses a safe backend URL for mobile builds and rejects placeholders, local
+ * URLs, or temporary tunnels in production APKs.
+ */
 declare const __DEV__: boolean | undefined;
 
 const normalizeUrl = (url: string) => url.trim().replace(/\/+$/, '');
@@ -15,6 +21,7 @@ const isDevelopmentRuntime = () =>
 
 const configuredApiUrl = normalizeUrl(process.env.EXPO_PUBLIC_API_URL || '');
 export const API_URL =
+  // Production builds fall back to the deployed Render backend when env config is missing/unsafe.
   !configuredApiUrl ||
   PLACEHOLDER_API_URL_PATTERN.test(configuredApiUrl) ||
   (LOCAL_API_URL_PATTERN.test(configuredApiUrl) && !ALLOW_LOCAL_API_URL)

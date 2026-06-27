@@ -1,3 +1,9 @@
+/**
+ * Users routes
+ *
+ * Authenticated profile/user APIs. Self-service profile updates are separated from
+ * role/status administration so users cannot change their own permissions.
+ */
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
@@ -117,6 +123,22 @@ function mapUserProfile(user) {
   };
 }
 
+async function findBasicUserProfileByEmail(email) {
+  const result = await pool.query(
+    `SELECT
+      id,
+      first_name,
+      last_name,
+      email,
+      role
+    FROM users
+    WHERE LOWER(email) = LOWER($1)`,
+    [email]
+  );
+
+  return result.rows[0] || null;
+}
+
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
@@ -221,8 +243,17 @@ router.get('/by-email/:email', async (req, res) => {
 
     res.json(mapUserProfile(result.rows[0]));
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error.' });
+    console.error('USER_PROFILE_LOOKUP_ERROR:', err.message || err);
+
+    try {
+      const basicUser = await findBasicUserProfileByEmail(req.params.email);
+      if (!basicUser) return res.status(404).json({ error: 'User profile not found.' });
+
+      return res.json(mapUserProfile(basicUser));
+    } catch (fallbackError) {
+      console.error('USER_PROFILE_FALLBACK_ERROR:', fallbackError.message || fallbackError);
+      return res.status(500).json({ error: 'Server error.' });
+    }
   }
 });
 
@@ -279,6 +310,7 @@ router.delete('/me/profile-photo', authenticateRequest, async (req, res) => {
 
 // PATCH /users/me/profile - update the authenticated user's editable profile fields
 router.patch('/me/profile', authenticateRequest, async (req, res) => {
+  // NOTE: Self-service profile updates exclude role/status so users cannot change permissions.
   const {
     firstName,
     middleName,
@@ -481,11 +513,12 @@ router.patch('/:id/profile', authenticateRequest, requireUserAccess, async (req,
 
 // PATCH /users/:id/account  — update email and/or password
 router.patch('/:id/account', authenticateRequest, requireUserAccess, async (req, res) => {
+  // NOTE: Account credential updates are separate from profile edits.
   const { email, password } = req.body;
   try {
     if (password) {
       const hashed = await bcrypt.hash(password, 10);
-      await pool.query('UPDATE users SET email = $1, password_hash = $2 WHERE id = $3', [
+      await pool.query('UPDATE users SET email = $1, password = $2, password_hash = $2 WHERE id = $3', [
         email,
         hashed,
         req.params.id,

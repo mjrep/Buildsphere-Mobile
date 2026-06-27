@@ -1,3 +1,9 @@
+/**
+ * Backend QA debug helper.
+ *
+ * Logs non-sensitive diagnostics outside production. Secret-like keys are
+ * redacted so troubleshooting does not leak credentials or auth tokens.
+ */
 function qaDebug(label, details = {}) {
   if (process.env.NODE_ENV === 'production') return;
 

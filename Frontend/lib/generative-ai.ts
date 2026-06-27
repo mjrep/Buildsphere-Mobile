@@ -1,8 +1,16 @@
+/**
+ * Generative AI mobile helper
+ *
+ * Sends site photos to the BuildSphere backend AI endpoint. The mobile app never
+ * stores Gemini keys or calls Gemini directly; the backend owns prompt/parser logic
+ * and returns the stable count/confidence/summary contract.
+ */
 import { API_URL, apiFetch } from './api';
 import { qaDebug } from '../utils/qaDebug';
 import { Platform } from 'react-native';
 
 const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 4000): Promise<T> => {
+  // Retry only transient AI/backend failures so users are not forced to retake photos immediately.
   try {
     return await fn();
   } catch (error: any) {
@@ -59,6 +67,7 @@ interface BackendGlassAnalysisResponse {
 }
 
 const getGlassAnalysisBaseUrls = () => {
+  // Android emulators may need loopback aliases when testing against a local LAN backend.
   const urls = [API_URL];
 
   if (Platform.OS === 'android') {

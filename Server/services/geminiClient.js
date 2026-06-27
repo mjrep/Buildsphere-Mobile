@@ -1,3 +1,10 @@
+/**
+ * Gemini client
+ *
+ * Backend-only Gemini integration with key fallback, timeout handling, and
+ * normalized error messages. This service does not change the public AI response
+ * contract; routes/ai.js is responsible for the stable detected_count/confidence/summary shape.
+ */
 const RETRYABLE_GEMINI_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const GEMINI_REQUEST_TIMEOUT_MS = 180000;
 const { qaDebug } = require('./qaDebug');
@@ -12,6 +19,7 @@ function createGeminiError(message, { status = 502, retryable = false, clientMes
 }
 
 function getGeminiApiKeys() {
+  // Multiple keys allow controlled fallback when a key is quota-limited or temporarily unavailable.
   return [
     { key: process.env.GEMINI_API_KEY, keyIndex: 1 },
     { key: process.env.GEMINI_API_KEY_2, keyIndex: 2 },
@@ -28,6 +36,7 @@ function getGeminiKeyOrder(configuredKeys) {
 }
 
 function stripJsonFences(text) {
+  // Gemini can wrap JSON in markdown fences; strip wrappers before route-level parsing.
   return text
     .replace(/```json/gi, '')
     .replace(/```/g, '')
@@ -105,7 +114,7 @@ async function fetchWithTimeout(url, options) {
 }
 
 async function callGeminiWithKey({ apiKey, imageBuffer, mimeType, systemInstruction, prompt }) {
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
   const modelPath = model.startsWith('models/') ? model : `models/${model}`;
 
   const response = await fetchWithTimeout(

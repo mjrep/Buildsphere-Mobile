@@ -1,3 +1,9 @@
+/**
+ * Theme constants
+ *
+ * Central palette for light/dark mode. Screens consume these tokens so new UI
+ * controls stay readable and consistent across mobile themes.
+ */
 import { Platform } from 'react-native';
 
 export const brand = {

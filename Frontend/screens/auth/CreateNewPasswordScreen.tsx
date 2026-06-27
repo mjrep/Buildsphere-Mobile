@@ -1,3 +1,9 @@
+/**
+ * CreateNewPasswordScreen for send ng otp and reset password sa profile view 
+ *
+ * Completes the OTP password reset flow after email verification. It validates
+ * password length/match locally before submitting the secure update.
+ */
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -25,6 +31,7 @@ interface CreateNewPasswordScreenProps {
 const MIN_PASSWORD_LENGTH = 6;
 
 function getPasswordUpdateErrorMessage(error: unknown) {
+  // Convert backend/Supabase password errors into user-safe recovery messages.
   const message = error instanceof Error ? error.message : String(error || '');
   const lowerMessage = message.toLowerCase();
 
@@ -76,27 +83,30 @@ export default function CreateNewPasswordScreen({ email, otp, onBackToLogin }: C
   };
 
   const handleUpdatePassword = async () => {
+    const normalizedNewPassword = newPassword.trim();
+    const normalizedConfirmPassword = confirmPassword.trim();
+
     if (!normalizedEmail || !otp) {
       setErrorField('form');
       setErrorMessage('Please verify your OTP before setting a new password.');
       return;
     }
-    if (!newPassword) {
+    if (!normalizedNewPassword) {
       setErrorField('newPassword');
       setErrorMessage('Please enter a new password.');
       return;
     }
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    if (normalizedNewPassword.length < MIN_PASSWORD_LENGTH) {
       setErrorField('newPassword');
       setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
-    if (!confirmPassword) {
+    if (!normalizedConfirmPassword) {
       setErrorField('confirmPassword');
       setErrorMessage('Please confirm your new password.');
       return;
     }
-    if (newPassword !== confirmPassword) {
+    if (normalizedNewPassword !== normalizedConfirmPassword) {
       setErrorField('confirmPassword');
       setErrorMessage('Passwords do not match.');
       return;
@@ -109,7 +119,7 @@ export default function CreateNewPasswordScreen({ email, otp, onBackToLogin }: C
 
     try {
       const { error } = await supabase.auth.updateUser({
-        password: newPassword,
+        password: normalizedNewPassword,
       });
 
       if (error) throw error;
@@ -195,6 +205,9 @@ export default function CreateNewPasswordScreen({ email, otp, onBackToLogin }: C
                     placeholderTextColor={theme.textMuted}
                     secureTextEntry={!showNewPassword}
                     textContentType="newPassword"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
                     onFocus={() => setFocusedField('newPassword')}
                     onBlur={() => setFocusedField(null)}
                     className="h-[52px] flex-1 pl-4 pr-2"
@@ -231,6 +244,9 @@ export default function CreateNewPasswordScreen({ email, otp, onBackToLogin }: C
                     placeholderTextColor={theme.textMuted}
                     secureTextEntry={!showConfirmPassword}
                     textContentType="newPassword"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
                     onFocus={() => setFocusedField('confirmPassword')}
                     onBlur={() => setFocusedField(null)}
                     className="h-[52px] flex-1 pl-4 pr-2"

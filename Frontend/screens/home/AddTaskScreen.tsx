@@ -1,3 +1,10 @@
+/**
+ * AddTaskScreen
+ *
+ * Creates project tasks using the Project -> Phase -> Milestone -> Assigned To flow.
+ * The screen validates dates, attachment types, and required task ownership before
+ * submitting to the backend.
+ */
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -115,6 +122,7 @@ const PRIORITIES = [
   { value: 'high', label: 'High' },
 ];
 const ALLOWED_ATTACHMENT_TYPES = [
+  // Attachments are limited to common site documentation formats used by mobile teams.
   'image/jpeg',
   'image/png',
   'image/webp',
@@ -145,6 +153,7 @@ const displayDate = (value: string) => {
 };
 
 const normalizeMilestones = (milestones: any[] = []): MilestoneOption[] =>
+  // Milestones are scoped by project phase so assignment follows the construction breakdown.
   milestones
     .map((milestone) => ({
       id: Number(milestone.id),
@@ -156,6 +165,7 @@ const normalizeMilestones = (milestones: any[] = []): MilestoneOption[] =>
     .filter((milestone) => Number.isFinite(milestone.id) && milestone.id > 0);
 
 const normalizePhases = (phases: any[] = []): PhaseOption[] =>
+  // Phase names from different backend shapes are normalized into one selector format.
   phases
     .map((phase) => ({
       id: Number(phase.id),
@@ -258,6 +268,7 @@ export default function AddTaskScreen({
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const [projectId, setProjectId] = useState('');
+  // NOTE: Task creation follows Project -> Phase -> Milestone -> Assigned To.
   const [phaseId, setPhaseId] = useState('');
   const [milestoneId, setMilestoneId] = useState('');
   const [title, setTitle] = useState('');
@@ -577,6 +588,7 @@ export default function AddTaskScreen({
     }
   }, [assignedTo, assigneeOptions]);
 
+  // NOTE: Validation prevents incomplete task assignments and due dates before start dates.
   const validate = () => {
     const nextErrors: Record<string, string> = {};
     if (!projectId) nextErrors.project_id = 'Please select a project.';
@@ -716,6 +728,7 @@ export default function AddTaskScreen({
   };
 
   const submit = async () => {
+    // NOTE: POST /tasks receives the selected project, phase, milestone, assignee, dates, and attachment.
     if (!validate()) {
       Alert.alert('Missing information', 'Please complete all required task fields.');
       return;

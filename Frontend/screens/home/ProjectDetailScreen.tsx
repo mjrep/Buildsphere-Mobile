@@ -1,3 +1,9 @@
+/**
+ * ProjectDetailScreen
+ *
+ * Shows project metadata, budget/progress information, activity, tasks, inventory
+ * access, and Site Updates. Module actions are gated by role permissions.
+ */
 import React, { useState, useEffect } from 'react';
 import {
   View,

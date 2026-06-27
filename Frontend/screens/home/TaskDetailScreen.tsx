@@ -1,3 +1,9 @@
+/**
+ * TaskDetailScreen
+ *
+ * Shows one assigned task, including readable status/priority labels, evidence,
+ * comments, progress actions, inventory shortcuts, and role-gated task controls.
+ */
 import React, { useState, useEffect, useRef } from 'react';
 
 import {
@@ -57,9 +63,11 @@ interface Comment {
 const PRIMARY = '#7370FF';
 
 const truthyFlag = (value: any) =>
+  // Backend fields may be boolean, numeric, or string flags depending on source query.
   value === true || value === 1 || ['true', '1', 'yes'].includes(String(value || '').toLowerCase());
 
 const finiteNumber = (value: any, fallback = 0) => {
+  // Defensive numeric parsing keeps progress and quantity displays stable.
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 };

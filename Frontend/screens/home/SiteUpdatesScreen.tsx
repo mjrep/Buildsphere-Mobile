@@ -1,3 +1,10 @@
+/**
+ * SiteUpdatesScreen
+ *
+ * Displays today's shift-based site progress and past site uploads by date.
+ * Upload actions remain role-gated; view-only users can inspect records without
+ * creating new progress entries.
+ */
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -22,6 +29,7 @@ import { formatDisplayLabel } from '../../utils/display';
 import SystemBars from '../../components/SystemBars';
 
 const { width } = Dimensions.get('window');
+// NOTE: Site progress is grouped into the three field reporting shifts used by the mobile UI.
 const SHIFT_NAMES = ['Morning', 'Noon', 'Afternoon'] as const;
 
 interface SiteUpdate {
@@ -163,11 +171,23 @@ export default function SiteUpdatesScreen({
   };
 
   const todayDateKey = getDateKey(new Date());
+  // NOTE: Dates are normalized to YYYY-MM-DD so upload markers do not shift across timezones.
+  const getUpdateDateKey = (update: SiteUpdate) =>
+    getDateKey(
+      update.work_date ||
+      (update as any).progress_date ||
+      (update as any).date ||
+      (update as any).recorded_at ||
+      update.created_at
+    );
+  // Dates with at least one site update are marked so users can easily find past uploads.
+  const markedDateKeys = new Set(updates.map(getUpdateDateKey).filter(Boolean));
   const todayUpdates = updates.filter((update) => (
-    getDateKey(update.work_date || update.created_at) === todayDateKey
+    getUpdateDateKey(update) === todayDateKey
   ));
   
   const shiftTotals = SHIFT_NAMES.reduce<Record<ShiftName, number>>((totals, shift) => {
+    // NOTE: Shift cards summarize today's recorded panels for quick field review.
     totals[shift] = todayUpdates
       .filter((update) => update.shift === shift)
       .reduce((sum, update) => sum + (Number(update.glass_count) || 0), 0);
@@ -198,6 +218,7 @@ export default function SiteUpdatesScreen({
     };
     const daysCount = getDaysInMonth(currentYear, currentMonthDate.getMonth());
     const dates = Array.from({ length: daysCount }, (_, i) => i + 1);
+    const firstWeekday = new Date(currentYear, currentMonthDate.getMonth(), 1).getDay();
 
     const handlePrevMonth = () => {
       const newDate = new Date(currentMonthDate);
@@ -237,9 +258,16 @@ export default function SiteUpdatesScreen({
           ))}
         </View>
 
-        <View className="flex-row flex-wrap justify-between">
+        <View className="flex-row flex-wrap">
+          {Array.from({ length: firstWeekday }).map((_, index) => (
+            <View key={`blank-${index}`} className="w-[14.285%] h-10 mb-1" />
+          ))}
           {dates.map(date => {
             const isSelected = date === currentSelectedDay;
+            const dayDate = new Date(currentYear, currentMonthDate.getMonth(), date);
+            const dayKey = getDateKey(dayDate);
+            // NOTE: Marked dates show a small dot when at least one upload exists.
+            const isMarked = markedDateKeys.has(dayKey);
             return (
               <TouchableOpacity 
                 key={date}
@@ -248,10 +276,20 @@ export default function SiteUpdatesScreen({
                   newDate.setDate(date);
                   setSelectedDate(newDate);
                 }}
-                className={`w-8 h-8 items-center justify-center rounded-full mb-1 ${isSelected ? 'bg-[#7370FF]' : ''}`}>
+                className="w-[14.285%] h-10 items-center justify-center mb-1">
+                <View
+                  className={`h-8 w-8 items-center justify-center rounded-full ${isSelected ? 'bg-[#7370FF]' : ''}`}
+                  style={{ backgroundColor: isSelected ? theme.primary : 'transparent' }}>
                 <Text className={`text-[12px] font-semibold ${isSelected ? 'text-white' : ''}`} style={{ color: isSelected ? 'white' : theme.text }}>
                   {date}
                 </Text>
+                </View>
+                {isMarked && (
+                  <View
+                    className="mt-0.5 h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: isSelected ? 'white' : theme.primary }}
+                  />
+                )}
               </TouchableOpacity>
             );
           })}
@@ -550,7 +588,8 @@ export default function SiteUpdatesScreen({
                       </View>
                     ) : (() => {
                       const activeDateKey = getDateKey(selectedDate);
-                      const visibleUpdates = updates.filter(update => getDateKey(update.work_date || update.created_at) === activeDateKey);
+                      // NOTE: Selecting a Past date shows every upload recorded for that normalized date.
+                      const visibleUpdates = updates.filter(update => getUpdateDateKey(update) === activeDateKey);
                       
                       if (visibleUpdates.length === 0) {
                         return (

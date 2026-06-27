@@ -107,7 +107,7 @@ function buildReferenceUrl(data) {
 }
 
 /**
- * Format date/time strings in Manila timezone for legacy mobile UI support.
+ * Format date/time strings in Manila timezone 8+ eto
  */
 function formatLegacyTimestamps() {
   const now = new Date();

@@ -1,3 +1,9 @@
+/**
+ * Date-only helpers
+ *
+ * Parses and formats YYYY-MM-DD values without UTC conversion so work dates,
+ * birthdays, and site update markers do not shift across timezones.
+ */
 export function parseDateOnly(value?: string | null) {
   if (!value) return null;
 
@@ -9,6 +15,7 @@ export function parseDateOnly(value?: string | null) {
 }
 
 export function toDateOnlyString(date: Date | null) {
+  // Use local date parts instead of toISOString() to avoid timezone day shifts.
   if (!date) return '';
 
   const year = date.getFullYear();

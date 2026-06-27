@@ -1,3 +1,9 @@
+/**
+ * MyWork
+ *
+ * Mobile task list for the signed-in user. Loads task assignments from the API,
+ * groups them into user-friendly status tabs, and supports project/priority sorting.
+ */
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
@@ -53,6 +59,7 @@ interface MyWorkProps {
 type Tab = 'To Do' | 'In Progress' | 'To Review' | 'Completed';
 
 const STATUS_MAP: Record<Tab, string> = {
+  // User-facing tabs map to backend task status values used by the API.
   'To Do': 'pending',
   'In Progress': 'in-progress',
   'To Review': 'in-review',

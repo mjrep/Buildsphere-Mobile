@@ -1,3 +1,9 @@
+/**
+ * Auth middleware
+ *
+ * Verifies the mobile access token and attaches the authenticated user to req.user
+ * before protected routes apply route-specific RBAC and business rules.
+ */
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const pool = require('../db');

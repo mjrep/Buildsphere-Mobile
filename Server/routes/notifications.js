@@ -1,3 +1,9 @@
+/**
+ * Notifications routes
+ *
+ * Authenticated notification inbox APIs for mobile badges, read state, and
+ * navigation metadata used to open the correct project/task/site progress context.
+ */
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
@@ -163,9 +169,11 @@ async function deleteNotificationViaSupabase(notificationId, userId) {
 }
 
 router.use(authenticateRequest);
+// NOTE: Notification routes are authenticated so inbox records are scoped to the current user.
 
 // GET /notifications
 router.get('/', async (req, res) => {
+  // NOTE: Response powers the mobile Notifications tab and unread badge count.
   const userId = getRequestUserId(req);
   if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
 

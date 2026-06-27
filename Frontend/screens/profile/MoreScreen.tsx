@@ -1,3 +1,9 @@
+/**
+ * MoreScreen
+ *
+ * Profile/settings hub for mobile users. Role and account status are displayed
+ * for transparency but permission changes are handled by authorized admin users.
+ */
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Image, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';

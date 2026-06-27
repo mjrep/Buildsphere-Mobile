@@ -1,3 +1,9 @@
+/**
+ * EditInformationScreen
+ *
+ * Lets users update personal profile details. Company role/status remain
+ * administrative fields and should not be edited by the account owner.
+ */
 import React, { useState } from 'react';
 import {
   View,
@@ -47,6 +53,7 @@ const isFutureDate = (date: Date | null) => {
 };
 
 export default function EditInformationScreen({ user, onBack, onSaved }: EditInformationScreenProps) {
+  // NOTE: Company Role and account status are read-only because users cannot change their own permissions.
   const { theme, isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -129,7 +136,9 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
       return false;
     }
 
-    const isChangingPassword = !!currentPassword || !!newPassword || !!confirmNewPassword;
+    const normalizedNewPassword = newPassword.trim();
+    const normalizedConfirmNewPassword = confirmNewPassword.trim();
+    const isChangingPassword = !!currentPassword || !!normalizedNewPassword || !!normalizedConfirmNewPassword;
 
     if (isChangingPassword) {
       if (!currentPassword) {
@@ -137,27 +146,27 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
         return false;
       }
 
-      if (!newPassword) {
+      if (!normalizedNewPassword) {
         Alert.alert('Error', 'New password is required.');
         return false;
       }
 
-      if (!confirmNewPassword) {
+      if (!normalizedConfirmNewPassword) {
         Alert.alert('Error', 'Confirm new password is required.');
         return false;
       }
 
-      if (newPassword.length < 8) {
+      if (normalizedNewPassword.length < 8) {
         Alert.alert('Error', 'Password must be at least 8 characters.');
         return false;
       }
 
-      if (newPassword !== confirmNewPassword) {
+      if (normalizedNewPassword !== normalizedConfirmNewPassword) {
         Alert.alert('Error', 'Passwords do not match.');
         return false;
       }
 
-      if (newPassword === currentPassword) {
+      if (normalizedNewPassword === currentPassword.trim()) {
         Alert.alert('Error', 'New password cannot be the same as current password.');
         return false;
       }
@@ -183,10 +192,13 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
       let profileEmail = trimmedEmail;
       let passwordUpdated = false;
       let emailConfirmationPending = false;
+      const normalizedNewPassword = newPassword.trim();
+      const normalizedConfirmNewPassword = confirmNewPassword.trim();
 
-      const isChangingPassword = !!currentPassword || !!newPassword || !!confirmNewPassword;
+      const isChangingPassword = !!currentPassword || !!normalizedNewPassword || !!normalizedConfirmNewPassword;
 
       if (isChangingPassword) {
+        // NOTE: Password changes require re-authentication and are handled separately from profile fields.
         const { error: reauthError } = await supabase.auth.signInWithPassword({
           email: originalEmail,
           password: currentPassword,
@@ -197,14 +209,14 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
           return;
         }
 
-        const { error: passwordError } = await supabase.auth.updateUser({ password: newPassword });
+        const { error: passwordError } = await supabase.auth.updateUser({ password: normalizedNewPassword });
         if (passwordError) {
           Alert.alert('Error', 'Could not update password. Please try again.');
           return;
         }
         passwordUpdated = true;
 
-        // Clear password fields upon success
+        // NOTE: Password fields are cleared after success and are never prefilled.
         setCurrentPassword('');
         setNewPassword('');
         setConfirmNewPassword('');
@@ -235,6 +247,27 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
       if (!token) {
         Alert.alert('Error', 'Your session has expired. Please log in again.');
         return;
+      }
+
+      if (isChangingPassword) {
+        const accountRes = await apiFetch(`${API_URL}/api/users/${user.id}/account`, {
+          method: 'PATCH',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            email: profileEmail,
+            password: normalizedNewPassword,
+          }),
+        });
+        const accountData = await accountRes.json().catch(() => null);
+
+        if (!accountRes.ok) {
+          Alert.alert('Error', accountData?.message || accountData?.error || 'Could not sync password with the backend.');
+          return;
+        }
       }
 
       const res = await apiFetch(`${API_URL}/api/users/me/profile`, {
@@ -336,6 +369,8 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
           secureTextEntry={!visible}
           autoCapitalize="none"
           autoComplete="off"
+          autoCorrect={false}
+          spellCheck={false}
           textContentType="none"
         />
         <TouchableOpacity

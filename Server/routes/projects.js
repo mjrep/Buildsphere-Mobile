@@ -1,3 +1,9 @@
+/**
+ * Projects routes
+ *
+ * Authenticated project APIs. The backend applies RBAC filtering before returning
+ * projects so mobile clients only receive data they are allowed to view or modify.
+ */
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
@@ -54,6 +60,7 @@ function rejectRole(res, message = 'You do not have permission to modify project
 }
 
 function requireProjectRole(allowedRoles, message) {
+  // NOTE: Project mutations are role-gated on the backend, not trusted to the mobile UI.
   return (req, res, next) => {
     if (!allowedRoles.has(userRole(req))) {
       return rejectRole(res, message);
@@ -67,6 +74,7 @@ function canViewAllProjects(req) {
 }
 
 function assignedProjectWhereClause(alias = 'p') {
+  // Non-executive users read projects through direct charge, project membership, or task assignment.
   return `(
     ${alias}.project_in_charge_id = $1
     OR EXISTS (
@@ -207,6 +215,7 @@ function mapProjectForMobile(row, progress = row.progress) {
 
 // GET /projects
 router.get('/', authenticateRequest, async (req, res) => {
+  // NOTE: Response is filtered by role/assignment before projects are returned to mobile.
   try {
     let rows;
     const canViewAll = canViewAllProjects(req);

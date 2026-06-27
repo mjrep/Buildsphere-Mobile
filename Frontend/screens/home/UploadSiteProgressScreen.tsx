@@ -1,3 +1,9 @@
+/**
+ * UploadSiteProgressScreen
+ *
+ * Handles site progress uploads. Users can run the Gemini AI count flow or skip
+ * AI validation and submit a manual upload with the same project/date/shift/photo data.
+ */
 import React, { useState } from 'react';
 import {
   View,
@@ -77,6 +83,8 @@ type AnalysisStatus =
   | 'no_panels'         // Analysis complete but 0 panels found
   | 'failed';           // Analysis failed — manual entry needed
 
+type UploadMode = 'ai' | 'manual' | null;
+
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function UploadSiteProgressScreen({
@@ -111,6 +119,7 @@ export default function UploadSiteProgressScreen({
   const [workDate, setWorkDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [glassCount, setGlassCount] = useState<number>(0);
+  const [uploadMode, setUploadMode] = useState<UploadMode>(null);
 
   //  AI detection state 
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle');
@@ -135,6 +144,7 @@ export default function UploadSiteProgressScreen({
     setQuantityInstalled('');
     setNotes('');
     setGlassCount(0);
+    setUploadMode(null);
     setSaving(false);
     setHasUnsavedChanges(false);
     setRecordSaved(false);
@@ -241,6 +251,7 @@ export default function UploadSiteProgressScreen({
       setSelectedPhotos(prev => [...prev, ...newPhotos]);
       setPhotoAnalysisResults([]);
       setAnalysisStatus('idle');
+      setUploadMode(null);
       setAiSummary('');
       markDirty();
     }
@@ -267,6 +278,7 @@ export default function UploadSiteProgressScreen({
       }]);
       setPhotoAnalysisResults([]);
       setAnalysisStatus('idle');
+      setUploadMode(null);
       setAiSummary('');
       markDirty();
     }
@@ -276,6 +288,7 @@ export default function UploadSiteProgressScreen({
     setSelectedPhotos(prev => prev.filter((_, i) => i !== index));
     setPhotoAnalysisResults([]);
     setAnalysisStatus('idle');
+    setUploadMode(null);
     setAiSummary('');
     markDirty();
   };
@@ -290,10 +303,12 @@ export default function UploadSiteProgressScreen({
   };
 
   const handleCountGlass = async () => {
+    // NOTE: "Use AI Check" sends photos to the backend Gemini analysis flow before saving.
     if (selectedPhotos.length === 0) {
       return;
     }
 
+    setUploadMode('ai');
     setAnalyzing(true);
     setAnalysisStatus('uploading');
     setPhotoAnalysisResults([]);
@@ -411,13 +426,25 @@ export default function UploadSiteProgressScreen({
     }
   };
 
+  const handleManualUpload = () => {
+    // AI validation is optional.
+    // Users may upload a site update manually when AI checking is not needed.
+    setUploadMode('manual');
+    setAnalysisStatus('idle');
+    setDetectionMode('manual');
+    setAvgConfidence(0);
+    setAiDetectedCount(0);
+    setHasWarnings(false);
+    setWarningMessage('');
+    setAiSummary('');
+    setPhotoAnalysisResults([]);
+    setStep(3);
+  };
+
   const handleSave = async () => {
+    // NOTE: "Looks Good" confirms AI results; manual mode submits the same record without AI fields.
     if (!projectId || !taskId) {
       Alert.alert('Missing info', 'Please select a project and a task.');
-      return;
-    }
-    if (selectedPhotos.length > 0 && analysisStatus === 'idle') {
-      Alert.alert('Verification required', 'AI result must be verified before saving.');
       return;
     }
     setSaving(true);
@@ -437,14 +464,16 @@ export default function UploadSiteProgressScreen({
       formData.append('workDate', formattedDate);
       formData.append('notes', notes);
 
-      // Gemini-only analysis fields
-      formData.append('ai_detected_count', aiDetectedCount.toString());
       formData.append('verified_panel_count', verifiedPanelCount.toString());
-      formData.append('avg_confidence', avgConfidence.toFixed(4));
-      formData.append('detection_mode', detectionMode);
-      formData.append('warning_message', warningMessage);
-      formData.append('ai_summary', aiSummary);
-      formData.append('per_photo_counts', JSON.stringify(photoAnalysisResults));
+      formData.append('detection_mode', uploadMode === 'ai' ? detectionMode : 'manual');
+
+      if (uploadMode === 'ai') {
+        formData.append('ai_detected_count', aiDetectedCount.toString());
+        formData.append('avg_confidence', avgConfidence.toFixed(4));
+        formData.append('warning_message', warningMessage);
+        formData.append('ai_summary', aiSummary);
+        formData.append('per_photo_counts', JSON.stringify(photoAnalysisResults));
+      }
 
       if (selectedPhotos.length > 0) {
         selectedPhotos.forEach((photo, index) => {
@@ -823,33 +852,43 @@ export default function UploadSiteProgressScreen({
                 </SkeletonCard>
               )}
 
-              <TouchableOpacity
-                onPress={() => setStep(3)}
-                className="h-14 items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: PRIMARY }}>
-                <Text className="text-[16px] font-bold text-white">Looks Good, Next</Text>
-              </TouchableOpacity>
-
+              {/* NOTE: Users choose explicitly between AI validation and manual upload after photo preview. */}
               <TouchableOpacity
                 onPress={handleCountGlass}
                 disabled={analyzing}
-              className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
-              style={{ backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
+                className="h-14 flex-row items-center justify-center rounded-[16px]"
+                style={{ backgroundColor: PRIMARY }}>
                 {analyzing ? (
                   <View className="flex-row items-center px-4">
-                    <Text className="ml-3 text-[14px] font-semibold" style={{ color: theme.primary }}>
+                    <ActivityIndicator color="white" />
+                    <Text className="ml-3 text-[14px] font-semibold text-white">
                       {analysisProgressLabel}
                     </Text>
                   </View>
                 ) : (
                   <>
-                    <Ionicons name="sparkles" size={20} color={PRIMARY} />
-                    <Text className="ml-2 text-[16px] font-bold" style={{ color: theme.primary }}>
-                      Count All Photos (AI)
+                    <Ionicons name="sparkles" size={20} color="white" />
+                    <Text className="ml-2 text-[16px] font-bold text-white">
+                      Use AI Check
                     </Text>
                   </>
                 )}
               </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleManualUpload}
+                disabled={analyzing}
+                className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
+                style={{ backgroundColor: theme.surface, borderColor: theme.primary }}>
+                <Ionicons name="cloud-upload-outline" size={20} color={PRIMARY} />
+                <Text className="ml-2 text-[16px] font-bold" style={{ color: theme.primary }}>
+                  Upload Without AI
+                </Text>
+              </TouchableOpacity>
+
+              <Text className="mt-3 text-center text-[11px]" style={{ color: theme.textMuted }}>
+                AI check is optional. You may upload manually if AI validation is not needed.
+              </Text>
             </View>
           </View>
         )}
@@ -982,11 +1021,19 @@ export default function UploadSiteProgressScreen({
                       <Ionicons name="analytics" size={16} color={PRIMARY} />
                     </View>
                     <Text className="text-[13px] font-semibold" style={{ color: theme.text }}>
-                      AI Summary
+                      {uploadMode === 'manual' ? 'Manual Upload' : 'AI Summary'}
                     </Text>
                   </View>
                   {/* Detection Mode Badge */}
                 </View>
+
+                {uploadMode === 'manual' && (
+                  <View className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.elevated, borderColor: theme.border }}>
+                    <Text className="text-[12px] leading-4" style={{ color: theme.textSecondary }}>
+                      AI check skipped. Enter or adjust the verified count, then submit this site update manually.
+                    </Text>
+                  </View>
+                )}
 
                 {/* AI analysis failed — manual mode */}
                 {hasWarnings && analysisStatus !== 'failed' && (
@@ -1031,7 +1078,7 @@ export default function UploadSiteProgressScreen({
                 ) : null}
 
                 {/* AI Summary */}
-                {aiSummary ? (
+                {uploadMode === 'ai' && aiSummary ? (
                   <View className="mb-3 rounded-xl px-3 py-2 border" style={{ backgroundColor: theme.elevated, borderColor: theme.border }}>
                     <Text className="text-[10px] font-semibold mb-1" style={{ color: theme.textMuted }}>AI Summary</Text>
                     <Text className="text-[12px] leading-4" style={{ color: theme.textSecondary }}>{aiSummary}</Text>
@@ -1078,7 +1125,9 @@ export default function UploadSiteProgressScreen({
                     </TouchableOpacity>
                   </View>
                   <Text className="mt-1.5 text-center text-[10px]" style={{ color: theme.textMuted }}>
-                    AI count is only a suggestion. Please adjust the verified count if needed.
+                    {uploadMode === 'ai'
+                      ? 'AI count is only a suggestion. Please adjust the verified count if needed.'
+                      : 'Manual count will be saved without AI validation.'}
                   </Text>
                 </View>
               </View>
@@ -1094,7 +1143,9 @@ export default function UploadSiteProgressScreen({
                 {saving ? (
                   <ActivityIndicator color="white" />
                 ) : (
-                  <Text className="text-[16px] font-bold text-white">Save</Text>
+                  <Text className="text-[16px] font-bold text-white">
+                    {uploadMode === 'ai' ? 'Looks Good' : 'Submit Site Update'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1205,6 +1256,7 @@ export default function UploadSiteProgressScreen({
               </TouchableOpacity>
             </View>
 
+            {/* NOTE: Shift selection groups uploads into Morning, Noon, and Afternoon site records. */}
             {(['Morning', 'Afternoon', 'Noon'] as const).map((item) => (
               <TouchableOpacity
                 key={item}

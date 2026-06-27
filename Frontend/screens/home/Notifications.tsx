@@ -1,3 +1,9 @@
+/**
+ * Notifications
+ *
+ * Mobile notification inbox. Loads notification records, keeps unread badge counts
+ * in sync, and routes taps to task, project, inventory, or site progress screens.
+ */
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, RefreshControl, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -59,6 +65,7 @@ export default function Notifications({
   const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
 
   const fetchNotifications = useCallback(async () => {
+    // GET /notifications returns records already scoped to the authenticated user.
     try {
       setError(null);
       const res = await apiFetch(`${API_URL}/notifications`);

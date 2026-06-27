@@ -1,3 +1,10 @@
+/**
+ * BottomNavigationBar
+ *
+ * Shopee-style mobile navigation limited to the four primary mobile modules:
+ * Home, Task, Notifications, and More. Extra module access stays inside the
+ * home action menu so the bottom nav remains stable across roles.
+ */
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +25,7 @@ export function getBottomNavHeight(bottomInset: number) {
 }
 
 export function getBottomNavContentPadding(bottomInset: number) {
+  // Keeps scroll content and footer buttons above the fixed Android/iOS nav bar.
   return getBottomNavHeight(bottomInset) + BOTTOM_NAV_EXTRA_CONTENT_GAP;
 }
 
@@ -41,6 +49,7 @@ const NAV_ITEMS: {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
+  // NOTE: Mobile intentionally exposes only four tabs; role-gated modules open from Home.
   { key: 'home', label: 'Home', icon: 'home' },
   { key: 'mywork', label: 'Task', icon: 'briefcase-outline' },
   { key: 'notifications', label: 'Notifications', icon: 'notifications-outline' },
@@ -55,6 +64,7 @@ export default function BottomNavigationBar({
   const { isDark, theme } = useAppTheme();
   const insets = useSafeAreaInsets();
   const navBackground = theme.tabBar;
+  // NOTE: Active/inactive colors are chosen from theme values so the nav works in dark mode.
   const activeColor = isDark ? '#A78BFA' : theme.primary;
   const inactiveColor = isDark ? '#9CA3AF' : '#8F9098';
   const borderColor = isDark ? theme.border : 'rgba(30,30,30,0.08)';
@@ -101,6 +111,7 @@ export default function BottomNavigationBar({
                   size={25}
                   color={isActive ? activeColor : inactiveColor}
                 />
+                {/* NOTE: The badge is capped at 9+ so it stays readable on small mobile screens. */}
                 {item.key === 'notifications' && unreadCount > 0 && (
                   <View
                     className="absolute items-center justify-center rounded-full"

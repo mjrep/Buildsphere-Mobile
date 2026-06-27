@@ -1,3 +1,9 @@
+/**
+ * VerifyResetOtpScreen
+ *
+ * Confirms the emailed reset OTP before allowing the user to create a new password.
+ * Includes resend cooldown to avoid accidental email flooding.
+ */
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -25,6 +31,7 @@ interface VerifyResetOtpScreenProps {
 const RESEND_COOLDOWN_SECONDS = 60;
 
 function maskEmail(email: string) {
+  // Masks the local part so the user can confirm the destination without exposing full email text.
   const [name, domain] = email.split('@');
   if (!name || !domain) return email;
   const visible = name.slice(0, Math.min(2, name.length));
@@ -32,6 +39,7 @@ function maskEmail(email: string) {
 }
 
 function getOtpErrorMessage(error: unknown) {
+  // Keep OTP failures understandable while hiding provider-specific implementation details.
   const message = error instanceof Error ? error.message : String(error || '');
   const lowerMessage = message.toLowerCase();
 

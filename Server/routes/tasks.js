@@ -1,3 +1,9 @@
+/**
+ * Tasks routes
+ *
+ * Authenticated task APIs for assignment, status updates, attachments, and
+ * quantity-aware task progress. Creation is limited to coordinator/engineering leadership roles.
+ */
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -39,6 +45,7 @@ const TASK_UPDATE_FIELDS = new Set([
   'visibility_scope',
 ]);
 const CREATOR_ROLES = new Set([
+  // Task creation follows the mobile Project -> Phase -> Milestone -> Assigned To workflow.
   'ceo',
   'coo',
   'project_engineer',
@@ -378,6 +385,7 @@ async function ensureTaskColumns() {
 }
 
 router.use(authenticateRequest);
+// NOTE: All task routes require an authenticated user before task-specific permissions run.
 
 router.use(async (req, res, next) => {
   try {
@@ -391,6 +399,7 @@ router.use(async (req, res, next) => {
 
 // GET /tasks?userId=xxx
 router.get('/', async (req, res) => {
+  // NOTE: Task list is scoped by role and assignment so users only see relevant work.
   const userId = req.user.id;
   try {
     const result = await fetchAssignedTasks(userId);
@@ -404,6 +413,7 @@ router.get('/', async (req, res) => {
 
 // GET /tasks/meta
 router.get('/meta', async (req, res) => {
+  // NOTE: Metadata feeds the mobile Project -> Phase -> Milestone -> Assigned To selectors.
   if (!roleCanCreateTasks(req.user?.role)) {
     return res.status(403).json({ error: 'You do not have permission to create tasks.' });
   }
@@ -574,6 +584,7 @@ router.post(
   '/',
   handleTaskAttachmentUpload,
   async (req, res) => {
+  // NOTE: Expected body includes project, phase, milestone, assignee, priority, and date range.
   const {
     title,
     project_id,
@@ -583,6 +594,7 @@ router.post(
     assigned_by,
   } = req.body;
 
+  // NOTE: Backend repeats required-field/date validation instead of trusting the mobile form.
   const { errors, values } = validateTaskPayload(req.body);
   if (Object.keys(errors).length > 0) {
     return res.status(400).json({ error: 'Please complete the required task fields.', errors });

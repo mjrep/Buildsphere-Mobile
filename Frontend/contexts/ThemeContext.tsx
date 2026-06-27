@@ -1,3 +1,9 @@
+/**
+ * ThemeContext
+ *
+ * Provides light/dark mode colors to screens and components. Centralizing theme
+ * tokens keeps new UI additions readable in both modes.
+ */
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppThemes, AppTheme, ThemeMode } from '../constants/theme';

@@ -1,3 +1,9 @@
+/**
+ * LoginScreen 
+ *
+ * Starts the mobile Supabase/Auth session, then lets apiFetch attach the active
+ * access token to protected backend requests.
+ */
 import React, { useState } from 'react';
 import {
   View,
@@ -66,10 +72,17 @@ export default function LoginScreen({
           throw new Error(authData?.error || 'Invalid email or password.');
         }
 
-        const profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
-        const profileData = await profileRes.json().catch(() => null);
-        if (!profileRes.ok) {
-          throw new Error(profileData?.error || 'No app profile is linked to this account.');
+        let profileData = authData?.user;
+        try {
+          const profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
+          const fetchedProfile = await profileRes.json().catch(() => null);
+          if (profileRes.ok) {
+            profileData = fetchedProfile;
+          } else if (!profileData) {
+            throw new Error(fetchedProfile?.error || 'No app profile is linked to this account.');
+          }
+        } catch (profileError) {
+          if (!profileData) throw profileError;
         }
 
         onLogin(profileData, authData.token);
@@ -107,10 +120,14 @@ export default function LoginScreen({
         if (!profileRes.ok) {
           await supabase.auth.signOut();
           if (profileRes.status >= 500) {
-            Alert.alert(
-              'Profile unavailable',
-              'Login succeeded, but BuildSphere could not load your profile because the backend returned an error.'
-            );
+            try {
+              await loginWithBackend();
+            } catch (backendLoginError) {
+              Alert.alert(
+                'Profile unavailable',
+                'Login succeeded, but BuildSphere could not load your profile because the backend returned an error.'
+              );
+            }
           } else {
             Alert.alert(
               'Login Failed',

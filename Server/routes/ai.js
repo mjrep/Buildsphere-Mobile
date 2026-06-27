@@ -1,3 +1,10 @@
+/**
+ * AI routes
+ *
+ * Backend-owned Gemini image analysis endpoint. The mobile app sends images here
+ * so Gemini keys, prompt handling, parser normalization, and the stable result
+ * contract stay server-side.
+ */
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +23,7 @@ const upload = multer({
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'buildsphere_dev_secret_key');
+// NOTE: AI analysis is limited to roles that are allowed to submit site progress evidence.
 const AI_ALLOWED_ROLES = new Set(['project_engineer', 'foreman', 'project_supervisor']);
 const AI_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AI_RATE_LIMIT_MAX_REQUESTS = 20;
@@ -250,6 +258,7 @@ router.post(
   rateLimitAiRequest,
   upload.single('image'),
   async (req, res) => {
+    // NOTE: This endpoint preserves the stable AI result contract used by the mobile upload flow.
     try {
       if ((process.env.AI_ANALYSIS_MODE || 'gemini_only') !== 'gemini_only') {
         return res.status(400).json({ success: false, message: 'AI_ANALYSIS_MODE must be gemini_only.' });

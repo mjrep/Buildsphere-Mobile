@@ -1,3 +1,9 @@
+/**
+ * EditAccountScreen
+ *
+ * Handles account credential updates separately from profile details. Password
+ * fields are never prefilled so sensitive values are not stored in component state.
+ */
 import React, { useState } from 'react';
 import {
   View,
@@ -23,6 +29,7 @@ const PRIMARY = '#7370FF';
 
 export default function EditAccountScreen({ user, onBack, onSaved }: EditAccountScreenProps) {
   const [email, setEmail] = useState(user.email);
+  // NOTE: Password fields start blank; leaving them blank keeps the current password.
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -39,18 +46,22 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
   };
 
   const handleSave = async () => {
+    // NOTE: Account updates are separate from profile updates so credentials stay isolated.
+    const normalizedPassword = password.trim();
+    const normalizedConfirmPassword = confirmPassword.trim();
+
     if (!email.trim()) {
       Alert.alert('Missing info', 'Email is required.');
       return;
     }
-    if (password && password !== confirmPassword) {
+    if (normalizedPassword && normalizedPassword !== normalizedConfirmPassword) {
       Alert.alert('Error', 'Passwords do not match.');
       return;
     }
     setLoading(true);
     try {
       const body: any = { email };
-      if (password) body.password = password;
+      if (normalizedPassword) body.password = normalizedPassword;
 
       const res = await apiFetch(`${API_URL}/users/${user.id}/account`, {
         method: 'PATCH',
@@ -132,6 +143,10 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
             placeholder="Password"
             placeholderTextColor="#B9B9B9"
             secureTextEntry={!showPassword}
+            textContentType="newPassword"
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
           />
           <TouchableOpacity
             onPress={() => setShowPassword((current) => !current)}
@@ -151,6 +166,10 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
             placeholder="Confirm Password"
             placeholderTextColor="#B9B9B9"
             secureTextEntry={!showConfirmPassword}
+            textContentType="newPassword"
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
           />
           <TouchableOpacity
             onPress={() => setShowConfirmPassword((current) => !current)}

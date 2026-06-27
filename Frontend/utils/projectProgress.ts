@@ -1,6 +1,13 @@
+/**
+ * Project progress helpers
+ *
+ * Normalizes progress_percentage/progress fields and maps raw project statuses
+ * into user-friendly badge colors and labels.
+ */
 import { formatDisplayLabel } from './display';
 
 export function normalizeProgress(project: any) {
+  // progress_percentage is preferred because it represents backend-calculated project progress.
   const value =
     project?.progress_percentage ??
     project?.progressPercentage ??
@@ -30,6 +37,7 @@ export function normalizeProjectStatus(status?: string | null) {
 }
 
 export function isOngoingProjectStatus(status?: string | null) {
+  // Dashboard ongoing counts intentionally exclude completed/proposed/draft projects.
   const normalizedStatus = normalizeProjectStatus(status);
   return normalizedStatus === 'ongoing' || normalizedStatus === 'in_progress' || normalizedStatus === 'inprogress';
 }

@@ -1,3 +1,9 @@
+/**
+ * Image URL helpers
+ *
+ * Normalizes legacy single image paths and newer JSON/array photo fields into a
+ * predictable list for site updates, task evidence, and inventory thumbnails.
+ */
 export function getImageUrls(value: unknown): string[] {
   if (!value) return [];
 

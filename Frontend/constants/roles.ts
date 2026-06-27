@@ -1,6 +1,10 @@
 /**
  * BuildSphere RBAC — Final Verified Mapping
  * Stable, pure Javascript/Typescript logic for capstone defense.
+ *
+ * NOTE: Mobile intentionally exposes fewer modules than the web app. Executive
+ * roles get broad visibility, operations roles get field actions, and staff-like
+ * roles are limited to view/no-access states based on the project workflow.
  */
 
 export type UserRole =
@@ -40,6 +44,7 @@ export interface Permissions {
 }
 
 const VIEW_ONLY_INVENTORY: Pick<Permissions, 'canViewInventory' | 'canEditInventory' | 'canAddInventory' | 'canLogInventoryUsage'> = {
+  // View-only roles can inspect stock but cannot change official inventory records.
   canViewInventory: true,
   canEditInventory: false,
   canAddInventory: false,
@@ -290,6 +295,7 @@ export const canEditInventory = (role?: string) => getPermissions(role).canEditI
 export const canAddInventory = (role?: string) => getPermissions(role).canAddInventory;
 export const canLogInventoryUsage = (role?: string) => getPermissions(role).canLogInventoryUsage;
 export const canCreateTask = (role?: string) => getPermissions(role).canCreateTasks;
+// Site progress uploads are limited to field-facing roles responsible for site evidence.
 export const canUploadSiteProgress = (role?: string) => getPermissions(role).canSubmitSiteUpdates;
 export const canViewBudget = (role?: string) => getPermissions(role).canViewBudget;
 export const canViewReports = (role?: string) => getPermissions(role).canViewReports;

@@ -1,3 +1,10 @@
+/**
+ * HomeScreen
+ *
+ * Main mobile dashboard shell. Loads projects, assigned work, notifications,
+ * and module entry points, then applies mobile RBAC so each role only sees
+ * actions allowed for the BuildSphere mobile app.
+ */
 import {
   View,
   Text,
@@ -242,6 +249,7 @@ export default function HomeScreen({
   const canAccessInventory = perms.canViewInventory;
 
   const FAB_ACTIONS = useMemo(() => {
+    // NOTE: The dashboard quick actions are role-based; unavailable modules are not shown.
     const actions = [];
     if (perms.canCreateTasks)
       actions.push({ label: 'Add new task', icon: 'add-circle-outline', key: 'task' });
@@ -428,6 +436,7 @@ export default function HomeScreen({
   };
 
   const fetchProjects = async () => {
+    // NOTE: Loads projects from the backend; server-side RBAC decides which projects are returned.
     setLoadingProjects(true);
     setProjectsError(null);
     try {
@@ -474,6 +483,7 @@ export default function HomeScreen({
           p.daysLeft = days > 0 ? days : 0;
         }
 
+        // NOTE: Project progress uses progress_percentage when available, then falls back safely.
         const progress = normalizeProgress(p);
         p.progress_percentage = progress;
         p.progress = progress;

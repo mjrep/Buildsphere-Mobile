@@ -1,3 +1,9 @@
+/**
+ * Site progress routes
+ *
+ * Authenticated upload/read APIs for site update photos, shift, work date, notes,
+ * verified counts, and optional AI metadata. AI fields are nullable for manual uploads.
+ */
 /* global __dirname */
 const express = require('express');
 const router = express.Router();
@@ -51,6 +57,7 @@ function handleSiteProgressUpload(req, res, next) {
 }
 
 function requireSiteProgressRole(req, res, next) {
+  // NOTE: Only field-facing roles can upload site progress evidence.
   if (!canUploadSiteProgress(req.user?.role)) {
     return res.status(403).json({ message: 'You do not have permission to upload site progress.' });
   }
@@ -107,11 +114,12 @@ function firstFiniteInteger(...values) {
 router.use(authenticateRequest);
 
 router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, res) => {
+  // NOTE: POST /site-progress saves project/task/shift/work date/photos plus optional AI metadata.
   // photoUrls can come from body or req.files
   const {
     projectId, taskId, quantityInstalled, notes,
     glassCount, shift, workDate,
-    // AI detection fields from Gemini-only backend analysis
+    // AI validation is optional; manual uploads may omit AI count/confidence/summary fields.
     ai_detected_count, verified_panel_count,
     avg_confidence, detection_mode,
     per_photo_counts, warning_message,
@@ -400,6 +408,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
 
 // GET /site-progress
 router.get('/', async (req, res) => {
+  // NOTE: Read endpoints return progress records for display; upload permissions are checked on POST.
   try {
     const result = await pool.query(
       `SELECT 

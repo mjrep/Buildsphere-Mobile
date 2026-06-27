@@ -1,7 +1,14 @@
+/**
+ * Display helpers
+ *
+ * Converts backend enum/key values into readable labels while preserving common
+ * acronyms such as CEO, API, and QA for defense-friendly UI text.
+ */
 const EMPTY_LABEL = '-';
 const ACRONYMS = new Set(['AI', 'API', 'CEO', 'COO', 'HR', 'ID', 'QA', 'QC', 'UI', 'UX']);
 
 export function formatDisplayLabel(value: unknown, fallback = EMPTY_LABEL) {
+  // Raw enum values like "in_progress" become "In Progress" for users.
   if (value === null || value === undefined) return fallback;
 
   const raw = String(value).trim();
