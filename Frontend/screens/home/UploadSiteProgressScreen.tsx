@@ -595,6 +595,8 @@ export default function UploadSiteProgressScreen({
     photoAnalysisResults.find((result) => result.photoIndex === index);
 
   const safeUserTasks = Array.isArray(userTasks) ? userTasks : [];
+  const finalizeFooterBottomPadding = Math.max(insets.bottom + 28, Platform.OS === 'android' ? 48 : 40);
+  const finalizeScrollBottomPadding = finalizeFooterBottomPadding + 96;
 
   return (
     <Modal
@@ -603,6 +605,7 @@ export default function UploadSiteProgressScreen({
       presentationStyle="pageSheet"
       onRequestClose={handleClose}>
       <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
+      {/* NOTE: KeyboardAvoidingView and safe-area padding prevent the submit button and input fields from being covered by the mobile keyboard or system navigation bar. */}
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
@@ -1025,7 +1028,7 @@ export default function UploadSiteProgressScreen({
               className="flex-1"
               style={{ backgroundColor: theme.background }}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingTop: 20, paddingBottom: 40 + insets.bottom, backgroundColor: theme.background }}
+              contentContainerStyle={{ paddingTop: 20, paddingBottom: finalizeScrollBottomPadding, backgroundColor: theme.background }}
             >
               <View style={formContentStyle}>
               {!isProjectActive && (
@@ -1223,7 +1226,16 @@ export default function UploadSiteProgressScreen({
               </View>
             </ScrollView>
 
-            <View className="border-t pb-10 pt-3" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
+            <View
+              className="border-t pt-3"
+              style={[
+                formContentStyle,
+                {
+                  borderColor: theme.border,
+                  backgroundColor: theme.background,
+                  paddingBottom: finalizeFooterBottomPadding,
+                },
+              ]}>
               <TouchableOpacity
                 onPress={handleSave}
                 disabled={saving || !isProjectActive}
@@ -1369,3 +1381,4 @@ export default function UploadSiteProgressScreen({
 
   );
 }
+
