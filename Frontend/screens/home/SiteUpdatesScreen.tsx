@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL, apiFetch } from '../../lib/api';
-import { getImageUrls } from '../../lib/imageUrls';
+import { getSiteProgressImages } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +26,7 @@ import { UserInfo } from '../../App';
 import UploadSiteProgressScreen from './UploadSiteProgressScreen';
 import { getPermissions } from '../../constants/roles';
 import { formatDisplayLabel } from '../../utils/display';
+import { INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE, isActiveProjectStatus } from '../../utils/projectProgress';
 import SystemBars from '../../components/SystemBars';
 
 const { width } = Dimensions.get('window');
@@ -39,7 +40,11 @@ interface SiteUpdate {
   milestone: string;
   location: string;
   notes: string;
-  photo_url: string;
+  photo_url?: string | null;
+  image_url?: string | null;
+  image_urls?: string[] | string | null;
+  images?: string[] | string | null;
+  attachments?: unknown;
   glass_count: number;
   created_at: string;
   work_date?: string;
@@ -66,8 +71,9 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   projectName: string;
+  projectStatus?: string | null;
   user?: UserInfo;
-  projects?: { id: number; name: string }[];
+  projects?: { id: number; name: string; status?: string | null }[];
 }
 
 type ShiftName = typeof SHIFT_NAMES[number];
@@ -87,6 +93,7 @@ export default function SiteUpdatesScreen({
   visible,
   onClose,
   projectName,
+  projectStatus,
   user,
   projects,
 }: Props) {
@@ -106,6 +113,10 @@ export default function SiteUpdatesScreen({
 
   const perms = user ? getPermissions(user.role) : { canSubmitSiteUpdates: false };
   const canUpload = perms.canSubmitSiteUpdates;
+  const matchingProject = projects?.find((project) => project.name.trim().toLowerCase() === projectName.trim().toLowerCase());
+  const effectiveProjectStatus = projectStatus ?? matchingProject?.status ?? null;
+  const isProjectActive = effectiveProjectStatus === null || isActiveProjectStatus(effectiveProjectStatus);
+  const canUploadToProject = canUpload && isProjectActive;
 
 
   useEffect(() => {
@@ -339,6 +350,14 @@ export default function SiteUpdatesScreen({
             {/* Calendar for "Past" mode */}
             {timeRange === 'Past' && renderCalendar()}
 
+            {!isProjectActive && (
+              <View className="mb-5 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}>
+                <Text className="text-[12px] font-semibold leading-5" style={{ color: theme.textSecondary }}>
+                  {INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}
+                </Text>
+              </View>
+            )}
+
             {timeRange === 'Today' ? (
               // Today Tab Content
               <>
@@ -429,7 +448,7 @@ export default function SiteUpdatesScreen({
                         <Text className="text-[14px] font-bold text-center mb-3" style={{ color: theme.textMuted }}>
                           No {activeShift} progress recorded yet.
                         </Text>
-                        {canUpload ? (
+                        {canUploadToProject ? (
                           <TouchableOpacity 
                             onPress={() => setShowUpload(true)}
                             className="px-5 py-2.5 rounded-xl bg-[#7370FF]"
@@ -438,7 +457,7 @@ export default function SiteUpdatesScreen({
                           </TouchableOpacity>
                         ) : (
                           <Text className="text-[12px] italic text-center font-medium" style={{ color: theme.textMuted }}>
-                            You have view-only access to site progress.
+                            {canUpload ? INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE : 'You have view-only access to site progress.'}
                           </Text>
                         )}
                       </View>
@@ -453,7 +472,7 @@ export default function SiteUpdatesScreen({
                           let photos: string[] = [];
                           let photoCounts: PhotoCount[] = [];
                           if (currentUpdate) {
-                            photos = getImageUrls(currentUpdate.photo_url);
+                            photos = getSiteProgressImages(currentUpdate);
                             try {
                               const rawPhotoCounts = currentUpdate.ai_photo_counts;
                               if (Array.isArray(rawPhotoCounts)) {
@@ -626,22 +645,39 @@ export default function SiteUpdatesScreen({
 
                               {/* Row with image thumbnail and info */}
                               <View className="flex-row">
-                                {update.photo_url ? (
-                                  <TouchableOpacity
-                                    activeOpacity={0.9}
-                                    onPress={() => {
-                                      setSelectedImage(getPhotoUri(getImageUrls(update.photo_url)[0]));
-                                      setShowImageModal(true);
-                                    }}
-                                    className="h-16 w-16 rounded-xl overflow-hidden mr-3 bg-gray-100"
-                                  >
-                                    <Image 
-                                      source={{ uri: getPhotoUri(getImageUrls(update.photo_url)[0]) }} 
-                                      className="h-full w-full" 
-                                      resizeMode="cover"
-                                    />
-                                  </TouchableOpacity>
-                                ) : null}
+                                {(() => {
+                                  const photos = getSiteProgressImages(update);
+                                  if (photos.length === 0) return null;
+
+                                  return (
+                                    <ScrollView
+                                      horizontal
+                                      showsHorizontalScrollIndicator={false}
+                                      className="mr-3 max-w-[154px]">
+                                      {photos.map((photo, index) => (
+                                        <TouchableOpacity
+                                          key={`${photo}-${index}`}
+                                          activeOpacity={0.9}
+                                          onPress={() => {
+                                            setSelectedImage(getPhotoUri(photo));
+                                            setShowImageModal(true);
+                                          }}
+                                          className="mr-2 h-16 w-16 overflow-hidden rounded-xl bg-gray-100">
+                                          <Image
+                                            source={{ uri: getPhotoUri(photo) }}
+                                            className="h-full w-full"
+                                            resizeMode="cover"
+                                          />
+                                          {photos.length > 1 && index === 0 ? (
+                                            <View className="absolute bottom-0 right-0 rounded-tl-lg bg-black/60 px-1.5 py-0.5">
+                                              <Text className="text-[9px] font-bold text-white">{photos.length}</Text>
+                                            </View>
+                                          ) : null}
+                                        </TouchableOpacity>
+                                      ))}
+                                    </ScrollView>
+                                  );
+                                })()}
 
                                 <View className="flex-1 justify-center">
                                   <View className="flex-row items-center mb-1">
@@ -693,7 +729,7 @@ export default function SiteUpdatesScreen({
           user={user}
           projects={projects}
           initialShift={activeShift}
-          initialProjectId={projects.find(p => p.name.trim().toLowerCase() === projectName.trim().toLowerCase())?.id}
+          initialProjectId={matchingProject?.id}
           onClose={() => {
             setShowUpload(false);
             fetchUpdates();

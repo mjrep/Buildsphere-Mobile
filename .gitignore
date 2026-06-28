@@ -22,6 +22,7 @@ Frontend/node_modules/
 Frontend/.expo/
 Frontend/expo-env.d.ts
 Frontend/android/
+Frontend/builds/
 Frontend/dist/
 Frontend/build/
 Frontend/coverage/

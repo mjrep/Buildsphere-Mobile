@@ -34,13 +34,14 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
+import { INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE, isActiveProjectStatus } from '../../utils/projectProgress';
 import SystemBars from '../../components/SystemBars';
 
 interface Props {
   visible: boolean;
   user: UserInfo;
   onClose: () => void;
-  projects: { id: number; name: string }[];
+  projects: { id: number; name: string; status?: string | null }[];
   initialTask?: any;
   initialShift?: 'Morning' | 'Noon' | 'Afternoon';
   initialProjectId?: number;
@@ -132,6 +133,17 @@ export default function UploadSiteProgressScreen({
   const [aiSummary, setAiSummary] = useState<string>('');
   const [photoAnalysisResults, setPhotoAnalysisResults] = useState<PhotoAnalysisResult[]>([]);
   const [analyzingPhotoIndex, setAnalyzingPhotoIndex] = useState<number | null>(null);
+  const selectedProject = projects.find((project) => String(project.id) === String(projectId));
+  const hasSelectedProject = projectId !== null && projectId !== undefined;
+  const isProjectActive =
+    !hasSelectedProject ||
+    selectedProject?.status === undefined ||
+    selectedProject?.status === null ||
+    isActiveProjectStatus(selectedProject.status);
+
+  const showInactiveProjectMessage = () => {
+    Alert.alert('Project not active', INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE);
+  };
 
 
   const reset = () => {
@@ -222,6 +234,10 @@ export default function UploadSiteProgressScreen({
   };
 
   const pickFromLibrary = async (multiple = true) => {
+    if (!isProjectActive) {
+      showInactiveProjectMessage();
+      return;
+    }
     const remainingLimit = 5 - selectedPhotos.length;
     if (remainingLimit <= 0) {
       Alert.alert('Limit Reached', 'You can only upload up to 5 photos.');
@@ -258,6 +274,10 @@ export default function UploadSiteProgressScreen({
   };
 
   const takePhoto = async () => {
+    if (!isProjectActive) {
+      showInactiveProjectMessage();
+      return;
+    }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission required', 'Please allow camera access.');
@@ -294,6 +314,10 @@ export default function UploadSiteProgressScreen({
   };
 
   const showPhotoOptions = () => {
+    if (!isProjectActive) {
+      showInactiveProjectMessage();
+      return;
+    }
     Alert.alert('Add Photo', 'How would you like to add photos?', [
       { text: 'Take Photo', onPress: takePhoto },
       { text: 'Select Single Photo', onPress: () => pickFromLibrary(false) },
@@ -304,6 +328,10 @@ export default function UploadSiteProgressScreen({
 
   const handleCountGlass = async () => {
     // NOTE: "Use AI Check" sends photos to the backend Gemini analysis flow before saving.
+    if (!isProjectActive) {
+      showInactiveProjectMessage();
+      return;
+    }
     if (selectedPhotos.length === 0) {
       return;
     }
@@ -429,6 +457,10 @@ export default function UploadSiteProgressScreen({
   const handleManualUpload = () => {
     // AI validation is optional.
     // Users may upload a site update manually when AI checking is not needed.
+    if (!isProjectActive) {
+      showInactiveProjectMessage();
+      return;
+    }
     setUploadMode('manual');
     setAnalysisStatus('idle');
     setDetectionMode('manual');
@@ -445,6 +477,10 @@ export default function UploadSiteProgressScreen({
     // NOTE: "Looks Good" confirms AI results; manual mode submits the same record without AI fields.
     if (!projectId || !taskId) {
       Alert.alert('Missing info', 'Please select a project and a task.');
+      return;
+    }
+    if (!isProjectActive) {
+      showInactiveProjectMessage();
       return;
     }
     setSaving(true);
@@ -547,6 +583,7 @@ export default function UploadSiteProgressScreen({
       <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         style={{ flex: 1, backgroundColor: theme.background }}
       >
         <View className="flex-1" style={{ backgroundColor: theme.background }}>
@@ -566,9 +603,18 @@ export default function UploadSiteProgressScreen({
             <ScrollView
               className="flex-1 pt-5"
               style={{ backgroundColor: theme.background }}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingBottom: 40 + insets.bottom, backgroundColor: theme.background }}
             >
               <View style={formContentStyle}>
+              {!isProjectActive && (
+                <View className="mb-4 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}>
+                  <Text className="text-[12px] font-semibold leading-5" style={{ color: theme.textSecondary }}>
+                    {INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}
+                  </Text>
+                </View>
+              )}
+
               {/* Photo Grid / List */}
               {selectedPhotos.length > 0 ? (
                 <View className="mb-6">
@@ -589,22 +635,26 @@ export default function UploadSiteProgressScreen({
                     ))}
                     <TouchableOpacity
                       onPress={showPhotoOptions}
+                      disabled={!isProjectActive}
                       className="items-center justify-center rounded-[16px] border-2 border-dashed"
-                      style={{ width: 100, height: 160, backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
-                      <Ionicons name="add" size={32} color={PRIMARY} />
-                      <Text className="text-[10px]" style={{ color: theme.primary }}>Add more</Text>
+                      style={{ width: 100, height: 160, backgroundColor: isProjectActive ? theme.primaryLight : theme.input, borderColor: isProjectActive ? theme.primary : theme.border }}>
+                      <Ionicons name="add" size={32} color={isProjectActive ? PRIMARY : theme.textMuted} />
+                      <Text className="text-[10px]" style={{ color: isProjectActive ? theme.primary : theme.textMuted }}>Add more</Text>
                     </TouchableOpacity>
                   </ScrollView>
                 </View>
               ) : (
                 <TouchableOpacity
                   onPress={showPhotoOptions}
+                  disabled={!isProjectActive}
                   className="mb-6 items-center justify-center rounded-[16px] border-2 border-dashed"
-                  style={{ height: 160, backgroundColor: theme.surface, borderColor: theme.primary }}>
-                  <View className="mb-2 h-14 w-14 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
-                    <Ionicons name="camera" size={26} color={PRIMARY} />
+                  style={{ height: 160, backgroundColor: theme.surface, borderColor: isProjectActive ? theme.primary : theme.border }}>
+                  <View className="mb-2 h-14 w-14 items-center justify-center rounded-full" style={{ backgroundColor: isProjectActive ? theme.primaryLight : theme.input }}>
+                    <Ionicons name="camera" size={26} color={isProjectActive ? PRIMARY : theme.textMuted} />
                   </View>
-                  <Text className="text-[13px]" style={{ color: theme.textMuted }}>Tap to upload photo</Text>
+                  <Text className="text-[13px]" style={{ color: theme.textMuted }}>
+                    {isProjectActive ? 'Tap to upload photo' : 'Uploads disabled for this project'}
+                  </Text>
                 </TouchableOpacity>
               )}
               
@@ -750,8 +800,9 @@ export default function UploadSiteProgressScreen({
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => (selectedPhotos.length > 0 ? setStep(2) : setStep(3))}
+                disabled={!isProjectActive}
                 className="h-12 flex-1 items-center justify-center rounded-[14px]"
-                style={{ backgroundColor: PRIMARY }}>
+                style={{ backgroundColor: isProjectActive ? PRIMARY : theme.textMuted }}>
                 <Text className="text-[14px] font-bold text-white">Next</Text>
               </TouchableOpacity>
             </View>
@@ -853,11 +904,18 @@ export default function UploadSiteProgressScreen({
               )}
 
               {/* NOTE: Users choose explicitly between AI validation and manual upload after photo preview. */}
+              {!isProjectActive && (
+                <View className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}>
+                  <Text className="text-[12px] font-semibold leading-5" style={{ color: theme.textSecondary }}>
+                    {INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}
+                  </Text>
+                </View>
+              )}
               <TouchableOpacity
                 onPress={handleCountGlass}
-                disabled={analyzing}
+                disabled={analyzing || !isProjectActive}
                 className="h-14 flex-row items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: PRIMARY }}>
+                style={{ backgroundColor: isProjectActive ? PRIMARY : theme.textMuted }}>
                 {analyzing ? (
                   <View className="flex-row items-center px-4">
                     <ActivityIndicator color="white" />
@@ -877,11 +935,11 @@ export default function UploadSiteProgressScreen({
 
               <TouchableOpacity
                 onPress={handleManualUpload}
-                disabled={analyzing}
+                disabled={analyzing || !isProjectActive}
                 className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
-                style={{ backgroundColor: theme.surface, borderColor: theme.primary }}>
-                <Ionicons name="cloud-upload-outline" size={20} color={PRIMARY} />
-                <Text className="ml-2 text-[16px] font-bold" style={{ color: theme.primary }}>
+                style={{ backgroundColor: theme.surface, borderColor: isProjectActive ? theme.primary : theme.border }}>
+                <Ionicons name="cloud-upload-outline" size={20} color={isProjectActive ? PRIMARY : theme.textMuted} />
+                <Text className="ml-2 text-[16px] font-bold" style={{ color: isProjectActive ? theme.primary : theme.textMuted }}>
                   Upload Without AI
                 </Text>
               </TouchableOpacity>
@@ -944,9 +1002,18 @@ export default function UploadSiteProgressScreen({
             <ScrollView
               className="flex-1"
               style={{ backgroundColor: theme.background }}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingTop: 20, paddingBottom: 40 + insets.bottom, backgroundColor: theme.background }}
             >
               <View style={formContentStyle}>
+              {!isProjectActive && (
+                <View className="mb-4 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}>
+                  <Text className="text-[12px] font-semibold leading-5" style={{ color: theme.textSecondary }}>
+                    {INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}
+                  </Text>
+                </View>
+              )}
+
               <Text className="mb-1.5 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Task</Text>
               <TouchableOpacity
                 onPress={() => setIsTaskModalVisible(true)}
@@ -1137,9 +1204,9 @@ export default function UploadSiteProgressScreen({
             <View className="border-t pb-10 pt-3" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
               <TouchableOpacity
                 onPress={handleSave}
-                disabled={saving}
+                disabled={saving || !isProjectActive}
                 className="h-14 items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: PRIMARY }}>
+                style={{ backgroundColor: isProjectActive ? PRIMARY : theme.textMuted }}>
                 {saving ? (
                   <ActivityIndicator color="white" />
                 ) : (

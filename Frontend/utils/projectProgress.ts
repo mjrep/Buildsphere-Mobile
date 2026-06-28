@@ -42,6 +42,22 @@ export function isOngoingProjectStatus(status?: string | null) {
   return normalizedStatus === 'ongoing' || normalizedStatus === 'in_progress' || normalizedStatus === 'inprogress';
 }
 
+export const INACTIVE_PROJECT_INVENTORY_MESSAGE =
+  'This project is not active. Inventory actions are disabled for proposed or completed projects.';
+
+export const INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE =
+  'This project is not active. Site uploads are disabled for proposed or completed projects.';
+
+export function isActiveProjectStatus(status?: string | null) {
+  // NOTE: Proposed projects are not yet active for site operations.
+  // Completed projects are treated as historical/read-only records.
+  return isOngoingProjectStatus(status);
+}
+
+export function canPerformProjectWork(project?: { status?: string | null } | null) {
+  return isActiveProjectStatus(project?.status);
+}
+
 export function getProjectStatusColor(status: string | null | undefined, theme: ProjectStatusPalette) {
   const normalizedStatus = normalizeProjectStatus(status);
 

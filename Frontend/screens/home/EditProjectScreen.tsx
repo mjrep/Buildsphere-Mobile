@@ -5,7 +5,6 @@ import {
   Modal,
   TextInput,
   TouchableOpacity,
-  ScrollView,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -13,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomDatePicker from '../../components/CustomDatePicker';
 import { API_URL, apiFetch } from '../../lib/api';
+import KeyboardAwareScreen from '../../components/KeyboardAwareScreen';
 
 interface EditProjectScreenProps {
   visible: boolean;
@@ -108,7 +108,8 @@ export default function EditProjectScreen({
           </TouchableOpacity>
         </View>
 
-        <ScrollView className="flex-1 px-5 pt-6">
+        {/* NOTE: KeyboardAvoidingView keeps form inputs visible when the mobile keyboard is open. */}
+        <KeyboardAwareScreen className="flex-1 px-5 pt-6" contentContainerStyle={{ paddingBottom: 160 }}>
           <View className="mb-6">
             <Text className="mb-2 text-[14px] font-semibold text-[#1E1E1E]">Project Name</Text>
             <TextInput
@@ -182,7 +183,7 @@ export default function EditProjectScreen({
               textAlignVertical="top"
             />
           </View>
-        </ScrollView>
+        </KeyboardAwareScreen>
       </View>
     </Modal>
   );

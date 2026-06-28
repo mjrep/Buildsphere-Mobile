@@ -8,6 +8,7 @@
 const VIEW_ONLY_INVENTORY_MESSAGE = 'You have view-only access to Inventory.';
 const USAGE_ONLY_INVENTORY_MESSAGE = 'You can only log material consumption for assigned project inventory.';
 const NO_INVENTORY_ACCESS_MESSAGE = 'You do not have permission to access Inventory.';
+const INACTIVE_PROJECT_WORK_MESSAGE = 'This project is not active. Actions are disabled for proposed or completed projects.';
 
 const ROLE_ALIASES = {
   ceo_coo: 'ceo',
@@ -78,6 +79,37 @@ function canUploadSiteProgress(role) {
   return ['project_engineer', 'foreman', 'project_supervisor'].includes(normalizeRole(role));
 }
 
+function normalizeProjectStatus(status) {
+  return String(status || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[/-]+/g, '_')
+    .replace(/[\s-]+/g, '_');
+}
+
+function isActiveProjectStatus(status) {
+  // NOTE: Proposed projects are not yet active for site operations.
+  // Completed projects are treated as historical/read-only records.
+  const normalized = normalizeProjectStatus(status);
+  return normalized === 'ongoing' || normalized === 'in_progress' || normalized === 'inprogress';
+}
+
+async function getProjectStatus(pool, projectId) {
+  const result = await pool.query('SELECT status FROM projects WHERE id = $1', [projectId]);
+  return result.rows[0]?.status || null;
+}
+
+async function rejectInactiveProjectWork(pool, res, projectId) {
+  const status = await getProjectStatus(pool, projectId);
+  if (isActiveProjectStatus(status)) return false;
+
+  res.status(403).json({
+    success: false,
+    message: INACTIVE_PROJECT_WORK_MESSAGE,
+  });
+  return true;
+}
+
 function canViewBudget(role) {
   return ['ceo', 'coo', 'project_engineer', 'project_coordinator', 'procurement', 'accounting'].includes(normalizeRole(role));
 }
@@ -98,7 +130,11 @@ module.exports = {
   VIEW_ONLY_INVENTORY_MESSAGE,
   USAGE_ONLY_INVENTORY_MESSAGE,
   NO_INVENTORY_ACCESS_MESSAGE,
+  INACTIVE_PROJECT_WORK_MESSAGE,
   normalizeRole,
+  normalizeProjectStatus,
+  isActiveProjectStatus,
+  rejectInactiveProjectWork,
   getInventoryAccessLevel,
   canViewInventory,
   canAccessInventory,

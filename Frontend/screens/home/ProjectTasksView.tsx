@@ -12,6 +12,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { TaskCardSkeleton } from '../../components/skeletons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
+import KeyboardAwareScreen from '../../components/KeyboardAwareScreen';
 
 interface Task {
   id: number;
@@ -205,7 +206,8 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
         </ScrollView>
       </View>
 
-      <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 40 }}>
+      {/* NOTE: KeyboardAvoidingView keeps form inputs visible when the mobile keyboard is open. */}
+      <KeyboardAwareScreen className="flex-1 px-5" contentContainerStyle={{ paddingBottom: 120 }}>
         {loading ? (
           <View style={{ marginTop: 4 }}>
             {Array.from({ length: 5 }).map((_, index) => (
@@ -265,7 +267,7 @@ export default function ProjectTasksView({ projectId, currentUserId, onTaskSelec
             );
           })
         )}
-      </ScrollView>
+      </KeyboardAwareScreen>
     </View>
   );
 }

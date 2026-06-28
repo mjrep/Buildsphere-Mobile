@@ -16,6 +16,7 @@ const {
   NO_INVENTORY_ACCESS_MESSAGE,
   getInventoryAccessLevel,
   normalizeRole,
+  rejectInactiveProjectWork,
 } = require('../rbac');
 
 const VALID_ACTION_TYPES = ['RECEIVING', 'CONSUMPTION', 'SPOILAGE', 'ADJUSTMENT'];
@@ -198,6 +199,12 @@ async function rejectInventoryProjectAccess(req, res, projectId, context) {
   return true;
 }
 
+async function rejectInventoryProjectWork(req, res, projectId, context) {
+  // NOTE: Inventory and site upload mutations require both role permission and active project status.
+  if (await rejectInventoryProjectAccess(req, res, projectId, context)) return true;
+  return rejectInactiveProjectWork(pool, res, projectId);
+}
+
 async function rejectInventoryRead(req, res) {
   const actorId = getActorId(req);
   const context = await getActorInventoryAccess(actorId);
@@ -362,7 +369,7 @@ router.post('/:itemId/transaction', async (req, res) => {
     }
 
     const item = itemCheck.rows[0];
-    if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
+    if (await rejectInventoryProjectWork(req, res, item.project_id, inventoryContext)) return;
 
     const logResult = await pool.query(
       `INSERT INTO project_inventory_logs (item_id, action_type, quantity, reference_task_id, notes, created_by, created_at)
@@ -496,7 +503,7 @@ router.post('/', async (req, res) => {
 
   const inventoryContext = await rejectInventoryWrite(req, res);
   if (!inventoryContext) return;
-  if (await rejectInventoryProjectAccess(req, res, parsedProjectId, inventoryContext)) return;
+  if (await rejectInventoryProjectWork(req, res, parsedProjectId, inventoryContext)) return;
 
   const numQty = parseStrictNumber(quantity ?? stock ?? current_stock ?? 0);
   const numCrit = parseStrictNumber(criticalLevel ?? critical_level ?? minimumStock ?? minimum_stock ?? min_stock);
@@ -578,7 +585,7 @@ async function rejectInventoryMetadataMutation(req, res) {
     return true;
   }
 
-  return rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext);
+  return rejectInventoryProjectWork(req, res, item.project_id, inventoryContext);
 }
 
 router.patch('/:id', async (req, res) => {
@@ -621,7 +628,7 @@ router.delete('/:id', async (req, res) => {
     const item = itemResult.rows[0];
 
     if (item) {
-      if (await rejectInventoryProjectAccess(req, res, item.project_id, inventoryContext)) return;
+      if (await rejectInventoryProjectWork(req, res, item.project_id, inventoryContext)) return;
       const deletedQuantity = parseNumeric(item.current_stock);
 
       if (deletedQuantity > 0) {

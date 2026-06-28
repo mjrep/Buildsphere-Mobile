@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent } from '../../utils/responsive';
 import { formatCurrencyPHP } from '../../utils/budget';
 import { formatDisplayLabel } from '../../utils/display';
+import { INACTIVE_PROJECT_INVENTORY_MESSAGE, isActiveProjectStatus } from '../../utils/projectProgress';
 import { qaDebug } from '../../utils/qaDebug';
 import SuccessModal from '../../components/SuccessModal';
 import SystemBars from '../../components/SystemBars';
@@ -62,6 +63,7 @@ interface InventoryLog {
 
 interface Props {
   projectId: number;
+  projectStatus?: string | null;
   onBack: () => void;
   userRole?: UserRole;
   activeMainTab?: MainTab;
@@ -147,6 +149,7 @@ const INVENTORY_NO_ACCESS_MESSAGE = 'You do not have permission to access Invent
 
 export default function InventoryScreen({
   projectId,
+  projectStatus,
   onBack,
   userRole,
   activeMainTab = 'home',
@@ -164,6 +167,8 @@ export default function InventoryScreen({
   const canLogUsage = perms.canLogInventoryUsage && !canEdit;
   const canRecordInventoryLog = canEdit || canLogUsage;
   const canWriteInventory = canEdit || canAdd || canLogUsage;
+  const isProjectActive = projectStatus === undefined || projectStatus === null || isActiveProjectStatus(projectStatus);
+  const canMutateInventory = canWriteInventory && isProjectActive;
   const { theme, isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -373,14 +378,20 @@ export default function InventoryScreen({
   };
 
   const blockInventoryWrite = () => {
-    Alert.alert('Access denied', canView ? INVENTORY_VIEW_ONLY_MESSAGE : INVENTORY_NO_ACCESS_MESSAGE);
+    Alert.alert(
+      isProjectActive ? 'Access denied' : 'Project not active',
+      isProjectActive
+        ? canView ? INVENTORY_VIEW_ONLY_MESSAGE : INVENTORY_NO_ACCESS_MESSAGE
+        : INACTIVE_PROJECT_INVENTORY_MESSAGE
+    );
     return false;
   };
 
-  const ensureCanAddInventory = () => (canAdd ? true : blockInventoryWrite());
-  const ensureCanEditInventory = () => (canEdit ? true : blockInventoryWrite());
+  const ensureCanAddInventory = () => (canAdd && isProjectActive ? true : blockInventoryWrite());
+  const ensureCanEditInventory = () => (canEdit && isProjectActive ? true : blockInventoryWrite());
   const ensureCanRecordInventoryLog = (action: MobileActionType) => {
     // NOTE: Usage-only roles may record Consumption, but cannot receive, spoil, or edit stock.
+    if (!isProjectActive) return blockInventoryWrite();
     if (canEdit) return true;
     if (canLogUsage && action === 'CONSUMPTION') return true;
     return blockInventoryWrite();
@@ -681,9 +692,11 @@ export default function InventoryScreen({
           <Ionicons name="caret-back-outline" size={24} color={theme.text} />
         </TouchableOpacity>
         <Text className="text-[28px] font-bold" style={{ color: theme.primary }}>Inventory</Text>
-        {!canWriteInventory && (
+        {!canMutateInventory && (
           <View className="ml-3 rounded-full px-2.5 py-1" style={{ backgroundColor: theme.primaryLight }}>
-            <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }}>View only</Text>
+            <Text className="text-[10px] font-bold uppercase" style={{ color: theme.primary }}>
+              {isProjectActive ? 'View only' : 'Read only'}
+            </Text>
           </View>
         )}
         {canLogUsage && (
@@ -703,6 +716,14 @@ export default function InventoryScreen({
       </View>
 
       <View className="pb-2" style={screenContentStyle}>
+        {!isProjectActive && (
+          <View className="mb-2 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}>
+            <Text className="text-[12px] font-semibold leading-5" style={{ color: theme.textSecondary }}>
+              {INACTIVE_PROJECT_INVENTORY_MESSAGE}
+            </Text>
+          </View>
+        )}
+
         <View className="mb-1.5 flex-row rounded-full border p-1" style={{ backgroundColor: theme.input, borderColor: theme.border }}>
           <TouchableOpacity
             className="flex-1 rounded-full py-1.5"
@@ -814,14 +835,14 @@ export default function InventoryScreen({
         )}
       </View>
 
-      {canAdd && activeTab === 'items' && (
+      {canAdd && isProjectActive && activeTab === 'items' && (
         <View style={screenContentStyle}>
           <TouchableOpacity onPress={() => { if (ensureCanAddInventory()) setShowAdd(true); }} className="mb-3 h-[48px] items-center justify-center rounded-[12px]" style={{ backgroundColor: theme.primary }}>
             <Text className="text-[15px] font-bold text-white">Add Inventory Item</Text>
           </TouchableOpacity>
         </View>
       )}
-      {canRecordInventoryLog && activeTab === 'logs' && (
+      {canRecordInventoryLog && isProjectActive && activeTab === 'logs' && (
         <View style={screenContentStyle}>
           <TouchableOpacity
             onPress={() => {
@@ -904,8 +925,9 @@ export default function InventoryScreen({
                       elevation: 2,
                     }}
                     onPress={() => {
-                      if (!canRecordInventoryLog) {
+                      if (!canRecordInventoryLog || !isProjectActive) {
                         if (!canWriteInventory) showViewOnlyMessage();
+                        if (canWriteInventory && !isProjectActive) blockInventoryWrite();
                         return;
                       }
                       if (canLogUsage) {
@@ -1057,8 +1079,12 @@ export default function InventoryScreen({
           </View>
         </ScrollView>
       )}
-        <Modal visible={showAdd && canAdd} transparent animationType="slide" onRequestClose={closeAddItemModal}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
+        <Modal visible={showAdd && canAdd && isProjectActive} transparent animationType="slide" onRequestClose={closeAddItemModal}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+            className="flex-1 justify-center px-6"
+            style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeAddItemModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
               <View className="max-h-[86%] w-full rounded-3xl" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
@@ -1068,7 +1094,7 @@ export default function InventoryScreen({
                     <Ionicons name="close" size={20} color={theme.text} />
                   </TouchableOpacity>
                 </View>
-                <ScrollView className="px-6 pt-5" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
+                <ScrollView className="px-6 pt-5" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
                   <Text className="mb-1.5 text-[14px] font-bold" style={{ color: theme.text }}>Item Name</Text>
                   <TextInput
                     value={addName}
@@ -1136,11 +1162,16 @@ export default function InventoryScreen({
           </KeyboardAvoidingView>
         </Modal>
 
-        <Modal visible={showTransaction && canRecordInventoryLog} transparent animationType="slide" onRequestClose={closeTransactionModal}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-center px-6" style={{ backgroundColor: theme.overlay }}>
+        <Modal visible={showTransaction && canRecordInventoryLog && isProjectActive} transparent animationType="slide" onRequestClose={closeTransactionModal}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+            className="flex-1 justify-center px-6"
+            style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeTransactionModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
             <View className="max-h-[86%] w-full rounded-3xl p-6" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
               <View className="mb-4 flex-row items-start justify-between">
                 <View className="flex-1 pr-3">
                   <Text className="text-[18px] font-bold" style={{ color: theme.primary }}>Record Transaction</Text>
@@ -1183,13 +1214,18 @@ export default function InventoryScreen({
               <TouchableOpacity onPress={handleTransaction} disabled={saving} className="mt-2 h-12 items-center justify-center rounded-xl" style={{ backgroundColor: ACTION_TYPE_COLORS[txnAction] }}>
                 {saving ? <ActivityIndicator color="#fff" /> : <Text className="font-semibold text-white">Submit {LOCAL_ACTION_LABELS[txnAction]}</Text>}
               </TouchableOpacity>
+              </ScrollView>
             </View>
             </TouchableWithoutFeedback>
           </KeyboardAvoidingView>
         </Modal>
 
-        <Modal visible={showAddLog && canRecordInventoryLog} transparent animationType="fade" onRequestClose={closeAddLogModal}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 items-center justify-center px-6" style={{ backgroundColor: theme.overlay }}>
+        <Modal visible={showAddLog && canRecordInventoryLog && isProjectActive} transparent animationType="fade" onRequestClose={closeAddLogModal}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+            className="flex-1 items-center justify-center px-6"
+            style={{ backgroundColor: theme.overlay }}>
             <TouchableOpacity activeOpacity={1} onPress={closeAddLogModal} className="absolute inset-0" />
             <TouchableWithoutFeedback>
             <View className="max-h-[86%] w-full rounded-3xl p-6" style={{ backgroundColor: theme.elevated, maxWidth: 560, alignSelf: 'center' }}>
@@ -1204,7 +1240,7 @@ export default function InventoryScreen({
                   <Ionicons name="close" size={20} color={theme.text} />
                 </TouchableOpacity>
               </View>
-              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={false}>
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
               <Text className="mb-1 text-[12px]" style={{ color: theme.textSecondary }}>Item</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
                 {items.map((item) => (

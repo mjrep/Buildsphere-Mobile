@@ -432,6 +432,7 @@ export default function EditInformationScreen({ user, onBack, onSaved }: EditInf
         <ScrollView
           className="flex-1 pt-4"
           style={{ backgroundColor: theme.background }}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 150 + insets.bottom, backgroundColor: theme.background }}
         >

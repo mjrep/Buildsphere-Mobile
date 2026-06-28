@@ -15,10 +15,11 @@ const { createNotification, sendPushNotificationToUser } = require('../services/
 const { hasQuantityTracking, syncTaskQuantityStatus } = require('../services/taskStatusService');
 const { logProjectActivity } = require('../services/activityLogService');
 const { authenticateRequest } = require('../middleware/auth');
-const { canUploadSiteProgress } = require('../rbac');
+const { canUploadSiteProgress, rejectInactiveProjectWork } = require('../rbac');
 const { qaDebug } = require('../services/qaDebug');
 
 let supabase = null;
+let siteProgressImageSchemaReady = false;
 
 function getSupabaseStorageClient() {
   if (supabase) return supabase;
@@ -45,7 +46,14 @@ const upload = multer({
 });
 
 function handleSiteProgressUpload(req, res, next) {
-  upload.array('photos', 5)(req, res, (error) => {
+  upload.fields([
+    { name: 'photos', maxCount: 5 },
+    { name: 'photos[]', maxCount: 5 },
+    { name: 'images', maxCount: 5 },
+    { name: 'images[]', maxCount: 5 },
+    { name: 'image', maxCount: 1 },
+    { name: 'photo', maxCount: 1 },
+  ])(req, res, (error) => {
     if (!error) return next();
 
     if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
@@ -54,6 +62,20 @@ function handleSiteProgressUpload(req, res, next) {
 
     return res.status(400).json({ message: error.message || 'Invalid progress image upload.' });
   });
+}
+
+function getUploadedImageFiles(req) {
+  if (Array.isArray(req.files)) return req.files;
+  if (!req.files || typeof req.files !== 'object') return [];
+
+  return [
+    ...((req.files.photos) || []),
+    ...((req.files['photos[]']) || []),
+    ...((req.files.images) || []),
+    ...((req.files['images[]']) || []),
+    ...((req.files.image) || []),
+    ...((req.files.photo) || []),
+  ].slice(0, 5);
 }
 
 function requireSiteProgressRole(req, res, next) {
@@ -101,6 +123,75 @@ function normalizeImageUrl(value) {
   return null;
 }
 
+function getSiteProgressImages(...values) {
+  const urls = [];
+
+  for (const value of values) {
+    if (!value) continue;
+
+    if (Array.isArray(value)) {
+      urls.push(...getSiteProgressImages(...value));
+      continue;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            urls.push(...getSiteProgressImages(...parsed));
+            continue;
+          }
+        } catch (error) {
+          // Treat malformed JSON-like values as legacy single image paths.
+        }
+      }
+
+      urls.push(trimmed);
+      continue;
+    }
+
+    if (typeof value === 'object') {
+      urls.push(...getSiteProgressImages(
+        value.url,
+        value.uri,
+        value.image_url,
+        value.photo_url,
+        value.path
+      ));
+    }
+  }
+
+  return Array.from(new Set(urls.filter(Boolean)));
+}
+
+async function ensureSiteProgressImageColumns() {
+  if (siteProgressImageSchemaReady) return;
+
+  await pool.query(`
+    ALTER TABLE task_progress_logs
+      ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'::jsonb
+  `);
+
+  siteProgressImageSchemaReady = true;
+}
+
+function mapSiteProgressRow(row) {
+  const imageUrls = getSiteProgressImages(row.image_urls, row.photo_url, row.image_url, row.evidence_image_path);
+  const firstImage = imageUrls[0] || null;
+
+  return {
+    ...row,
+    photo_url: firstImage,
+    image_url: firstImage,
+    image_urls: imageUrls,
+    images: imageUrls,
+  };
+}
+
 // POST /site-progress  — upload multiple photos + form data
 function firstFiniteInteger(...values) {
   for (const value of values) {
@@ -127,6 +218,8 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
   let photoUrls = []; 
 
   try {
+    await ensureSiteProgressImageColumns();
+
     const parsedProjectId = firstFiniteInteger(projectId);
     const parsedTaskId = firstFiniteInteger(taskId);
     const parsedUserId = firstFiniteInteger(req.user.id);
@@ -137,15 +230,19 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       });
     }
 
+    // NOTE: Inventory and site upload mutations require both role permission and active project status.
+    if (await rejectInactiveProjectWork(pool, res, parsedProjectId)) return;
+
     const supabaseStorage = getSupabaseStorageClient();
-    if ((req.files?.length || 0) > 0 && !supabaseStorage) {
+    const uploadedImageFiles = getUploadedImageFiles(req);
+    if (uploadedImageFiles.length > 0 && !supabaseStorage) {
       return res.status(503).json({
         message: 'Image upload storage is not configured. Please try again later.',
       });
     }
 
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
+    if (uploadedImageFiles.length > 0) {
+      for (const file of uploadedImageFiles) {
         const filename = `progress_${Date.now()}_${Math.floor(Math.random() * 1000)}${path.extname(file.originalname)}`;
         
         // 1. Upload to Supabase Storage
@@ -175,7 +272,18 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       }
     }
 
-    const finalPhotoPath = photoUrls[0] || normalizeImageUrl(req.body.photoUrl);
+    const bodyPhotoUrls = getSiteProgressImages(
+      req.body.image_urls,
+      req.body.images,
+      req.body.attachments,
+      req.body.photoUrls,
+      req.body.photoUrl,
+      req.body.image_url
+    );
+    const allPhotoUrls = getSiteProgressImages(photoUrls, bodyPhotoUrls);
+    // NOTE: Site uploads can contain multiple photos.
+    // image_url is kept for backward compatibility, while image_urls/images stores all uploaded photos.
+    const finalPhotoPath = allPhotoUrls[0] || null;
     const perPhotoCounts = parseJsonBodyField(per_photo_counts, null);
 
     // 1. Fetch milestone data from the task. Quantity milestones drive task status automatically.
@@ -221,10 +329,10 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     const result = await pool.query(
       `INSERT INTO task_progress_logs (
         task_id, milestone_id, created_by, quantity_accomplished,
-        evidence_image_path, remarks, shift, work_date,
+        evidence_image_path, image_urls, remarks, shift, work_date,
         ai_detected_count, verified_panel_count, avg_confidence, detection_mode, ai_photo_counts,
         created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
       RETURNING *`,
       [
         parsedTaskId,
@@ -232,6 +340,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
         parsedUserId,
         savedQuantity,
         finalPhotoPath,
+        JSON.stringify(allPhotoUrls),
         notes,
         shift || 'Morning',
         workDate || new Date(),
@@ -246,6 +355,11 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       ...result.rows[0],
       evidence_image_path: normalizeImageUrl(result.rows[0].evidence_image_path),
     };
+    const progressImageUrls = getSiteProgressImages(result.rows[0].image_urls, progress.evidence_image_path);
+    progress.image_url = progressImageUrls[0] || null;
+    progress.photo_url = progressImageUrls[0] || null;
+    progress.image_urls = progressImageUrls;
+    progress.images = progressImageUrls;
 
     if (milestoneId && hasQuantityTracking(taskMilestone)) {
       const syncedProgress = await syncTaskQuantityStatus(pool, parsedTaskId);
@@ -269,6 +383,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
         milestone_id: milestoneId,
         site_progress_id: progress.id,
         image_url: finalPhotoPath,
+        image_urls: allPhotoUrls,
         ai_detected_count: ai_detected_count != null ? parseInt(ai_detected_count) : null,
         verified_panel_count: savedQuantity,
         avg_confidence: avg_confidence != null ? parseFloat(avg_confidence) : null,
@@ -410,6 +525,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
 router.get('/', async (req, res) => {
   // NOTE: Read endpoints return progress records for display; upload permissions are checked on POST.
   try {
+    await ensureSiteProgressImageColumns();
     const result = await pool.query(
       `SELECT 
         tpl.id,
@@ -419,6 +535,8 @@ router.get('/', async (req, res) => {
         p.address as location,
         tpl.remarks as notes,
         tpl.evidence_image_path as photo_url,
+        tpl.evidence_image_path as image_url,
+        tpl.image_urls,
         tpl.quantity_accomplished as glass_count,
         tpl.created_at,
         tpl.work_date,
@@ -435,12 +553,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN users u ON tpl.created_by = u.id
        ORDER BY COALESCE(tpl.created_at, tpl.updated_at) DESC`
     );
-    res.json(
-      result.rows.map((row) => ({
-        ...row,
-        photo_url: normalizeImageUrl(row.photo_url),
-      }))
-    );
+    res.json(result.rows.map(mapSiteProgressRow));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch site progress.' });
@@ -450,6 +563,7 @@ router.get('/', async (req, res) => {
 // GET /site-progress/project/:name
 router.get('/project/:name', async (req, res) => {
   try {
+    await ensureSiteProgressImageColumns();
     const result = await pool.query(
       `SELECT 
         tpl.id,
@@ -459,6 +573,8 @@ router.get('/project/:name', async (req, res) => {
         p.address as location,
         tpl.remarks as notes,
         tpl.evidence_image_path as photo_url,
+        tpl.evidence_image_path as image_url,
+        tpl.image_urls,
         tpl.quantity_accomplished as glass_count,
         tpl.created_at,
         tpl.work_date,
@@ -477,12 +593,7 @@ router.get('/project/:name', async (req, res) => {
        ORDER BY COALESCE(tpl.created_at, tpl.updated_at) DESC`,
       [req.params.name]
     );
-    res.json(
-      result.rows.map((row) => ({
-        ...row,
-        photo_url: normalizeImageUrl(row.photo_url),
-      }))
-    );
+    res.json(result.rows.map(mapSiteProgressRow));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch project progress.' });

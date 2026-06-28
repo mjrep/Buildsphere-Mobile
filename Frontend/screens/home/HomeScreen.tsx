@@ -222,6 +222,7 @@ export default function HomeScreen({
   const [showInventory, setShowInventory] = useState(false);
   const [showInventoryProjectPicker, setShowInventoryProjectPicker] = useState(false);
   const [inventoryProjectId, setInventoryProjectId] = useState<number | null>(null);
+  const [inventoryProjectStatus, setInventoryProjectStatus] = useState<string | null>(null);
   const [highlightInventoryItemId, setHighlightInventoryItemId] = useState<number | null>(null);
   const fabAnim = useRef(new Animated.Value(0)).current;
   const [selectedTask, setSelectedTask] = useState<any>(null);
@@ -272,6 +273,7 @@ export default function HomeScreen({
     setShowInventory(false);
     setShowInventoryProjectPicker(false);
     setInventoryProjectId(null);
+    setInventoryProjectStatus(null);
     setHighlightInventoryItemId(null);
   };
 
@@ -288,7 +290,9 @@ export default function HomeScreen({
       return true;
     }
 
+    const project = projects.find((item) => Number(item.id) === Number(projectId));
     setInventoryProjectId(projectId);
+    setInventoryProjectStatus(project?.status || null);
     setHighlightInventoryItemId(inventoryItemId ?? null);
     setShowInventory(true);
     return true;
@@ -859,6 +863,7 @@ export default function HomeScreen({
                       key={project.id}
                       onPress={() => {
                         setInventoryProjectId(project.id);
+                        setInventoryProjectStatus(project.status || null);
                         setHighlightInventoryItemId(null);
                         setShowInventoryProjectPicker(false);
                         setShowInventory(true);
@@ -926,8 +931,10 @@ export default function HomeScreen({
         <Modal visible={showInventory} animationType="slide" transparent={false}>
           <InventoryScreen
             projectId={inventoryProjectId}
+            projectStatus={inventoryProjectStatus}
             onBack={() => {
               setShowInventory(false);
+              setInventoryProjectStatus(null);
               setHighlightInventoryItemId(null);
             }}
             userRole={user.role}

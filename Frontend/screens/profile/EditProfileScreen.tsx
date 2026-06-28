@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  ScrollView,
   Alert,
   ActivityIndicator,
   TextInput,
@@ -22,6 +21,7 @@ import {
   parseDateOnly,
   toDateOnlyString,
 } from '../../utils/dateOnly';
+import KeyboardAwareScreen from '../../components/KeyboardAwareScreen';
 
 interface EditProfileScreenProps {
   user: UserInfo;
@@ -231,7 +231,8 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
         </TouchableOpacity>
       </View>
 
-      <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 40 }}>
+      {/* NOTE: KeyboardAvoidingView keeps form inputs visible when the mobile keyboard is open. */}
+      <KeyboardAwareScreen className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 160 }}>
         {/* Avatar / Photo Picker */}
         <View className="mb-10 mt-4 items-center">
           <TouchableOpacity onPress={pickImage} className="items-center">
@@ -323,7 +324,7 @@ export default function EditProfileScreen({ user, onBack, onSaved }: EditProfile
 
         <Text className="mb-2 mt-5 text-[12px] font-semibold text-[#2D2D2D]">Position (optional)</Text>
         <TextInput value={position} onChangeText={setPosition} style={inputStyle} placeholder="Position / job title" placeholderTextColor="#B9B9B9" />
-      </ScrollView>
+      </KeyboardAwareScreen>
     </View>
   );
 }

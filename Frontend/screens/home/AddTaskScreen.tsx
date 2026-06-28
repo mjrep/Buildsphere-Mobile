@@ -870,7 +870,8 @@ export default function AddTaskScreen({
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={requestClose}>
       <KeyboardAvoidingView
         className="flex-1"
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         style={{ backgroundColor: modalBg }}
       >
         <View

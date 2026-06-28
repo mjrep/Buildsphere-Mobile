@@ -83,6 +83,40 @@ function normalizeImageUrl(value) {
   return null;
 }
 
+function getImageUrls(...values) {
+  const urls = [];
+
+  for (const value of values) {
+    if (!value) continue;
+
+    if (Array.isArray(value)) {
+      urls.push(...getImageUrls(...value));
+      continue;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            urls.push(...getImageUrls(...parsed));
+            continue;
+          }
+        } catch (error) {
+          // Keep malformed legacy values as a single URL/path.
+        }
+      }
+
+      urls.push(trimmed);
+    }
+  }
+
+  return Array.from(new Set(urls));
+}
+
 const attachmentStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, attachmentDir),
   filename: (_req, file, cb) => {
@@ -534,6 +568,9 @@ router.get('/:taskId/progress', async (req, res) => {
       result.rows.map((row) => ({
         ...row,
         evidence_image_path: normalizeImageUrl(row.evidence_image_path),
+        image_url: getImageUrls(row.image_urls, row.evidence_image_path)[0] || null,
+        image_urls: getImageUrls(row.image_urls, row.evidence_image_path),
+        images: getImageUrls(row.image_urls, row.evidence_image_path),
       }))
     );
   } catch (err) {

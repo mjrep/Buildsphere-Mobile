@@ -9,7 +9,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  ScrollView,
   Alert,
   ActivityIndicator,
   TextInput,
@@ -18,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { API_URL, apiFetch } from '../../lib/api';
 import { UserInfo } from '../../App';
+import KeyboardAwareScreen from '../../components/KeyboardAwareScreen';
 
 interface EditAccountScreenProps {
   user: UserInfo;
@@ -119,7 +119,8 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
         </TouchableOpacity>
       </View>
 
-      <ScrollView className="mt-4 flex-1 px-6" contentContainerStyle={{ paddingBottom: 40 }}>
+      {/* NOTE: KeyboardAvoidingView keeps form inputs visible when the mobile keyboard is open. */}
+      <KeyboardAwareScreen className="mt-4 flex-1 px-6" contentContainerStyle={{ paddingBottom: 140 }}>
         <Text className="mb-2 text-[12px] font-semibold text-[#2D2D2D]">Email</Text>
         <TextInput
           value={email}
@@ -179,7 +180,7 @@ export default function EditAccountScreen({ user, onBack, onSaved }: EditAccount
             <Ionicons name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} size={22} color="#7A7A7A" />
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </KeyboardAwareScreen>
     </View>
   );
 }

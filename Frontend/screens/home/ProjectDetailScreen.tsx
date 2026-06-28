@@ -57,7 +57,7 @@ interface Props {
   onBack: () => void;
   userRole?: UserRole;
   user?: UserInfo;
-  projects?: { id: number; name: string }[];
+  projects?: { id: number; name: string; status?: string | null }[];
   onNavigate?: (tab: MainTab) => void;
   canViewHome?: boolean;
   unreadCount?: number;
@@ -353,6 +353,7 @@ export default function ProjectDetailScreen({
         <SiteUpdatesScreen
           visible={showSiteUpdates}
           projectName={project.name}
+          projectStatus={project.status}
           user={user}
           projects={projects}
           onClose={() => {

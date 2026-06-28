@@ -23,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getPermissions, type UserRole } from '../../constants/roles';
 import { API_URL, apiFetch } from '../../lib/api';
-import { normalizeImageUrl } from '../../lib/imageUrls';
+import { getSiteProgressImages } from '../../lib/imageUrls';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import BottomNavigationBar, {
   getBottomNavContentPadding,
@@ -471,26 +471,33 @@ export default function TaskDetailScreen({
                       </Text>
 
                       {(() => {
-                        const imageUrl = normalizeImageUrl(item.evidence_image_path);
-                        if (!imageUrl) return null;
+                        const imageUrls = getSiteProgressImages(item);
+                        if (imageUrls.length === 0) return null;
 
                         return (
-                          <TouchableOpacity
-                            onPress={() => {
-                              setSelectedImage(imageUrl);
-                              setShowImageModal(true);
-                            }}
-                            className="flex-row items-center rounded-lg p-1.5 self-start pr-4"
-                            style={{ backgroundColor: theme.primaryLight }}>
-                            <Image
-                              source={{ uri: imageUrl }}
-                              className="h-10 w-10 rounded-md mr-2"
-                              style={{ backgroundColor: theme.border }}
-                              resizeMode="cover"
-                            />
-                            <Ionicons name="image-outline" size={14} color={theme.primary} />
-                            <Text className="ml-1 text-[11px] font-bold" style={{ color: theme.primary }}>View Photo</Text>
-                          </TouchableOpacity>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            {imageUrls.map((imageUrl, imageIndex) => (
+                              <TouchableOpacity
+                                key={`${imageUrl}-${imageIndex}`}
+                                onPress={() => {
+                                  setSelectedImage(imageUrl);
+                                  setShowImageModal(true);
+                                }}
+                                className="mr-2 flex-row items-center rounded-lg p-1.5 pr-3"
+                                style={{ backgroundColor: theme.primaryLight }}>
+                                <Image
+                                  source={{ uri: imageUrl }}
+                                  className="mr-2 h-10 w-10 rounded-md"
+                                  style={{ backgroundColor: theme.border }}
+                                  resizeMode="cover"
+                                />
+                                <Ionicons name="image-outline" size={14} color={theme.primary} />
+                                <Text className="ml-1 text-[11px] font-bold" style={{ color: theme.primary }}>
+                                  {imageUrls.length > 1 ? `Photo ${imageIndex + 1}` : 'View Photo'}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
                         );
                       })()}
 
