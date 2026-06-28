@@ -24,6 +24,10 @@ export function getImageUrls(value: unknown): string[] {
       }
     }
 
+    if (trimmed.includes(',')) {
+      return getImageUrls(trimmed.split(','));
+    }
+
     return [trimmed];
   }
 

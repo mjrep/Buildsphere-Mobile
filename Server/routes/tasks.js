@@ -88,6 +88,11 @@ function getImageUrls(...values) {
         }
       }
 
+      if (trimmed.includes(',')) {
+        urls.push(...getImageUrls(...trimmed.split(',')));
+        continue;
+      }
+
       urls.push(trimmed);
     }
   }
