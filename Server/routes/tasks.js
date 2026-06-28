@@ -58,29 +58,7 @@ const attachmentDir = path.join(__dirname, '../uploads/task_attachments');
 fs.mkdirSync(attachmentDir, { recursive: true });
 
 function normalizeImageUrl(value) {
-  if (!value) return null;
-
-  if (Array.isArray(value)) {
-    return normalizeImageUrl(value[0]);
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-
-    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed)) return normalizeImageUrl(parsed[0]);
-      } catch (error) {
-        return trimmed;
-      }
-    }
-
-    return trimmed;
-  }
-
-  return null;
+  return getImageUrls(value)[0] || null;
 }
 
 function getImageUrls(...values) {
@@ -114,7 +92,9 @@ function getImageUrls(...values) {
     }
   }
 
-  return Array.from(new Set(urls));
+  // NOTE: Site upload image arrays are normalized to remove empty values like [""].
+  // This prevents blank or broken images from appearing on mobile and web.
+  return Array.from(new Set(urls.filter(Boolean)));
 }
 
 const attachmentStorage = multer.diskStorage({

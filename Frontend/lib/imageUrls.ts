@@ -20,7 +20,7 @@ export function getImageUrls(value: unknown): string[] {
         const parsed = JSON.parse(trimmed);
         if (Array.isArray(parsed)) return getImageUrls(parsed);
       } catch (error) {
-        return [trimmed];
+        return trimmed ? [trimmed] : [];
       }
     }
 
@@ -54,7 +54,8 @@ export function getSiteProgressImages(record: unknown): string[] {
 
   const siteProgress = record as Record<string, unknown>;
   // NOTE: Site uploads can contain multiple photos.
-  // image_url is kept for backward compatibility, while image_urls/images stores all uploaded photos.
+  // NOTE: Site upload image arrays are normalized to remove empty values like [""].
+  // This prevents blank or broken images from appearing on mobile and web.
   return getImageUrls([
     siteProgress.image_urls,
     siteProgress.images,

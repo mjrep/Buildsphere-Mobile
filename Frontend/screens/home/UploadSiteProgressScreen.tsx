@@ -257,13 +257,19 @@ export default function UploadSiteProgressScreen({
       selectionLimit: remainingLimit,
     });
     if (!result.canceled && result.assets) {
-      const newPhotos = result.assets.map(asset => ({
-        uri: asset.uri,
-        base64: asset.base64 || null,
-        width: asset.width,
-        height: asset.height,
-        fileSize: asset.fileSize,
-      }));
+      const newPhotos = result.assets
+        .filter(asset => Boolean(asset.uri?.trim()))
+        .map(asset => ({
+          uri: asset.uri.trim(),
+          base64: asset.base64 || null,
+          width: asset.width,
+          height: asset.height,
+          fileSize: asset.fileSize,
+        }));
+      if (newPhotos.length === 0) {
+        Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
+        return;
+      }
       setSelectedPhotos(prev => [...prev, ...newPhotos]);
       setPhotoAnalysisResults([]);
       setAnalysisStatus('idle');
@@ -289,8 +295,13 @@ export default function UploadSiteProgressScreen({
       base64: false,
     });
     if (!result.canceled && result.assets[0]) {
+      const photoUri = result.assets[0].uri?.trim();
+      if (!photoUri) {
+        Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
+        return;
+      }
       setSelectedPhotos(prev => [...prev, {
-        uri: result.assets[0].uri,
+        uri: photoUri,
         base64: result.assets[0].base64 || null,
         width: result.assets[0].width,
         height: result.assets[0].height,
@@ -335,6 +346,11 @@ export default function UploadSiteProgressScreen({
     if (selectedPhotos.length === 0) {
       return;
     }
+    const validSelectedPhotos = selectedPhotos.filter(photo => Boolean(photo.uri?.trim()));
+    if (validSelectedPhotos.length === 0) {
+      Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
+      return;
+    }
 
     setUploadMode('ai');
     setAnalyzing(true);
@@ -345,7 +361,7 @@ export default function UploadSiteProgressScreen({
     setHasWarnings(false);
     setWarningMessage('');
     try {
-      if (selectedPhotos.length > 0) {
+      if (validSelectedPhotos.length > 0) {
         const nextResults: PhotoAnalysisResult[] = [];
         const failedPhotoNumbers: number[] = [];
         const detectionModes = new Set<string>();
@@ -353,7 +369,7 @@ export default function UploadSiteProgressScreen({
         let totalConfidence = 0;
         let confidenceCount = 0;
 
-        for (const [index, currentPhoto] of selectedPhotos.entries()) {
+        for (const [index, currentPhoto] of validSelectedPhotos.entries()) {
           setAnalyzingPhotoIndex(index);
           setAnalysisStatus(index === 0 ? 'uploading' : 'analyzing');
 
@@ -419,7 +435,7 @@ export default function UploadSiteProgressScreen({
           ? `\nUncertain detections: ${uncertainCount}. Poor lighting or obstruction may reduce accuracy.`
           : '';
         const summaryText =
-          `${selectedPhotos.length} photo${selectedPhotos.length === 1 ? '' : 's'} analyzed.\n` +
+          `${validSelectedPhotos.length} photo${validSelectedPhotos.length === 1 ? '' : 's'} analyzed.\n` +
           `${breakdownText}\nTotal AI count: ${totalCount} panel${totalCount === 1 ? '' : 's'}.${failedText}${qualityText}`;
 
         setAiDetectedCount(totalCount);
@@ -483,6 +499,11 @@ export default function UploadSiteProgressScreen({
       showInactiveProjectMessage();
       return;
     }
+    const validSelectedPhotos = selectedPhotos.filter(photo => Boolean(photo.uri?.trim()));
+    if (validSelectedPhotos.length === 0) {
+      Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
+      return;
+    }
     setSaving(true);
     try {
       const formData = new FormData();
@@ -511,14 +532,15 @@ export default function UploadSiteProgressScreen({
         formData.append('per_photo_counts', JSON.stringify(photoAnalysisResults));
       }
 
-      if (selectedPhotos.length > 0) {
-        selectedPhotos.forEach((photo, index) => {
-          const filename = photo.uri.split('/').pop() || `photo_${index}.jpg`;
+      if (validSelectedPhotos.length > 0) {
+        validSelectedPhotos.forEach((photo, index) => {
+          const photoUri = photo.uri.trim();
+          const filename = photoUri.split('/').pop() || `photo_${index}.jpg`;
           const match = /\.(\w+)$/.exec(filename);
           const type = match ? `image/${match[1]}` : `image/jpeg`;
 
           formData.append('photos', {
-            uri: photo.uri,
+            uri: photoUri,
             name: filename,
             type,
           } as any);
