@@ -282,8 +282,10 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     );
     const allPhotoUrls = getSiteProgressImages(photoUrls, bodyPhotoUrls);
     // NOTE: Site uploads can contain multiple photos.
-    // image_url is kept for backward compatibility, while image_urls/images stores all uploaded photos.
+    // evidence_image_path stores the full photo set for the web table when multiple photos exist,
+    // while image_url/photo_url API fields still expose the first photo for legacy mobile clients.
     const finalPhotoPath = allPhotoUrls[0] || null;
+    const evidenceImagePath = allPhotoUrls.length > 1 ? JSON.stringify(allPhotoUrls) : finalPhotoPath;
     const perPhotoCounts = parseJsonBodyField(per_photo_counts, null);
 
     // 1. Fetch milestone data from the task. Quantity milestones drive task status automatically.
@@ -339,7 +341,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
         milestoneId,
         parsedUserId,
         savedQuantity,
-        finalPhotoPath,
+        evidenceImagePath,
         JSON.stringify(allPhotoUrls),
         notes,
         shift || 'Morning',
