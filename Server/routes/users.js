@@ -11,9 +11,11 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 const { authenticateRequest } = require('../middleware/auth');
 const { canEditUserRoles } = require('../rbac');
 let userProfileSchemaReady = false;
+let supabaseAuthClient = null;
 
 const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 const PROFILE_PHOTO_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -123,6 +125,65 @@ function mapUserProfile(user) {
   };
 }
 
+function getSupabaseAuthClient() {
+  if (supabaseAuthClient) return supabaseAuthClient;
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return null;
+
+  supabaseAuthClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  return supabaseAuthClient;
+}
+
+function getBearerToken(req) {
+  const authorization = req.get('authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+async function getVerifiedSupabaseEmail(req) {
+  const token = getBearerToken(req);
+  if (!token) return null;
+
+  const supabase = getSupabaseAuthClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data?.user?.email) return null;
+
+  return String(data.user.email).trim().toLowerCase();
+}
+
+function inferDemoRoleFromEmail(email) {
+  const localPart = String(email || '').split('@')[0].toLowerCase();
+  if (localPart.includes('projeng') || localPart.includes('engineer')) return 'project_engineer';
+  if (localPart.includes('foreman')) return 'foreman';
+  if (localPart.includes('ceo')) return 'ceo';
+  if (localPart.includes('coo')) return 'coo';
+  if (localPart.includes('account')) return 'accounting';
+  if (localPart.includes('procure')) return 'procurement';
+  if (localPart.includes('hr')) return 'human_resource';
+  if (localPart.includes('coord')) return 'project_coordinator';
+  if (localPart.includes('supervisor')) return 'project_supervisor';
+  return 'general_staff';
+}
+
+function inferNameFromEmail(email) {
+  const localPart = String(email || '').split('@')[0] || 'user';
+  const readable = localPart
+    .replace(/[_-]+/g, ' ')
+    .replace(/\d+/g, ' ')
+    .trim();
+  const words = readable ? readable.split(/\s+/) : ['BuildSphere', 'User'];
+  const title = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+
+  if (title.length === 1) {
+    const compact = title[0];
+    if (/projeng/i.test(compact)) return { firstName: 'Project', lastName: 'Engineer' };
+    return { firstName: compact, lastName: 'User' };
+  }
+
+  return { firstName: title[0], lastName: title.slice(1).join(' ') };
+}
+
 async function findBasicUserProfileByEmail(email) {
   const result = await pool.query(
     `SELECT
@@ -176,6 +237,16 @@ function requireUserAccess(req, res, next) {
 async function ensureUserProfileColumns() {
   if (userProfileSchemaReady) return;
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      first_name VARCHAR(120) NOT NULL DEFAULT 'BuildSphere',
+      last_name VARCHAR(120) NOT NULL DEFAULT 'User',
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password TEXT,
+      role VARCHAR(80) NOT NULL DEFAULT 'general_staff'
+    )
+  `);
+  await pool.query(`
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS middle_name VARCHAR(120),
       ADD COLUMN IF NOT EXISTS suffix VARCHAR(50),
@@ -191,6 +262,42 @@ async function ensureUserProfileColumns() {
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
   `);
   userProfileSchemaReady = true;
+}
+
+async function findOrCreateVerifiedSupabaseProfile(req, email) {
+  const verifiedEmail = await getVerifiedSupabaseEmail(req);
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!verifiedEmail || verifiedEmail !== normalizedEmail) return null;
+
+  const { firstName, lastName } = inferNameFromEmail(normalizedEmail);
+  const role = inferDemoRoleFromEmail(normalizedEmail);
+  const result = await pool.query(
+    `INSERT INTO users (first_name, last_name, email, role, account_status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
+     ON CONFLICT (email) DO UPDATE
+       SET updated_at = NOW()
+     RETURNING
+       id,
+       first_name,
+       middle_name,
+       last_name,
+       suffix,
+       email,
+       role,
+       phone_number,
+       gender,
+       birthdate,
+       address,
+       department,
+       position,
+       account_status,
+       profile_picture_url,
+       created_at,
+       updated_at`,
+    [firstName, lastName, normalizedEmail, role]
+  );
+
+  return result.rows[0] || null;
 }
 
 // GET /users - list all users
@@ -239,7 +346,11 @@ router.get('/by-email/:email', async (req, res) => {
       [req.params.email]
     );
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'User profile not found.' });
+    if (result.rows.length === 0) {
+      const repairedProfile = await findOrCreateVerifiedSupabaseProfile(req, req.params.email);
+      if (repairedProfile) return res.json(mapUserProfile(repairedProfile));
+      return res.status(404).json({ error: 'User profile not found.' });
+    }
 
     res.json(mapUserProfile(result.rows[0]));
   } catch (err) {
@@ -247,7 +358,11 @@ router.get('/by-email/:email', async (req, res) => {
 
     try {
       const basicUser = await findBasicUserProfileByEmail(req.params.email);
-      if (!basicUser) return res.status(404).json({ error: 'User profile not found.' });
+      if (!basicUser) {
+        const repairedProfile = await findOrCreateVerifiedSupabaseProfile(req, req.params.email);
+        if (repairedProfile) return res.json(mapUserProfile(repairedProfile));
+        return res.status(404).json({ error: 'User profile not found.' });
+      }
 
       return res.json(mapUserProfile(basicUser));
     } catch (fallbackError) {

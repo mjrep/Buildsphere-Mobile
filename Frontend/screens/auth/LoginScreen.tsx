@@ -97,7 +97,11 @@ export default function LoginScreen({
         let profileRes: Response;
 
         try {
-          profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
+          profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`, {
+            headers: {
+              Authorization: `Bearer ${authData.session.access_token}`,
+            },
+          });
         } catch (profileError) {
           const backendHealthy = await checkApiHealth();
           await supabase.auth.signOut();
