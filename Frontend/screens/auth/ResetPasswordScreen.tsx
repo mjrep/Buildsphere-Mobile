@@ -1,5 +1,5 @@
 /**
- * ResetPasswordScreen
+ * ResetPasswordScreen yung sa login view ito
  *
  * Lets users set a new password from a Supabase recovery session. Password inputs
  * start empty and are never prefilled to avoid storing sensitive values in UI state.

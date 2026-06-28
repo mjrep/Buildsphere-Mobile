@@ -1,5 +1,5 @@
 /**
- * VerifyResetOtpScreen
+ * VerifyResetOtpScreen verity pang otp sa email bago mag reset ng password
  *
  * Confirms the emailed reset OTP before allowing the user to create a new password.
  * Includes resend cooldown to avoid accidental email flooding.
