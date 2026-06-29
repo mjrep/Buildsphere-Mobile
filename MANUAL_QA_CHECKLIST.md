@@ -103,7 +103,7 @@ Expo Go is not enough for final push QA. Use a physical Android phone or a suppo
 
 | Item | Current repo state | Status | Notes |
 | --- | --- | --- | --- |
-| Android package name | `com.icecandyyy.buildsphere` in `Frontend/app.json` | STATIC CHECKED | Verify it matches EAS/FCM credentials before building |
+| Android package name | `com.micrep.buildsphere` in `Frontend/app.json` | STATIC CHECKED | Verify it matches EAS/FCM credentials before building |
 | EAS projectId | `1c2ed9d9-6d4c-4b8a-9052-af1100d2cf29` in `Frontend/app.json` | STATIC CHECKED | Required by `getExpoPushTokenAsync` |
 | `expo-notifications` plugin | Present in `Frontend/app.json` | STATIC CHECKED |  |
 | Android notification channel | Created in mobile notification helper | STATIC CHECKED | Uses default channel with high importance |

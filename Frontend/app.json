@@ -2,6 +2,10 @@
   "expo": {
     "name": "Buildsphere",
     "slug": "buildsphere",
+{
+  "expo": {
+    "name": "Buildsphere",
+    "slug": "buildsphere",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/Buildspherelogo4x.png",
@@ -10,13 +14,13 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.icecandyyy.Buildsphere",
+      "bundleIdentifier": "com.micrep.Buildsphere",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.icecandyyy.buildsphere",
+      "package": "com.micrep.buildsphere",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -60,6 +64,6 @@
         "projectId": "1c2ed9d9-6d4c-4b8a-9052-af1100d2cf29"
       }
     },
-    "owner": "icecandyyy"
+    "owner": "micrep"
   }
 }
