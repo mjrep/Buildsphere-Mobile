@@ -154,7 +154,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canEditUserRoles: false,
   },
   procurement: {
-    canViewDashboard: false,
+    canViewDashboard: true,
     canViewBudget: true,
     canCreateTasks: false,
     ...FULL_INVENTORY_ACCESS,
