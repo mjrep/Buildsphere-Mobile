@@ -85,6 +85,11 @@ interface AssignedTaskProject {
 
 const INVENTORY_PERMISSION_MESSAGE = 'You do not have permission to access Inventory.';
 
+const defaultTabForRole = (role?: string): MainTab => {
+  if (getPermissions(role).canViewDashboard) return 'home';
+  return normalizeRole(role) === 'sales' ? 'mywork' : 'more';
+};
+
 const toPositiveNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -210,7 +215,7 @@ export default function HomeScreen({
   notificationData,
   onNotificationHandled,
 }: HomeScreenProps) {
-  const [activeTab, setActiveTab] = useState<MainTab>('home');
+  const [activeTab, setActiveTab] = useState<MainTab>(() => defaultTabForRole(initialUser.role));
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [user, setUser] = useState<UserInfo>(initialUser);
@@ -305,15 +310,21 @@ export default function HomeScreen({
 
   useEffect(() => {
     setUser(initialUser);
+    setActiveTab((currentTab) => {
+      if (currentTab === 'home' && !getPermissions(initialUser.role).canViewDashboard) {
+        return defaultTabForRole(initialUser.role);
+      }
+      return currentTab;
+    });
   }, [initialUser]);
 
   useEffect(() => {
     // ─── RBAC: Redirect from Home if not permitted ───
     // NOTE: Staff users do not receive project cards because they do not perform mobile site operations.
     if (!perms.canViewDashboard && activeTab === 'home') {
-      setActiveTab('more');
+      setActiveTab(defaultTabForRole(user.role));
     }
-  }, [perms.canViewDashboard, activeTab]);
+  }, [perms.canViewDashboard, activeTab, user.role]);
 
   useEffect(() => {
     if (!canAccessInventory && (showInventory || showInventoryProjectPicker)) {
@@ -434,7 +445,7 @@ export default function HomeScreen({
 
   const handleMainTabPress = (tab: MainTab) => {
     if (tab === 'home' && !perms.canViewDashboard) {
-      setActiveTab('more');
+      setActiveTab(defaultTabForRole(user.role));
       return;
     }
 
