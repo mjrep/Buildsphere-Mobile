@@ -19,6 +19,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   useWindowDimensions,
+  FlatList,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -122,6 +123,10 @@ export default function UploadSiteProgressScreen({
   const [glassCount, setGlassCount] = useState<number>(0);
   const [uploadMode, setUploadMode] = useState<UploadMode>(null);
 
+  // Image Viewer & preview states
+  const [currentPhotoIndex, setCurrentPhotoIndex] = useState<number>(0);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+
   //  AI detection state 
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle');
   const [detectionMode, setDetectionMode] = useState<string>('gemini-only');
@@ -171,6 +176,8 @@ export default function UploadSiteProgressScreen({
     setAiSummary('');
     setPhotoAnalysisResults([]);
     setAnalyzingPhotoIndex(null);
+    setCurrentPhotoIndex(0);
+    setViewerIndex(null);
   };
 
   const markDirty = () => {
@@ -852,10 +859,10 @@ export default function UploadSiteProgressScreen({
               <View 
                 className="overflow-hidden rounded-[24px] shadow-xl"
                 style={{ 
-                  backgroundColor: theme.surface,
+                  backgroundColor: '#121212', 
                   height: '100%', 
                   shadowColor: '#000', 
-                  shadowOpacity: 0.1, 
+                  shadowOpacity: 0.15, 
                   shadowRadius: 15, 
                   elevation: 5 
                 }}>
@@ -863,15 +870,28 @@ export default function UploadSiteProgressScreen({
                   horizontal 
                   pagingEnabled 
                   showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={(e) => {
+                    const contentOffset = e.nativeEvent.contentOffset.x;
+                    const viewSize = e.nativeEvent.layoutMeasurement.width;
+                    if (viewSize > 0) {
+                      const idx = Math.round(contentOffset / viewSize);
+                      setCurrentPhotoIndex(idx);
+                    }
+                  }}
                   contentContainerStyle={{ alignItems: 'center' }}>
                   {selectedPhotos.map((photo, index) => (
-                    <View key={index} style={{ width: SCREEN_WIDTH - 40, height: '100%' }}>
+                    <TouchableOpacity 
+                      key={index} 
+                      activeOpacity={0.9}
+                      onPress={() => setViewerIndex(index)}
+                      style={{ width: SCREEN_WIDTH - 40, height: '100%', justifyContent: 'center', alignItems: 'center' }}
+                    >
                       <Image 
                         source={{ uri: photo.uri }} 
                         style={{ width: '100%', height: '100%' }} 
-                        resizeMode="cover" 
+                        resizeMode="contain" 
                       />
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
 
@@ -879,7 +899,15 @@ export default function UploadSiteProgressScreen({
                 {selectedPhotos.length > 1 && (
                   <View className="absolute bottom-5 left-0 right-0 flex-row justify-center gap-2">
                     {selectedPhotos.map((_, i) => (
-                      <View key={i} className="h-1.5 w-1.5 rounded-full bg-white/60" />
+                      <View 
+                        key={i} 
+                        style={{
+                          height: 6,
+                          width: i === currentPhotoIndex ? 16 : 6,
+                          borderRadius: 3,
+                          backgroundColor: i === currentPhotoIndex ? PRIMARY : 'rgba(255, 255, 255, 0.6)',
+                        }}
+                      />
                     ))}
                   </View>
                 )}
@@ -1002,7 +1030,12 @@ export default function UploadSiteProgressScreen({
                     const photoResult = getPhotoAnalysisResult(index);
 
                     return (
-                      <View key={index} className="mr-3">
+                      <TouchableOpacity 
+                        key={index} 
+                        activeOpacity={0.8}
+                        onPress={() => setViewerIndex(index)}
+                        className="mr-3"
+                      >
                         <Image
                           source={{ uri: photo.uri }}
                           style={{ width: 110, height: 110, borderRadius: 16 }}
@@ -1017,7 +1050,7 @@ export default function UploadSiteProgressScreen({
                             </Text>
                           </View>
                         ) : null}
-                      </View>
+                      </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
@@ -1374,6 +1407,99 @@ export default function UploadSiteProgressScreen({
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+      </Modal>
+
+      {/* ── Full-Screen Image Viewer Modal ── */}
+      <Modal
+        visible={viewerIndex !== null}
+        transparent={false}
+        animationType="fade"
+        onRequestClose={() => setViewerIndex(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: '#000000' }}>
+          <SystemBars backgroundColor="#000000" style="light" />
+          
+          {/* Header Controls */}
+          <View
+            style={{
+              position: 'absolute',
+              top: Math.max(insets.top, 20),
+              left: 0,
+              right: 0,
+              height: 50,
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingHorizontal: 20,
+              zIndex: 10,
+            }}
+          >
+            <TouchableOpacity
+              onPress={() => setViewerIndex(null)}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="close" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            {viewerIndex !== null && (
+              <View style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: 'bold' }}>
+                  {(viewerIndex ?? 0) + 1} / {selectedPhotos.length}
+                </Text>
+              </View>
+            )}
+
+            {/* Spacer */}
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Image Slider */}
+          {viewerIndex !== null && (
+            <FlatList
+              data={selectedPhotos}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              initialScrollIndex={viewerIndex}
+              getItemLayout={(_, index) => ({
+                length: SCREEN_WIDTH,
+                offset: SCREEN_WIDTH * index,
+                index,
+              })}
+              onMomentumScrollEnd={(e) => {
+                const index = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                if (index >= 0 && index < selectedPhotos.length) {
+                  setViewerIndex(index);
+                }
+              }}
+              keyExtractor={(_, i) => String(i)}
+              renderItem={({ item }) => (
+                <View style={{ width: SCREEN_WIDTH, height: '100%' }}>
+                  <ScrollView
+                    maximumZoomScale={5}
+                    minimumZoomScale={1}
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{ width: SCREEN_WIDTH, height: '100%', justifyContent: 'center', alignItems: 'center' }}
+                  >
+                    <Image
+                      source={{ uri: item.uri }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode="contain"
+                    />
+                  </ScrollView>
+                </View>
+              )}
+            />
+          )}
         </View>
       </Modal>
 
