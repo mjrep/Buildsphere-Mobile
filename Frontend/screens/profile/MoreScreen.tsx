@@ -98,7 +98,7 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
 
   return (
     <View className="flex-1" style={{ backgroundColor: theme.background }}>
-      <ScrollView className="flex-1 pt-14" contentContainerStyle={{ paddingBottom: bottomNavContentPadding }}>
+      <ScrollView className="flex-1 pt-14" contentContainerStyle={{ paddingBottom: bottomNavContentPadding + 24 }}>
         <View style={screenContentStyle}>
         {loadingProfile ? (
           <ProfileSkeleton />
@@ -208,17 +208,32 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
 
         {/* Menu Items */}
         <View
-          className="mb-8 overflow-hidden rounded-2xl border"
-          style={{ backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}>
-          <View className="border-b px-5 py-4" style={{ borderColor: theme.border }}>
+          className="mb-12 overflow-hidden rounded-[24px] border"
+          style={{
+            backgroundColor: theme.elevated,
+            borderColor: theme.border,
+            shadowColor: theme.shadow,
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.14,
+            shadowRadius: 18,
+            elevation: 8,
+          }}>
+          <View className="border-b px-6 py-5" style={{ borderColor: theme.border }}>
             <Text className="mb-3 text-[13px] font-bold uppercase" style={{ color: theme.textMuted }}>Appearance</Text>
-            <View className="flex-row rounded-2xl p-1" style={{ backgroundColor: theme.input }}>
+            <View className="flex-row rounded-2xl p-1.5" style={{ backgroundColor: theme.input }}>
               {(['light', 'dark'] as const).map((item) => (
                 <TouchableOpacity
                   key={item}
                   onPress={() => setMode(item)}
-                  className="flex-1 rounded-xl py-2"
-                  style={{ backgroundColor: mode === item ? theme.primary : 'transparent' }}>
+                  className="flex-1 rounded-xl py-2.5"
+                  style={{
+                    backgroundColor: mode === item ? theme.primary : 'transparent',
+                    shadowColor: mode === item ? theme.primary : 'transparent',
+                    shadowOpacity: mode === item ? 0.25 : 0,
+                    shadowRadius: mode === item ? 8 : 0,
+                    shadowOffset: { width: 0, height: 3 },
+                    elevation: mode === item ? 3 : 0,
+                  }}>
                   <Text className="text-center text-[13px] font-bold" style={{ color: mode === item ? '#FFFFFF' : theme.textSecondary }}>
                     {item === 'light' ? 'Light' : 'Dark'}
                   </Text>
@@ -238,11 +253,11 @@ export default function MoreScreen({ user, onLogout, onUserUpdated }: MoreScreen
                 ]
               );
             }} 
-            className="flex-row items-center px-5 py-4">
-            <View className="mr-3 h-8 w-8 items-center justify-center rounded-full bg-[#FFE8E8]">
+            className="flex-row items-center px-6 py-5">
+            <View className="mr-4 h-10 w-10 items-center justify-center rounded-full bg-[#FFE8E8]">
               <Ionicons name="log-out-outline" size={18} color="#FF6B6B" />
             </View>
-            <Text className="text-[15px] font-medium text-[#FF6B6B]">Logout</Text>
+            <Text className="text-[16px] font-bold text-[#FF6B6B]">Logout</Text>
           </TouchableOpacity>
         </View>
         </View>
