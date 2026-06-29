@@ -87,7 +87,7 @@ const INVENTORY_PERMISSION_MESSAGE = 'You do not have permission to access Inven
 
 const defaultTabForRole = (role?: string): MainTab => {
   if (getPermissions(role).canViewDashboard) return 'home';
-  return ['sales', 'accounting', 'human_resource'].includes(normalizeRole(role)) ? 'mywork' : 'more';
+  return ['sales', 'accounting', 'human_resource', 'staff'].includes(normalizeRole(role)) ? 'mywork' : 'more';
 };
 
 const toPositiveNumber = (value: unknown) => {
@@ -494,6 +494,10 @@ export default function HomeScreen({
       if (assignedProjectRoles.has(normalizedRole) && canApplyAssignedTaskFilter) {
         filteredData = filterAssignedProjects(allProjects, assignedTasks, user.id);
       }
+      if (normalizedRole === 'procurement') {
+        // NOTE: Procurement users only see assigned ongoing projects because their mobile workflow is limited to inventory-related project work.
+        filteredData = filteredData.filter((project) => isOngoingProjectStatus(project.status));
+      }
 
       const mappedData = filteredData.map((p: any) => {
         if (typeof p.image_url === 'string' && p.image_url.startsWith('http')) {
@@ -657,6 +661,8 @@ export default function HomeScreen({
                     <Text className="mt-2 text-center" style={{ color: theme.textMuted }}>
                       {['project_engineer', 'project_coordinator', 'foreman', 'project_supervisor', 'staff'].includes(normalizedRole)
                         ? 'No assigned projects yet.'
+                        : normalizedRole === 'procurement'
+                          ? 'No assigned projects available.'
                         : 'No projects found.'}
                     </Text>
                   </View>
