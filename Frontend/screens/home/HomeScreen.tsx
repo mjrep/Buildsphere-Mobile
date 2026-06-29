@@ -87,7 +87,7 @@ const INVENTORY_PERMISSION_MESSAGE = 'You do not have permission to access Inven
 
 const defaultTabForRole = (role?: string): MainTab => {
   if (getPermissions(role).canViewDashboard) return 'home';
-  return normalizeRole(role) === 'sales' ? 'mywork' : 'more';
+  return ['sales', 'accounting'].includes(normalizeRole(role)) ? 'mywork' : 'more';
 };
 
 const toPositiveNumber = (value: unknown) => {

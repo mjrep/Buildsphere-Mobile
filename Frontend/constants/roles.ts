@@ -213,9 +213,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canApproveProject: false,
     canEditUserRoles: false,
   },
-  // Accounting: Dashboard and monitoring are visible; inventory remains audit-only.
+  // Accounting: Audit-only mobile access through Task, Notifications, and More.
   accounting: {
-    canViewDashboard: true,
+    canViewDashboard: false,
     canViewBudget: true,
     canCreateTasks: false,
     ...VIEW_ONLY_INVENTORY,
