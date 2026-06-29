@@ -115,7 +115,17 @@ function canViewBudget(role) {
 }
 
 function canViewReports(role) {
-  return ['ceo', 'coo', 'project_coordinator', 'accounting'].includes(normalizeRole(role));
+  return [
+    'ceo',
+    'coo',
+    'project_engineer',
+    'project_coordinator',
+    'foreman',
+    'project_supervisor',
+    'accounting',
+    'human_resource',
+    'procurement',
+  ].includes(normalizeRole(role));
 }
 
 function canApproveProject(role) {

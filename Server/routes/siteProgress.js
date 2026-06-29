@@ -15,7 +15,7 @@ const { createNotification, sendPushNotificationToUser } = require('../services/
 const { hasQuantityTracking, syncTaskQuantityStatus } = require('../services/taskStatusService');
 const { logProjectActivity } = require('../services/activityLogService');
 const { authenticateRequest } = require('../middleware/auth');
-const { canUploadSiteProgress, rejectInactiveProjectWork } = require('../rbac');
+const { canUploadSiteProgress, canViewReports, rejectInactiveProjectWork } = require('../rbac');
 const { qaDebug } = require('../services/qaDebug');
 
 let supabase = null;
@@ -99,6 +99,15 @@ function parseJsonBodyField(value, fallback = null) {
 
 function normalizeImageUrl(value) {
   return getSiteProgressImages(value)[0] || null;
+}
+
+function requireSiteProgressReadRole(req, res, next) {
+  // Monitoring access follows the mobile access matrix. Upload permission is checked separately on POST.
+  if (!canViewReports(req.user?.role)) {
+    return res.status(403).json({ message: 'You do not have permission to view site progress.' });
+  }
+
+  return next();
 }
 
 function getSiteProgressImages(...values) {
@@ -513,7 +522,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
 
 
 // GET /site-progress
-router.get('/', async (req, res) => {
+router.get('/', authenticateRequest, requireSiteProgressReadRole, async (req, res) => {
   // NOTE: Read endpoints return progress records for display; upload permissions are checked on POST.
   try {
     await ensureSiteProgressImageColumns();
@@ -552,7 +561,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /site-progress/project/:name
-router.get('/project/:name', async (req, res) => {
+router.get('/project/:name', authenticateRequest, requireSiteProgressReadRole, async (req, res) => {
   try {
     await ensureSiteProgressImageColumns();
     const result = await pool.query(

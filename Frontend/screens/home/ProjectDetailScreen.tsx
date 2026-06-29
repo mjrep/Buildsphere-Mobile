@@ -193,6 +193,7 @@ export default function ProjectDetailScreen({
   const [showSiteUpdates, setShowSiteUpdates] = useState(false);
   const perms = getPermissions(userRole);
   const mayViewInventory = canViewInventory ?? perms.canViewInventory;
+  const mayViewMonitoring = perms.canViewReports;
 
   const loadProject = async () => {
     setLoading(true);
@@ -329,7 +330,7 @@ export default function ProjectDetailScreen({
         <View className="mt-8">
           {[
             ...(mayViewInventory ? [{ label: 'Inventory', key: 'inventory' }] : []),
-            { label: 'Site Updates', key: 'siteUpdates' },
+            ...(mayViewMonitoring ? [{ label: 'Site Updates', key: 'siteUpdates' }] : []),
           ].map((item) => (
             <TouchableOpacity
               key={item.key}
