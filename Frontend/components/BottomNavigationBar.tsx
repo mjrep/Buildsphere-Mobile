@@ -59,6 +59,7 @@ const NAV_ITEMS: {
 export default function BottomNavigationBar({
   activeTab,
   onTabPress,
+  canViewHome = true,
   unreadCount = 0,
 }: BottomNavigationBarProps) {
   const { isDark, theme } = useAppTheme();
@@ -89,7 +90,7 @@ export default function BottomNavigationBar({
         elevation: 10,
         zIndex: 50,
       }}>
-      {NAV_ITEMS.map((item) => {
+      {NAV_ITEMS.filter((item) => canViewHome || item.key !== 'home').map((item) => {
         const isActive = activeTab === item.key;
         return (
           <TouchableOpacity

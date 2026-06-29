@@ -400,6 +400,15 @@ export default function HomeScreen({
   };
 
   const handleNotifNavigateToProject = (projectId: number) => {
+    if (!perms.canViewDashboard) {
+      setActiveTab('notifications');
+      setSelectedProjectId(null);
+      setSelectedTask(null);
+      setShowInventory(false);
+      setShowSiteProgress(false);
+      return;
+    }
+
     setActiveTab('home');
     setSelectedTask(null);
     setShowInventory(false);
