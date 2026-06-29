@@ -2,10 +2,6 @@
   "expo": {
     "name": "Buildsphere",
     "slug": "buildsphere",
-{
-  "expo": {
-    "name": "Buildsphere",
-    "slug": "buildsphere",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/Buildspherelogo4x.png",
