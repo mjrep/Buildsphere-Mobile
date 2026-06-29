@@ -174,7 +174,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canEditUserRoles: false,
   },
   hr: {
-    canViewDashboard: true,
+    canViewDashboard: false,
     canViewBudget: false,
     canCreateTasks: false,
     ...NO_INVENTORY_ACCESS,
@@ -184,7 +184,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canEditUserRoles: true,
   },
   human_resource: {
-    canViewDashboard: true,
+    canViewDashboard: false,
     canViewBudget: false,
     canCreateTasks: false,
     ...NO_INVENTORY_ACCESS,
@@ -194,7 +194,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permissions> = {
     canEditUserRoles: true,
   },
   human_resources: {
-    canViewDashboard: true,
+    canViewDashboard: false,
     canViewBudget: false,
     canCreateTasks: false,
     ...NO_INVENTORY_ACCESS,
