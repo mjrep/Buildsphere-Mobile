@@ -110,7 +110,11 @@ function getActorId(req) {
 }
 
 function canViewAllInventoryProjects(role) {
-  return ['ceo', 'coo', 'accounting', 'procurement'].includes(normalizeRole(role));
+  return ['ceo', 'coo', 'accounting'].includes(normalizeRole(role));
+}
+
+function ongoingProjectWhereClause(alias = 'p') {
+  return `LOWER(REPLACE(REPLACE(COALESCE(${alias}.status, ''), '-', '_'), ' ', '_')) IN ('ongoing', 'in_progress', 'inprogress')`;
 }
 
 function rejectInventoryAccess(res, accessLevel) {
@@ -145,8 +149,10 @@ async function canAccessProjectInventory(userId, role, projectId) {
   const parsedUserId = Number(userId);
   const parsedProjectId = Number(projectId);
   if (!Number.isFinite(parsedProjectId) || parsedProjectId <= 0) return false;
-  if (canViewAllInventoryProjects(role)) return true;
+  const normalizedRole = normalizeRole(role);
+  if (canViewAllInventoryProjects(normalizedRole)) return true;
   if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) return false;
+  const procurementStatusClause = normalizedRole === 'procurement' ? `AND ${ongoingProjectWhereClause('p')}` : '';
 
   try {
     const result = await pool.query(
@@ -155,16 +161,21 @@ async function canAccessProjectInventory(userId, role, projectId) {
          FROM projects p
          WHERE p.id = $1
            AND p.project_in_charge_id = $2
+           ${procurementStatusClause}
       ) OR EXISTS (
          SELECT 1
          FROM project_user pu
+         JOIN projects p ON p.id = pu.project_id
          WHERE pu.project_id = $1
            AND pu.user_id = $2
+           ${procurementStatusClause}
       ) OR EXISTS (
          SELECT 1
          FROM tasks t
+         JOIN projects p ON p.id = t.project_id
          WHERE t.project_id = $1
            AND (t.assigned_to = $2 OR t.assigned_by = $2 OR t.created_by = $2)
+           ${procurementStatusClause}
       ) AS allowed`,
       [parsedProjectId, parsedUserId]
     );
@@ -179,11 +190,14 @@ async function canAccessProjectInventory(userId, role, projectId) {
          FROM projects p
          WHERE p.id = $1
            AND p.project_in_charge_id = $2
+           ${procurementStatusClause}
       ) OR EXISTS (
          SELECT 1
          FROM tasks t
+         JOIN projects p ON p.id = t.project_id
          WHERE t.project_id = $1
            AND (t.assigned_to = $2 OR t.assigned_by = $2 OR t.created_by = $2)
+           ${procurementStatusClause}
       ) AS allowed`,
       [parsedProjectId, parsedUserId]
     );

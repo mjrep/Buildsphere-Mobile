@@ -18,7 +18,7 @@ const PROJECT_DELETE_ROLES = new Set(['ceo', 'coo']);
 const PROJECT_COLOR_ROLES = new Set(['ceo', 'coo', 'project_engineer', 'project_coordinator']);
 const PROJECT_GLOBAL_COLOR_ROLES = new Set(['ceo', 'coo']);
 const FINAL_STATUS_VALUES = new Set(['approved', 'rejected', 'cancelled']);
-const PROJECT_VIEW_ALL_ROLES = new Set(['ceo', 'coo', 'accounting', 'procurement']);
+const PROJECT_VIEW_ALL_ROLES = new Set(['ceo', 'coo', 'accounting']);
 
 function firstPresent(...values) {
   return values.find((value) => value !== null && value !== undefined && String(value).trim() !== '');
@@ -73,6 +73,20 @@ function canViewAllProjects(req) {
   return PROJECT_VIEW_ALL_ROLES.has(userRole(req));
 }
 
+function ongoingProjectWhereClause(alias = 'p') {
+  return `LOWER(REPLACE(REPLACE(COALESCE(${alias}.status, ''), '-', '_'), ' ', '_')) IN ('ongoing', 'in_progress', 'inprogress')`;
+}
+
+function roleProjectWhereClause(req, alias = 'p') {
+  const role = userRole(req);
+  if (canViewAllProjects(req)) return '';
+  const assignedClause = assignedProjectWhereClause(alias);
+  if (role === 'procurement') {
+    return `WHERE ${assignedClause} AND ${ongoingProjectWhereClause(alias)}`;
+  }
+  return `WHERE ${assignedClause}`;
+}
+
 function assignedProjectWhereClause(alias = 'p') {
   // Non-executive users read projects through direct charge, project membership, or task assignment.
   return `(
@@ -97,6 +111,8 @@ async function canReadProject(req, projectId) {
   if (canViewAllProjects(req)) return true;
   const parsedProjectId = Number(projectId);
   if (!Number.isFinite(parsedProjectId) || parsedProjectId <= 0) return false;
+  const role = userRole(req);
+  const statusClause = role === 'procurement' ? `AND ${ongoingProjectWhereClause('p')}` : '';
 
   const result = await pool.query(
     `SELECT EXISTS (
@@ -104,6 +120,7 @@ async function canReadProject(req, projectId) {
        FROM projects p
        WHERE p.id = $2
          AND ${assignedProjectWhereClause('p')}
+         ${statusClause}
      ) AS allowed`,
     [req.user.id, parsedProjectId]
   );
@@ -188,7 +205,7 @@ function authorizeProjectUpdate(req, res, currentProject) {
 
 async function fetchBasicProjects(req) {
   const canViewAll = canViewAllProjects(req);
-  const whereClause = canViewAll ? '' : `WHERE ${assignedProjectWhereClause('p')}`;
+  const whereClause = roleProjectWhereClause(req);
   const params = canViewAll ? [] : [req.user.id];
 
   try {
@@ -219,7 +236,7 @@ router.get('/', authenticateRequest, async (req, res) => {
   try {
     let rows;
     const canViewAll = canViewAllProjects(req);
-    const whereClause = canViewAll ? '' : `WHERE ${assignedProjectWhereClause('p')}`;
+    const whereClause = roleProjectWhereClause(req);
     const params = canViewAll ? [] : [req.user.id];
 
     try {
