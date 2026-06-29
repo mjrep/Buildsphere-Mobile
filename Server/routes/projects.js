@@ -18,7 +18,7 @@ const PROJECT_DELETE_ROLES = new Set(['ceo', 'coo']);
 const PROJECT_COLOR_ROLES = new Set(['ceo', 'coo', 'project_engineer', 'project_coordinator']);
 const PROJECT_GLOBAL_COLOR_ROLES = new Set(['ceo', 'coo']);
 const FINAL_STATUS_VALUES = new Set(['approved', 'rejected', 'cancelled']);
-const PROJECT_VIEW_ALL_ROLES = new Set(['ceo', 'coo', 'accounting']);
+const PROJECT_VIEW_ALL_ROLES = new Set(['ceo', 'coo']);
 
 function firstPresent(...values) {
   return values.find((value) => value !== null && value !== undefined && String(value).trim() !== '');
@@ -81,6 +81,10 @@ function roleProjectWhereClause(req, alias = 'p') {
   const role = userRole(req);
   if (canViewAllProjects(req)) return '';
   const assignedClause = assignedProjectWhereClause(alias);
+  // NOTE: Mobile project cards are filtered by both role and project assignment.
+  // A logged-in user should not automatically see all projects.
+  // NOTE: Staff users do not receive project cards because they do not perform mobile site operations.
+  // NOTE: Procurement users only see assigned projects because their mobile workflow is limited to inventory-related project work.
   if (role === 'procurement') {
     return `WHERE ${assignedClause} AND ${ongoingProjectWhereClause(alias)}`;
   }

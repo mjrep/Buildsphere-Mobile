@@ -309,8 +309,9 @@ export default function HomeScreen({
 
   useEffect(() => {
     // ─── RBAC: Redirect from Home if not permitted ───
+    // NOTE: Staff users do not receive project cards because they do not perform mobile site operations.
     if (!perms.canViewDashboard && activeTab === 'home') {
-      setActiveTab('mywork');
+      setActiveTab('more');
     }
   }, [perms.canViewDashboard, activeTab]);
 
@@ -433,7 +434,7 @@ export default function HomeScreen({
 
   const handleMainTabPress = (tab: MainTab) => {
     if (tab === 'home' && !perms.canViewDashboard) {
-      setActiveTab('mywork');
+      setActiveTab('more');
       return;
     }
 
@@ -449,7 +450,8 @@ export default function HomeScreen({
   };
 
   const fetchProjects = async () => {
-    // NOTE: Loads projects from the backend; server-side RBAC decides which projects are returned.
+    // NOTE: Mobile project cards are filtered by both role and project assignment.
+    // A logged-in user should not automatically see all projects.
     setLoadingProjects(true);
     setProjectsError(null);
     try {
@@ -669,6 +671,7 @@ export default function HomeScreen({
         ) : activeTab === 'mywork' ? (
           <MyWork
             userId={user.id}
+            userRole={user.role}
             onTaskSelect={(task) => setSelectedTask(task)}
             projects={projects}
             projectsLoading={loadingProjects}

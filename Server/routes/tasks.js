@@ -51,7 +51,7 @@ const CREATOR_ROLES = new Set([
   'project_engineer',
   'project_coordinator',
 ]);
-const TASK_VIEW_ALL_PROJECT_ROLES = new Set(['ceo', 'coo', 'accounting', 'procurement']);
+const TASK_VIEW_ALL_PROJECT_ROLES = new Set(['ceo', 'coo']);
 const TASK_UPDATE_ALL_ROLES = new Set(['ceo', 'coo', 'project_engineer', 'project_coordinator']);
 
 const attachmentDir = path.join(__dirname, '../uploads/task_attachments');
@@ -224,6 +224,8 @@ function canViewAllTaskProjects(req) {
 }
 
 function assignedProjectAccessClause(alias = 'p') {
+  // NOTE: Mobile project/task lookup is filtered by both role and project assignment.
+  // A logged-in user should not automatically see all projects.
   return `(
     ${alias}.project_in_charge_id = $1
     OR EXISTS (
@@ -419,6 +421,10 @@ router.use(async (req, res, next) => {
 // GET /tasks?userId=xxx
 router.get('/', async (req, res) => {
   // NOTE: Task list is scoped by role and assignment so users only see relevant work.
+  if (normalizeRole(req.user?.role) === 'staff') {
+    return res.json([]);
+  }
+
   const userId = req.user.id;
   try {
     const result = await fetchAssignedTasks(userId);

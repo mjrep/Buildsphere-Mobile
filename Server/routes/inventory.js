@@ -110,7 +110,7 @@ function getActorId(req) {
 }
 
 function canViewAllInventoryProjects(role) {
-  return ['ceo', 'coo', 'accounting'].includes(normalizeRole(role));
+  return ['ceo', 'coo'].includes(normalizeRole(role));
 }
 
 function ongoingProjectWhereClause(alias = 'p') {

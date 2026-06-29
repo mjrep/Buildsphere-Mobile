@@ -23,6 +23,7 @@ import { SkeletonBox, TaskCardSkeleton } from '../../components/skeletons';
 import { centeredContent } from '../../utils/responsive';
 import { formatDisplayLabel, normalizeDisplayKey } from '../../utils/display';
 import { qaDebug } from '../../utils/qaDebug';
+import { normalizeRole } from '../../constants/roles';
 
 interface Task {
   id: number;
@@ -54,6 +55,7 @@ interface MyWorkProps {
   projectsError?: string | null;
   onRetryProjects?: () => void;
   refreshKey?: number;
+  userRole?: string;
 }
 
 type Tab = 'To Do' | 'In Progress' | 'To Review' | 'Completed';
@@ -74,6 +76,7 @@ export default function MyWork({
   projectsError = null,
   onRetryProjects,
   refreshKey = 0,
+  userRole,
 }: MyWorkProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,6 +91,7 @@ export default function MyWork({
   const { width } = useWindowDimensions();
   const screenContentStyle = centeredContent(width);
   const bottomNavContentPadding = getBottomNavContentPadding(insets.bottom);
+  const isStaff = normalizeRole(userRole) === 'staff';
 
   const TABS: { label: Tab; color: string }[] = [
     { label: 'To Do', color: '#FF6B6B' },
@@ -333,10 +337,12 @@ export default function MyWork({
         ) : filteredTasks.length === 0 ? (
           <View className="mt-20 items-center justify-center">
             <Ionicons name="document-text-outline" size={48} color={theme.textMuted} />
-            <Text className="mt-4 text-[14px]" style={{ color: theme.textMuted }}>
-              {selectedProject === 'All'
-                ? 'No tasks in this category'
-                : `No tasks for ${selectedProject} in this category`}
+            <Text className="mt-4 px-6 text-center text-[14px]" style={{ color: theme.textMuted }}>
+              {isStaff
+                ? 'You do not have assigned project access for mobile operations.'
+                : selectedProject === 'All'
+                  ? 'No tasks in this category'
+                  : `No tasks for ${selectedProject} in this category`}
             </Text>
           </View>
         ) : (
