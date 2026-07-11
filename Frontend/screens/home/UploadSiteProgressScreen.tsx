@@ -113,6 +113,15 @@ const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
 
 const PRIMARY = '#7370FF';
 const AI_IMAGE_PICKER_QUALITY = 0.75;
+const AUTH_REQUIRED_PATTERN = /authentication is required/i;
+
+const cleanSubmitErrorMessage = (message?: string | null) => {
+  if (!message || AUTH_REQUIRED_PATTERN.test(message)) {
+    return 'Could not submit the site update. Please try again.';
+  }
+
+  return message;
+};
 
 // Step 1: Upload details
 // Step 2: AI or manual selection (still shown as Upload in the stepper)
@@ -608,7 +617,7 @@ export default function UploadSiteProgressScreen({
       }
       const scheduleBody = await scheduleResponse.json().catch(() => null);
       if (!scheduleResponse.ok) {
-        Alert.alert('Schedule required', scheduleBody?.message || 'Could not validate the site update schedule.');
+        Alert.alert('Could not continue', cleanSubmitErrorMessage(scheduleBody?.message || scheduleBody?.error || 'Could not validate the site update schedule.'));
         setAnalysisStatus('idle');
         return;
       }
@@ -832,7 +841,7 @@ export default function UploadSiteProgressScreen({
 
       if (!response.ok) {
         const d = await response.json().catch(() => null);
-        Alert.alert('Error', d?.message || d?.error || 'Failed to save record.');
+        Alert.alert('Could not submit', cleanSubmitErrorMessage(d?.message || d?.error || 'Failed to save record.'));
         return;
       }
 

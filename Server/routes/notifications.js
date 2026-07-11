@@ -17,6 +17,7 @@ const { authenticateRequest } = require('../middleware/auth');
 const { qaDebug } = require('../services/qaDebug');
 
 let supabase = null;
+const SESSION_UNAVAILABLE_MESSAGE = 'Session could not be verified. Please try again.';
 
 function getSupabaseClient() {
   if (supabase) return supabase;
@@ -175,7 +176,7 @@ router.use(authenticateRequest);
 router.get('/', async (req, res) => {
   // NOTE: Response powers the mobile Notifications tab and unread badge count.
   const userId = getRequestUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!userId) return res.status(401).json({ error: SESSION_UNAVAILABLE_MESSAGE });
 
   try {
     const rows = await fetchNotificationsWithSchemaRepair(userId);
@@ -189,7 +190,7 @@ router.get('/', async (req, res) => {
 // PATCH /notifications/:id/read
 router.patch('/:id/read', async (req, res) => {
   const userId = getRequestUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!userId) return res.status(401).json({ error: SESSION_UNAVAILABLE_MESSAGE });
 
   try {
     let notification;
@@ -215,7 +216,7 @@ router.patch('/:id/read', async (req, res) => {
 // PATCH /notifications/read-all?userId=xxx
 router.patch('/read-all', async (req, res) => {
   const userId = getRequestUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!userId) return res.status(401).json({ error: SESSION_UNAVAILABLE_MESSAGE });
 
   try {
     let count;
@@ -241,7 +242,7 @@ router.patch('/read-all', async (req, res) => {
 // DELETE /notifications/:id
 router.delete('/:id', async (req, res) => {
   const userId = getRequestUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!userId) return res.status(401).json({ error: SESSION_UNAVAILABLE_MESSAGE });
 
   try {
     let deletedNotification;
@@ -271,7 +272,7 @@ router.post('/register-token', async (req, res) => {
   qaDebug('Push token register request received', { userId: userId ? String(userId) : undefined });
 
   if (!userId) {
-    return res.status(401).json({ success: false, saved: false, message: 'Authentication is required.' });
+    return res.status(401).json({ success: false, saved: false, message: SESSION_UNAVAILABLE_MESSAGE });
   }
 
   if (typeof expo_push_token !== 'string' || !expo_push_token.trim()) {
@@ -356,7 +357,7 @@ router.post('/unregister-token', async (req, res) => {
 router.post('/test', async (req, res) => {
   const { title, message } = req.body;
   const userId = getRequestUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!userId) return res.status(401).json({ error: SESSION_UNAVAILABLE_MESSAGE });
 
   try {
     const result = await createNotification({

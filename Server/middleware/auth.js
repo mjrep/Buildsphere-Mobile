@@ -11,6 +11,7 @@ const { qaDebug } = require('../services/qaDebug');
 
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'buildsphere_dev_secret_key');
 let supabaseAuthClient = null;
+const SESSION_UNAVAILABLE_MESSAGE = 'Session could not be verified. Please try again.';
 
 function inferRoleFromEmail(email) {
   const localPart = String(email || '').split('@')[0].toLowerCase();
@@ -113,7 +114,7 @@ async function authenticateRequest(req, res, next) {
   const token = getBearerToken(req);
   if (!token) {
     if (await continueWithMobileSession(req, next)) return;
-    return res.status(401).json({ success: false, message: 'Authentication is required.' });
+    return res.status(401).json({ success: false, message: SESSION_UNAVAILABLE_MESSAGE });
   }
 
   try {
@@ -134,13 +135,13 @@ async function authenticateRequest(req, res, next) {
     const supabase = getSupabaseAuthClient();
     if (!supabase) {
       if (await continueWithMobileSession(req, next)) return;
-      return res.status(401).json({ success: false, message: 'Authentication is required.' });
+      return res.status(401).json({ success: false, message: SESSION_UNAVAILABLE_MESSAGE });
     }
 
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user?.email) {
       if (await continueWithMobileSession(req, next)) return;
-      return res.status(401).json({ success: false, message: 'Authentication is required.' });
+      return res.status(401).json({ success: false, message: SESSION_UNAVAILABLE_MESSAGE });
     }
 
     const appUser = await findAppUser({ email: data.user.email });
