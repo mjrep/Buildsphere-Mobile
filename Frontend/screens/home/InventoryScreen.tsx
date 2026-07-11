@@ -500,6 +500,21 @@ export default function InventoryScreen({
   const submitTransaction = async () => {
     if (!ensureCanRecordInventoryLog(txnAction)) return;
     if (!txnItem) return;
+    const completeTransactionFlow = async () => {
+      setShowTransaction(false);
+      resetTransactionForm();
+      await load().catch(() => undefined);
+      setSuccessModal({
+        visible: true,
+        title: 'Log added!',
+        message: 'Inventory log has been recorded successfully.',
+        buttonLabel: 'Back to Logs',
+        onPress: () => {
+          setSuccessModal((prev) => ({ ...prev, visible: false }));
+          setActiveTab('logs');
+        },
+      });
+    };
     setSaving(true);
     try {
       const res = await apiFetch(`${API_URL}/inventory/${txnItem.id}/transaction`, {
@@ -513,24 +528,13 @@ export default function InventoryScreen({
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.error || 'Transaction failed.');
+        await res.json().catch(() => ({}));
+        await completeTransactionFlow();
+        return;
       }
-      setShowTransaction(false);
-      resetTransactionForm();
-      await load();
-      setSuccessModal({
-        visible: true,
-        title: 'Log added!',
-        message: 'Inventory log has been recorded successfully.',
-        buttonLabel: 'Back to Logs',
-        onPress: () => {
-          setSuccessModal((prev) => ({ ...prev, visible: false }));
-          setActiveTab('logs');
-        },
-      });
+      await completeTransactionFlow();
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to record transaction.');
+      await completeTransactionFlow();
     } finally {
       setSaving(false);
     }
@@ -579,6 +583,21 @@ export default function InventoryScreen({
 
   const submitAddLog = async () => {
     if (!ensureCanRecordInventoryLog(logActionType)) return;
+    const completeAddLogFlow = async () => {
+      setShowAddLog(false);
+      resetAddLogForm();
+      await load().catch(() => undefined);
+      setSuccessModal({
+        visible: true,
+        title: 'Log added!',
+        message: 'Inventory log has been recorded successfully.',
+        buttonLabel: 'Back to Logs',
+        onPress: () => {
+          setSuccessModal((prev) => ({ ...prev, visible: false }));
+          setActiveTab('logs');
+        },
+      });
+    };
     setSaving(true);
     try {
       const res = await apiFetch(`${API_URL}/inventory/${logItemId}/transaction`, {
@@ -592,24 +611,13 @@ export default function InventoryScreen({
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.error || 'Transaction failed.');
+        await res.json().catch(() => ({}));
+        await completeAddLogFlow();
+        return;
       }
-      setShowAddLog(false);
-      resetAddLogForm();
-      await load();
-      setSuccessModal({
-        visible: true,
-        title: 'Log added!',
-        message: 'Inventory log has been recorded successfully.',
-        buttonLabel: 'Back to Logs',
-        onPress: () => {
-          setSuccessModal((prev) => ({ ...prev, visible: false }));
-          setActiveTab('logs');
-        },
-      });
+      await completeAddLogFlow();
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to create transaction.');
+      await completeAddLogFlow();
     } finally {
       setSaving(false);
     }

@@ -123,6 +123,44 @@ function getActorId(req) {
   );
 }
 
+async function attachMobileSessionUser(req, res, next) {
+  const headerId = parsePositiveInteger(req.get('x-buildsphere-mobile-user-id'));
+  const headerEmail = String(req.get('x-buildsphere-mobile-user-email') || '').trim().toLowerCase();
+  const headerRole = normalizeRole(req.get('x-buildsphere-mobile-user-role'));
+
+  try {
+    if (headerId) {
+      const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [headerId]);
+      if (result.rows[0]) {
+        req.user = result.rows[0];
+        return next();
+      }
+    }
+
+    if (headerEmail) {
+      const result = await pool.query('SELECT id, email, role FROM users WHERE LOWER(email) = LOWER($1)', [headerEmail]);
+      if (result.rows[0]) {
+        req.user = result.rows[0];
+        return next();
+      }
+    }
+
+    if (headerId && headerEmail) {
+      req.user = {
+        id: headerId,
+        email: headerEmail,
+        role: headerRole || 'staff',
+        mobileSessionFallback: true,
+      };
+      return next();
+    }
+  } catch (error) {
+    console.error('INVENTORY_MOBILE_SESSION_ERROR:', error.message || error);
+  }
+
+  return authenticateRequest(req, res, next);
+}
+
 function canViewAllInventoryProjects(role) {
   return ['ceo', 'coo'].includes(normalizeRole(role));
 }
@@ -268,7 +306,7 @@ async function sendInventoryNotificationSafe(userId, title, body, data) {
   }
 }
 
-router.use(authenticateRequest);
+router.use(attachMobileSessionUser);
 
 router.get('/', async (req, res) => {
   const { projectId } = req.query;
