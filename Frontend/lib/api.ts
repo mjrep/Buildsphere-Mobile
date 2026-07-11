@@ -135,11 +135,6 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
         authenticated: headers.has('Authorization'),
       });
 
-      if (response.status === 401) {
-        await AsyncStorage.multiRemove(['user', 'token']);
-        notifyUnauthorized();
-      }
-
       return response;
     } catch (error) {
       lastError = error;
