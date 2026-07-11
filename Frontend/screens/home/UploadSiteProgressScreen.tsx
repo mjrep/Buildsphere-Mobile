@@ -1062,24 +1062,92 @@ export default function UploadSiteProgressScreen({
 
         {/* STEP 2: AI/manual selection stays in the Upload stage of the visible stepper. */}
         {step === 2 && selectedPhotos.length > 0 && (
-          <>
-            {/* NOTE: AI or manual selection is retained as an intermediate page between Upload and Panel Count. */}
+          <View className="flex-1" style={{ backgroundColor: theme.background }}>
             <View className="flex-row items-center border-b px-4 pb-2 pt-2" style={[formContentStyle, { backgroundColor: theme.background, borderColor: theme.border }]}>
-              <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 mr-3"><Ionicons name="caret-back-outline" size={24} color={theme.text} /></TouchableOpacity>
-              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Choose Analysis Method</Text>
+              <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 mr-3">
+                <Ionicons name="caret-back-outline" size={24} color={theme.text} />
+              </TouchableOpacity>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
+                Preview Photos ({selectedPhotos.length})
+              </Text>
             </View>
-            <View style={formContentStyle}><SiteUpdateStepper currentStep={1} /></View>
-            <ScrollView className="flex-1" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}>
-              <View style={formContentStyle}>
-                <Text className="mb-3 text-[13px]" style={{ color: theme.textSecondary }}>Choose how to determine the visible glass panel count.</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-5">
-                  {selectedPhotos.map((photo, index) => <TouchableOpacity key={index} onPress={() => setViewerIndex(index)} className="mr-3"><Image source={{ uri: photo.uri }} style={{ width: Math.min(Math.max(width * 0.3, 104), 132), aspectRatio: 1, borderRadius: 12 }} resizeMode="cover" /></TouchableOpacity>)}
+
+            <View style={formContentStyle}>
+              <SiteUpdateStepper currentStep={1} />
+            </View>
+
+            <View className="flex-1 justify-center px-5 py-6">
+              <View
+                className="overflow-hidden rounded-[24px] shadow-xl"
+                style={{
+                  backgroundColor: '#121212',
+                  height: '100%',
+                  shadowColor: '#000',
+                  shadowOpacity: 0.15,
+                  shadowRadius: 15,
+                  elevation: 5,
+                }}
+              >
+                <ScrollView
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={(e) => {
+                    const contentOffset = e.nativeEvent.contentOffset.x;
+                    const viewSize = e.nativeEvent.layoutMeasurement.width;
+                    if (viewSize > 0) {
+                      const idx = Math.round(contentOffset / viewSize);
+                      setCurrentPhotoIndex(idx);
+                    }
+                  }}
+                  contentContainerStyle={{ alignItems: 'center' }}
+                >
+                  {selectedPhotos.map((photo, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      activeOpacity={0.9}
+                      onPress={() => setViewerIndex(index)}
+                      style={{
+                        width: Math.min(SCREEN_WIDTH - 40, FORM_CONTENT_MAX_WIDTH - 40),
+                        height: '100%',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Image
+                        source={{ uri: photo.uri }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="contain"
+                      />
+                    </TouchableOpacity>
+                  ))}
                 </ScrollView>
+
+                {selectedPhotos.length > 1 && (
+                  <View className="absolute bottom-5 left-0 right-0 flex-row justify-center gap-2">
+                    {selectedPhotos.map((_, i) => (
+                      <View
+                        key={i}
+                        style={{
+                          height: 6,
+                          width: i === currentPhotoIndex ? 16 : 6,
+                          borderRadius: 3,
+                          backgroundColor: i === currentPhotoIndex ? PRIMARY : 'rgba(255, 255, 255, 0.6)',
+                        }}
+                      />
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+
+            <View className="border-t px-5 pt-4" style={{ paddingBottom: 12, backgroundColor: theme.background, borderColor: theme.border }}>
+              <View style={formContentStyle}>
                 {analysisStatus === 'complete' && (
                   <View className="mb-3 flex-row items-center rounded-xl bg-[#E8F5E9] px-4 py-3">
                     <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
                     <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#2E7D32]">
-                      {aiDetectedCount} panels detected. You can review and correct the count next.
+                      {aiDetectedCount} panels detected. Verify the panel count before saving.
                     </Text>
                   </View>
                 )}
@@ -1087,7 +1155,7 @@ export default function UploadSiteProgressScreen({
                   <View className="mb-3 flex-row items-center rounded-xl bg-[#FFF3E0] px-4 py-3">
                     <Ionicons name="alert-circle" size={20} color="#F57C00" />
                     <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#E65100]">
-                      No glass panels detected. You can enter the count manually on the next page.
+                      No glass panels detected. Enter count manually.
                     </Text>
                   </View>
                 )}
@@ -1095,23 +1163,75 @@ export default function UploadSiteProgressScreen({
                   <View className="mb-3 flex-row items-center rounded-xl bg-[#FFEBEE] px-4 py-3">
                     <Ionicons name="close-circle" size={20} color="#E53935" />
                     <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#C62828]">
-                      AI analysis failed. Enter the verified count manually on the next page.
+                      AI analysis failed. Enter count manually.
                     </Text>
                   </View>
                 )}
-                {!isProjectActive && <View className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}><Text className="text-[12px]" style={{ color: theme.textSecondary }}>{INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}</Text></View>}
-                <TouchableOpacity onPress={handleCountGlass} disabled={analyzing || !isProjectActive || !scheduleReady} className="mb-3 rounded-xl border p-4" style={{ backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
-                  <View className="flex-row items-center"><Ionicons name="sparkles" size={20} color={PRIMARY} /><Text className="ml-3 text-[15px] font-bold" style={{ color: theme.text }}>Use AI Analysis</Text></View>
-                  <Text className="mt-2 text-[12px] leading-4" style={{ color: theme.textSecondary }}>Analyze the selected photo(s) with Gemini, then review and correct the result.</Text>
+
+                {analyzing && (
+                  <SkeletonCard style={{ borderRadius: 16, borderColor: theme.primary, marginBottom: 12 }}>
+                    <View className="mb-3 flex-row items-center">
+                      <SkeletonBox width={34} height={34} borderRadius={17} style={{ marginRight: 10 }} />
+                      <View className="flex-1">
+                        <Text className="text-[13px] font-semibold" style={{ color: theme.primary }}>
+                          {analysisProgressLabel}
+                        </Text>
+                        <SkeletonText width="72%" height={10} style={{ marginTop: 8 }} />
+                      </View>
+                    </View>
+                    <SkeletonBox height={72} borderRadius={12} />
+                  </SkeletonCard>
+                )}
+
+                {!isProjectActive && (
+                  <View className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}>
+                    <Text className="text-[12px] font-semibold leading-5" style={{ color: theme.textSecondary }}>
+                      {INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}
+                    </Text>
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  onPress={handleCountGlass}
+                  disabled={analyzing || !isProjectActive || !scheduleReady}
+                  className="h-14 flex-row items-center justify-center rounded-[16px]"
+                  style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}
+                >
+                  {analyzing ? (
+                    <View className="flex-row items-center px-4">
+                      <ActivityIndicator color="white" />
+                      <Text className="ml-3 text-[14px] font-semibold text-white">
+                        {analysisProgressLabel}
+                      </Text>
+                    </View>
+                  ) : (
+                    <>
+                      <Ionicons name="sparkles" size={20} color="white" />
+                      <Text className="ml-2 text-[16px] font-bold text-white">
+                        Use AI Check
+                      </Text>
+                    </>
+                  )}
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleManualUpload} disabled={analyzing || !isProjectActive || !scheduleReady} className="rounded-xl border p-4" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
-                  <View className="flex-row items-center"><Ionicons name="create-outline" size={20} color={PRIMARY} /><Text className="ml-3 text-[15px] font-bold" style={{ color: theme.text }}>Enter Count Manually</Text></View>
-                  <Text className="mt-2 text-[12px] leading-4" style={{ color: theme.textSecondary }}>Skip AI and enter the verified glass panel count yourself.</Text>
+
+                <TouchableOpacity
+                  onPress={handleManualUpload}
+                  disabled={analyzing || !isProjectActive || !scheduleReady}
+                  className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
+                  style={{ backgroundColor: theme.surface, borderColor: isProjectActive && scheduleReady ? theme.primary : theme.border }}
+                >
+                  <Ionicons name="create-outline" size={20} color={isProjectActive && scheduleReady ? PRIMARY : theme.textMuted} />
+                  <Text className="ml-2 text-[16px] font-bold" style={{ color: isProjectActive && scheduleReady ? theme.primary : theme.textMuted }}>
+                    Enter Count Manually
+                  </Text>
                 </TouchableOpacity>
-                {analyzing && <View className="mt-4 flex-row items-center"><ActivityIndicator color={PRIMARY} /><Text className="ml-3 text-[13px]" style={{ color: theme.textSecondary }}>{analysisProgressLabel}</Text></View>}
+
+                <Text className="mt-3 text-center text-[11px]" style={{ color: theme.textMuted }}>
+                  AI check is optional. You may enter the verified count manually.
+                </Text>
               </View>
-            </ScrollView>
-          </>
+            </View>
+          </View>
         )}
 
         {/* ── STEP 3: Form Details ── */}
