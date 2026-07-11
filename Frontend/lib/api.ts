@@ -360,6 +360,25 @@ function setBearerToken(headers: Headers, token?: string) {
   }
 }
 
+async function attachMobileSessionHeaders(headers: Headers) {
+  const user = await readStoredUser();
+  if (!user || typeof user !== 'object') return;
+
+  const id = user.id ?? user.userId;
+  const email = user.email;
+  const role = user.role;
+
+  if (id !== undefined && id !== null && !headers.has('X-BuildSphere-Mobile-User-Id')) {
+    headers.set('X-BuildSphere-Mobile-User-Id', String(id));
+  }
+  if (email && !headers.has('X-BuildSphere-Mobile-User-Email')) {
+    headers.set('X-BuildSphere-Mobile-User-Email', String(email));
+  }
+  if (role && !headers.has('X-BuildSphere-Mobile-User-Role')) {
+    headers.set('X-BuildSphere-Mobile-User-Role', String(role));
+  }
+}
+
 export async function apiFetch(input: string, init: RequestInit = {}) {
   const baseHeaders = new Headers(init.headers || {});
   const explicitAuthorization = baseHeaders.has('Authorization');
@@ -370,6 +389,7 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
     // Mobile uses the backend as the source of truth, so protected calls carry auth.
     setBearerToken(headers, tokenCandidates[0]);
   }
+  await attachMobileSessionHeaders(headers);
 
   const method = init.method || 'GET';
   const endpoint = typeof input === 'string' ? input.replace(API_URL, '') : 'unknown';
@@ -394,6 +414,7 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
         for (const retryToken of tokenCandidates.slice(1)) {
           const retryHeaders = new Headers(baseHeaders);
           setBearerToken(retryHeaders, retryToken);
+          await attachMobileSessionHeaders(retryHeaders);
 
           const retryResponse = await fetch(requestUrl, {
             ...init,

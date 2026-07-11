@@ -9,12 +9,10 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const jwt = require('jsonwebtoken');
-const { createClient } = require('@supabase/supabase-js');
-const pool = require('../db');
 const { normalizeRole } = require('../rbac');
 const { analyzeGlassImage } = require('../services/geminiClient');
 const { qaDebug } = require('../services/qaDebug');
+const { authenticateRequest } = require('../middleware/auth');
 
 const router = express.Router();
 const upload = multer({
@@ -22,14 +20,12 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'buildsphere_dev_secret_key');
 // NOTE: AI analysis is limited to roles that are allowed to submit site progress evidence.
 const AI_ALLOWED_ROLES = new Set(['project_engineer', 'foreman', 'project_supervisor']);
 const AI_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AI_RATE_LIMIT_MAX_REQUESTS = 20;
 const AI_IMAGE_MAX_BYTES = 7 * 1024 * 1024;
 const aiRateLimitBuckets = new Map();
-let supabaseAuthClient = null;
 
 const promptPath = path.join(__dirname, '../glass-panel-prompt.txt');
 const readPrompt = () => fs.readFileSync(promptPath, 'utf8');
@@ -42,75 +38,8 @@ const GLASS_ANALYSIS_USER_PROMPT = [
 ].join('\n');
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-function getSupabaseAuthClient() {
-  if (supabaseAuthClient) return supabaseAuthClient;
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return null;
-
-  supabaseAuthClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
-  return supabaseAuthClient;
-}
-
-function getBearerToken(req) {
-  const authorization = req.get('authorization') || '';
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1].trim() : '';
-}
-
-async function findAppUserByTokenPayload(payload) {
-  if (payload?.userId) {
-    const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [payload.userId]);
-    if (result.rows[0]) return result.rows[0];
-  }
-
-  if (payload?.email) {
-    const result = await pool.query('SELECT id, email, role FROM users WHERE LOWER(email) = LOWER($1)', [payload.email]);
-    if (result.rows[0]) return result.rows[0];
-  }
-
-  return null;
-}
-
 async function authenticateAiRequest(req, res, next) {
-  const token = getBearerToken(req);
-  if (!token) {
-    return res.status(401).json({ success: false, message: 'Authentication is required.' });
-  }
-
-  try {
-    if (JWT_SECRET) {
-      try {
-        const payload = jwt.verify(token, JWT_SECRET);
-        const appUser = await findAppUserByTokenPayload(payload);
-        if (appUser) {
-          req.user = appUser;
-          return next();
-        }
-      } catch (jwtError) {
-        // Fall through to Supabase token validation.
-      }
-    }
-
-    const supabase = getSupabaseAuthClient();
-    if (!supabase) {
-      return res.status(401).json({ success: false, message: 'Authentication is required.' });
-    }
-
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user?.email) {
-      return res.status(401).json({ success: false, message: 'Authentication is required.' });
-    }
-
-    const appUser = await findAppUserByTokenPayload({ email: data.user.email });
-    if (!appUser) {
-      return res.status(403).json({ success: false, message: 'User profile is not allowed to use image analysis.' });
-    }
-
-    req.user = appUser;
-    return next();
-  } catch (error) {
-    console.error('AI_AUTH_ERROR:', error.message || error);
-    return res.status(500).json({ success: false, message: 'Could not verify image analysis access.' });
-  }
+  return authenticateRequest(req, res, next);
 }
 
 function requireAiRole(req, res, next) {

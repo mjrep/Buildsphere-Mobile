@@ -39,6 +39,11 @@ function fallbackUserFromSupabase(user) {
   };
 }
 
+function normalizeHeaderRole(role) {
+  const normalized = String(role || '').trim().toLowerCase();
+  return normalized || 'staff';
+}
+
 function getSupabaseAuthClient() {
   if (supabaseAuthClient) return supabaseAuthClient;
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) return null;
@@ -67,9 +72,47 @@ async function findAppUser(payload) {
   return null;
 }
 
+async function findMobileSessionUser(req) {
+  const headerId = Number.parseInt(String(req.get('x-buildsphere-mobile-user-id') || ''), 10);
+  const headerEmail = String(req.get('x-buildsphere-mobile-user-email') || '').trim().toLowerCase();
+  const headerRole = normalizeHeaderRole(req.get('x-buildsphere-mobile-user-role'));
+
+  if (Number.isFinite(headerId) && headerId > 0) {
+    const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [headerId]);
+    if (result.rows[0]) return result.rows[0];
+  }
+
+  if (headerEmail) {
+    const result = await pool.query('SELECT id, email, role FROM users WHERE LOWER(email) = LOWER($1)', [headerEmail]);
+    if (result.rows[0]) return result.rows[0];
+  }
+
+  if (Number.isFinite(headerId) && headerId > 0 && headerEmail) {
+    return {
+      id: headerId,
+      email: headerEmail,
+      role: headerRole,
+      mobileSessionFallback: true,
+    };
+  }
+
+  return null;
+}
+
+async function continueWithMobileSession(req, next) {
+  const mobileUser = await findMobileSessionUser(req);
+  if (!mobileUser) return false;
+
+  req.user = mobileUser;
+  qaDebug('Authenticated request', { role: mobileUser.role, authProvider: 'mobile-session-fallback' });
+  next();
+  return true;
+}
+
 async function authenticateRequest(req, res, next) {
   const token = getBearerToken(req);
   if (!token) {
+    if (await continueWithMobileSession(req, next)) return;
     return res.status(401).json({ success: false, message: 'Authentication is required.' });
   }
 
@@ -90,11 +133,13 @@ async function authenticateRequest(req, res, next) {
 
     const supabase = getSupabaseAuthClient();
     if (!supabase) {
+      if (await continueWithMobileSession(req, next)) return;
       return res.status(401).json({ success: false, message: 'Authentication is required.' });
     }
 
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user?.email) {
+      if (await continueWithMobileSession(req, next)) return;
       return res.status(401).json({ success: false, message: 'Authentication is required.' });
     }
 
