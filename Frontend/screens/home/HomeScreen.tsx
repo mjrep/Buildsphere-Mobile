@@ -62,6 +62,8 @@ interface HomeScreenProps {
 interface Project {
   id: number;
   name: string;
+  project_name?: string;
+  projectName?: string;
   location: string;
   client_name?: string;
   clientName?: string;
@@ -94,6 +96,36 @@ const toPositiveNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
+
+const firstNonEmptyString = (...values: unknown[]) => {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+};
+
+const getProjectDisplayName = (project: any) =>
+  firstNonEmptyString(
+    project?.name,
+    project?.project_name,
+    project?.projectName,
+    project?.project_title,
+    project?.projectTitle,
+    project?.title
+  );
+
+const getProjectClientName = (project: any) =>
+  firstNonEmptyString(project?.client_name, project?.clientName, project?.client, project?.owner_name, project?.ownerName);
+
+const normalizeDashboardProject = (project: any): Project => ({
+  ...project,
+  name: getProjectDisplayName(project) || 'Untitled Project',
+  client_name: getProjectClientName(project) || project?.client_name,
+  location: firstNonEmptyString(project?.location, project?.address) || 'Unknown Location',
+  color: firstNonEmptyString(project?.color) || '#FFDFF2',
+  status: firstNonEmptyString(project?.status) || 'ongoing',
+});
 
 const projectMatchesAssignedUser = (project: any, userId: number) => {
   const userIdText = String(userId);
@@ -148,7 +180,7 @@ const filterAssignedProjects = (allProjects: any[], assignedTasks: AssignedTaskP
 
   return allProjects.filter((project) => {
     const projectId = toPositiveNumber(project.id);
-    const projectName = String(project.name || project.project_name || '').trim().toLowerCase();
+    const projectName = getProjectDisplayName(project).toLowerCase();
     return (
       (projectId !== null && taskProjectIds.has(String(projectId))) ||
       (!!projectName && taskProjectNames.has(projectName)) ||
@@ -508,9 +540,11 @@ export default function HomeScreen({
         }
       }
 
-      let filteredData = allProjects;
+      const normalizedProjects = allProjects.map(normalizeDashboardProject);
+
+      let filteredData = normalizedProjects;
       if (assignedProjectRoles.has(normalizedRole) && canApplyAssignedTaskFilter) {
-        filteredData = filterAssignedProjects(allProjects, assignedTasks, user.id);
+        filteredData = filterAssignedProjects(normalizedProjects, assignedTasks, user.id);
       }
       if (normalizedRole === 'procurement') {
         // NOTE: Procurement users only see assigned ongoing projects because their mobile workflow is limited to inventory-related project work.
@@ -688,8 +722,8 @@ export default function HomeScreen({
                   projects.map((p: any) => (
                     <TouchableOpacity key={p.id} onPress={() => setSelectedProjectId(p.id)}>
                       <ProjectCard
-                        name={p.name || 'Untitled Project'}
-                        clientName={p.client_name || p.clientName}
+                        name={getProjectDisplayName(p) || 'Untitled Project'}
+                        clientName={getProjectClientName(p) || p.client_name || p.clientName}
                         color={p.color}
                         status={p.status}
                         image={p.image}

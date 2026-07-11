@@ -143,11 +143,25 @@ async function supabaseRows(table: string, orderBy = 'created_at') {
 }
 
 async function getProjectsFallback(path: string) {
+  const mapProject = (project: any) => ({
+    ...project,
+    name:
+      project.name ||
+      project.project_name ||
+      project.projectName ||
+      project.project_title ||
+      project.projectTitle ||
+      project.title ||
+      'Unnamed Project',
+    location: project.location || project.address || 'Unknown Location',
+    color: project.color || '#FFDFF2',
+  });
+
   const detailMatch = path.match(/^\/projects\/(\d+)$/);
   if (detailMatch) {
     const rows = await supabaseRows('projects');
     const project = rows.find((row: any) => String(row.id) === detailMatch[1]);
-    return project ? makeJsonResponse(project) : makeJsonResponse({ error: 'Project not found.' }, 404);
+    return project ? makeJsonResponse(mapProject(project)) : makeJsonResponse({ error: 'Project not found.' }, 404);
   }
 
   const activityMatch = path.match(/^\/projects\/(\d+)\/activity$/);
@@ -172,7 +186,7 @@ async function getProjectsFallback(path: string) {
     });
   }
 
-  if (path === '/projects') return makeJsonResponse(await supabaseRows('projects'));
+  if (path === '/projects') return makeJsonResponse((await supabaseRows('projects')).map(mapProject));
   return null;
 }
 
