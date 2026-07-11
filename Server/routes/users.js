@@ -16,6 +16,7 @@ const { authenticateRequest } = require('../middleware/auth');
 const { canEditUserRoles } = require('../rbac');
 let userProfileSchemaReady = false;
 let supabaseAuthClient = null;
+let supabaseDataClient = null;
 
 const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 const PROFILE_PHOTO_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -133,6 +134,15 @@ function getSupabaseAuthClient() {
   return supabaseAuthClient;
 }
 
+function getSupabaseDataClient() {
+  if (supabaseDataClient) return supabaseDataClient;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!process.env.SUPABASE_URL || !key) return null;
+
+  supabaseDataClient = createClient(process.env.SUPABASE_URL, key);
+  return supabaseDataClient;
+}
+
 function getBearerToken(req) {
   const authorization = req.get('authorization') || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
@@ -198,6 +208,40 @@ async function findBasicUserProfileByEmail(email) {
   );
 
   return result.rows[0] || null;
+}
+
+async function findUserProfileByEmailWithSupabase(email) {
+  const supabase = getSupabaseDataClient();
+  if (!supabase) return null;
+
+  const fullColumns = `
+    id,
+    first_name,
+    middle_name,
+    last_name,
+    suffix,
+    email,
+    role,
+    phone_number,
+    gender,
+    birthdate,
+    address,
+    department,
+    position,
+    account_status,
+    profile_picture_url,
+    created_at,
+    updated_at
+  `;
+  const basicColumns = 'id, first_name, last_name, email, role';
+
+  const fullResult = await supabase.from('users').select(fullColumns).ilike('email', email).maybeSingle();
+  if (!fullResult.error) return fullResult.data || null;
+
+  console.warn('SUPABASE_PROFILE_FULL_LOOKUP_WARNING:', fullResult.error.message || fullResult.error);
+  const basicResult = await supabase.from('users').select(basicColumns).ilike('email', email).maybeSingle();
+  if (basicResult.error) throw basicResult.error;
+  return basicResult.data || null;
 }
 
 function isValidEmail(value) {
@@ -269,8 +313,50 @@ async function findOrCreateVerifiedSupabaseProfile(req, email) {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   if (!verifiedEmail || verifiedEmail !== normalizedEmail) return null;
 
+  const existingSupabaseProfile = await findUserProfileByEmailWithSupabase(normalizedEmail).catch((error) => {
+    console.warn('SUPABASE_PROFILE_LOOKUP_WARNING:', error.message || error);
+    return null;
+  });
+  if (existingSupabaseProfile) return existingSupabaseProfile;
+
   const { firstName, lastName } = inferNameFromEmail(normalizedEmail);
   const role = inferDemoRoleFromEmail(normalizedEmail);
+  const supabase = getSupabaseDataClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('users')
+      .insert({
+        first_name: firstName,
+        last_name: lastName,
+        email: normalizedEmail,
+        role,
+        account_status: 'active',
+      })
+      .select(`
+        id,
+        first_name,
+        middle_name,
+        last_name,
+        suffix,
+        email,
+        role,
+        phone_number,
+        gender,
+        birthdate,
+        address,
+        department,
+        position,
+        account_status,
+        profile_picture_url,
+        created_at,
+        updated_at
+      `)
+      .maybeSingle();
+
+    if (!error && data) return data;
+    if (error) console.warn('SUPABASE_PROFILE_REPAIR_WARNING:', error.message || error);
+  }
+
   const result = await pool.query(
     `INSERT INTO users (first_name, last_name, email, role, account_status, created_at, updated_at)
      VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
@@ -357,6 +443,9 @@ router.get('/by-email/:email', async (req, res) => {
     console.error('USER_PROFILE_LOOKUP_ERROR:', err.message || err);
 
     try {
+      const supabaseProfile = await findUserProfileByEmailWithSupabase(req.params.email);
+      if (supabaseProfile) return res.json(mapUserProfile(supabaseProfile));
+
       const basicUser = await findBasicUserProfileByEmail(req.params.email);
       if (!basicUser) {
         const repairedProfile = await findOrCreateVerifiedSupabaseProfile(req, req.params.email);
