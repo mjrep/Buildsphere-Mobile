@@ -25,6 +25,7 @@ const {
 
 let supabase = null;
 let siteProgressImageSchemaReady = false;
+const STORAGE_UPLOAD_TIMEOUT_MS = 25000;
 
 function getSupabaseStorageClient() {
   if (supabase) return supabase;
@@ -81,6 +82,15 @@ function getUploadedImageFiles(req) {
     ...((req.files.image) || []),
     ...((req.files.photo) || []),
   ].slice(0, 5);
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
 }
 
 function requireSiteProgressRole(req, res, next) {
@@ -339,13 +349,17 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
         const filename = `progress_${Date.now()}_${Math.floor(Math.random() * 1000)}${path.extname(file.originalname)}`;
         
         // 1. Upload to Supabase Storage
-        const { error: uploadError } = await supabaseStorage.storage
-          .from('site-progress')
-          .upload(filename, file.buffer, {
-            contentType: file.mimetype,
-            cacheControl: '3600',
-            upsert: false
-          });
+        const { error: uploadError } = await withTimeout(
+          supabaseStorage.storage
+            .from('site-progress')
+            .upload(filename, file.buffer, {
+              contentType: file.mimetype,
+              cacheControl: '3600',
+              upsert: false
+            }),
+          STORAGE_UPLOAD_TIMEOUT_MS,
+          'Image upload storage timed out.'
+        );
 
         if (uploadError) {
           qaDebug('Storage upload result', { success: false, bucket: 'site-progress', mimeType: file.mimetype });

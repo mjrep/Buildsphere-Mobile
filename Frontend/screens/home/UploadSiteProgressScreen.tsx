@@ -27,6 +27,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 
 
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 import { API_URL, apiFetch, getServerConnectionErrorMessage } from '../../lib/api';
 import { UserInfo } from '../../App';
@@ -113,6 +114,8 @@ const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
 
 const PRIMARY = '#7370FF';
 const AI_IMAGE_PICKER_QUALITY = 0.75;
+const SITE_PROGRESS_UPLOAD_IMAGE_MAX_WIDTH = 1280;
+const SITE_PROGRESS_UPLOAD_IMAGE_COMPRESS = 0.62;
 const SITE_PROGRESS_SUBMIT_TIMEOUT_MS = 60000;
 const SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE = 'Upload is taking too long. Please check your connection and try again.';
 const AUTH_REQUIRED_PATTERN = /authentication is required/i;
@@ -132,6 +135,44 @@ const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, message: string
       setTimeout(() => reject(new Error(message)), timeoutMs);
     }),
   ]);
+
+const prepareUploadPhoto = async (asset: ImagePicker.ImagePickerAsset): Promise<SelectedPhoto | null> => {
+  const sourceUri = asset.uri?.trim();
+  if (!sourceUri) return null;
+
+  try {
+    const resizeWidth =
+      asset.width && asset.width > SITE_PROGRESS_UPLOAD_IMAGE_MAX_WIDTH
+        ? SITE_PROGRESS_UPLOAD_IMAGE_MAX_WIDTH
+        : undefined;
+    const manipulated = await ImageManipulator.manipulateAsync(
+      sourceUri,
+      resizeWidth ? [{ resize: { width: resizeWidth } }] : [],
+      {
+        compress: SITE_PROGRESS_UPLOAD_IMAGE_COMPRESS,
+        format: ImageManipulator.SaveFormat.JPEG,
+        base64: false,
+      }
+    );
+
+    return {
+      uri: manipulated.uri,
+      base64: asset.base64 || null,
+      width: manipulated.width || asset.width,
+      height: manipulated.height || asset.height,
+      fileSize: asset.fileSize,
+    };
+  } catch (error) {
+    console.warn('IMAGE_COMPRESS_FAILED:', error);
+    return {
+      uri: sourceUri,
+      base64: asset.base64 || null,
+      width: asset.width,
+      height: asset.height,
+      fileSize: asset.fileSize,
+    };
+  }
+};
 
 // Step 1: Upload details
 // Step 2: AI or manual selection (still shown as Upload in the stepper)
@@ -490,15 +531,12 @@ export default function UploadSiteProgressScreen({
       selectionLimit: remainingLimit,
     });
     if (!result.canceled && result.assets) {
-      const newPhotos = result.assets
-        .filter(asset => Boolean(asset.uri?.trim()))
-        .map(asset => ({
-          uri: asset.uri.trim(),
-          base64: asset.base64 || null,
-          width: asset.width,
-          height: asset.height,
-          fileSize: asset.fileSize,
-        }));
+      const preparedPhotos = await Promise.all(
+        result.assets
+          .filter(asset => Boolean(asset.uri?.trim()))
+          .map(asset => prepareUploadPhoto(asset))
+      );
+      const newPhotos = preparedPhotos.filter((photo): photo is SelectedPhoto => Boolean(photo));
       if (newPhotos.length === 0) {
         Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
         return;
@@ -528,18 +566,12 @@ export default function UploadSiteProgressScreen({
       base64: false,
     });
     if (!result.canceled && result.assets[0]) {
-      const photoUri = result.assets[0].uri?.trim();
-      if (!photoUri) {
+      const preparedPhoto = await prepareUploadPhoto(result.assets[0]);
+      if (!preparedPhoto) {
         Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
         return;
       }
-      setSelectedPhotos(prev => [...prev, {
-        uri: photoUri,
-        base64: result.assets[0].base64 || null,
-        width: result.assets[0].width,
-        height: result.assets[0].height,
-        fileSize: result.assets[0].fileSize,
-      }]);
+      setSelectedPhotos(prev => [...prev, preparedPhoto]);
       setPhotoAnalysisResults([]);
       setAnalysisStatus('idle');
       setUploadMode(null);
