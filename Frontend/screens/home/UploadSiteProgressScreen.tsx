@@ -37,6 +37,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 import { INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE, isActiveProjectStatus } from '../../utils/projectProgress';
 import SystemBars from '../../components/SystemBars';
+import SiteUpdateStepper, { SiteUpdateStep } from '../../components/SiteUpdateStepper';
 import { formatDateOnlyDisplay, parseDateOnly, toDateOnlyString } from '../../utils/dateOnly';
 import {
   clampDateToAllowedRange,
@@ -181,6 +182,7 @@ export default function UploadSiteProgressScreen({
   const [avgConfidence, setAvgConfidence] = useState<number>(0);
   const [aiDetectedCount, setAiDetectedCount] = useState<number>(0);
   const [verifiedPanelCount, setVerifiedPanelCount] = useState<number>(0);
+  const [panelCountInput, setPanelCountInput] = useState('');
   const [hasWarnings, setHasWarnings] = useState<boolean>(false);
   const [warningMessage, setWarningMessage] = useState<string>('');
   const [aiSummary, setAiSummary] = useState<string>('');
@@ -197,6 +199,10 @@ export default function UploadSiteProgressScreen({
       : null;
   // Schedule enforcement is temporarily relaxed so site updates can be QA'd while project schedules are being backfilled.
   const scheduleReady = Boolean(selectedTask);
+  // NOTE: The visible workflow contains three main steps: upload, verified panel count, and inventory update.
+  const visibleStep: SiteUpdateStep = materialsSheetVisible ? 3 : step === 4 ? 3 : step === 1 || step === 2 ? 1 : 2;
+  const stepperCompleted = step === 4;
+  const panelCountIsValid = panelCountInput !== '' && /^\d+$/.test(panelCountInput);
   const hasSelectedProject = projectId !== null && projectId !== undefined;
   const isProjectActive =
     !hasSelectedProject ||
@@ -229,6 +235,7 @@ export default function UploadSiteProgressScreen({
     setAvgConfidence(0);
     setAiDetectedCount(0);
     setVerifiedPanelCount(0);
+    setPanelCountInput('');
     setHasWarnings(false);
     setWarningMessage('');
     setAiSummary('');
@@ -393,6 +400,7 @@ export default function UploadSiteProgressScreen({
     const submittedIds: number[] = [];
     try {
       for (const material of linkedMaterials) {
+        // Inventory stock changes only through the approved consumption transaction.
         const response = await apiFetch(`${API_URL}/inventory/${material.id}/transaction`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -531,6 +539,32 @@ export default function UploadSiteProgressScreen({
     ]);
   };
 
+  const setVerifiedCountFromInput = (value: string) => {
+    const sanitized = value.replace(/\D/g, '');
+    setPanelCountInput(sanitized);
+    setVerifiedPanelCount(sanitized === '' ? 0 : Number(sanitized));
+    markDirty();
+  };
+
+  const openAiChoice = () => {
+    if (!isProjectActive) {
+      showInactiveProjectMessage();
+      return;
+    }
+    if (!requireValidSchedule()) return;
+    if (selectedPhotos.filter((photo) => Boolean(photo.uri?.trim())).length === 0) {
+      Alert.alert('Photo required', 'Please select or capture at least one photo before continuing.');
+      return;
+    }
+
+    // AI or manual selection is an intermediate choice and is not displayed as a separate step.
+    Alert.alert('Panel Count', 'Choose how to count visible glass panels.', [
+      { text: 'Use AI Check', onPress: handleCountGlass },
+      { text: 'Enter Count Manually', onPress: handleManualUpload },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const handleCountGlass = async () => {
     // NOTE: "Use AI Check" sends photos to the backend Gemini analysis flow before saving.
     if (!isProjectActive) {
@@ -544,6 +578,10 @@ export default function UploadSiteProgressScreen({
     const validSelectedPhotos = selectedPhotos.filter(photo => Boolean(photo.uri?.trim()));
     if (validSelectedPhotos.length === 0) {
       Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
+      return;
+    }
+    if (uploadMode === 'ai' && analysisStatus === 'complete' && panelCountInput !== '') {
+      setStep(3);
       return;
     }
 
@@ -659,6 +697,7 @@ export default function UploadSiteProgressScreen({
 
         setAiDetectedCount(totalCount);
         setVerifiedPanelCount(totalCount);
+        setPanelCountInput(String(totalCount));
         setGlassCount(totalCount);
         setDetectionMode(detectionModes.size === 1 ? Array.from(detectionModes)[0] : 'gemini-multi-photo');
         setAvgConfidence(confidenceCount > 0 ? totalConfidence / confidenceCount : 0);
@@ -702,6 +741,7 @@ export default function UploadSiteProgressScreen({
     setDetectionMode('manual');
     setAvgConfidence(0);
     setAiDetectedCount(0);
+    setPanelCountInput('');
     setHasWarnings(false);
     setWarningMessage('');
     setAiSummary('');
@@ -728,6 +768,18 @@ export default function UploadSiteProgressScreen({
       return;
     }
     if (!requireValidSchedule()) return;
+    if (!panelCountIsValid) {
+      Alert.alert('Panel count required', 'Enter a whole number of visible glass panels.');
+      return;
+    }
+    if (recordSaved) {
+      if (linkedMaterials.length > 0) {
+        setMaterialsSheetVisible(true);
+      } else {
+        setStep(4);
+      }
+      return;
+    }
     const validSelectedPhotos = selectedPhotos.filter(photo => Boolean(photo.uri?.trim()));
     if (validSelectedPhotos.length === 0) {
       Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
@@ -736,9 +788,10 @@ export default function UploadSiteProgressScreen({
     setSaving(true);
     try {
       const formData = new FormData();
+      const verifiedCount = Number(panelCountInput);
       formData.append('projectId', projectId.toString());
       formData.append('taskId', taskId.toString());
-      formData.append('glassCount', verifiedPanelCount.toString());
+      formData.append('glassCount', String(verifiedCount));
       formData.append('shift', shift);
       
       // Use local date parts (YYYY-MM-DD) to avoid UTC timezone shifts.
@@ -747,7 +800,7 @@ export default function UploadSiteProgressScreen({
       formData.append('workDate', formattedDate);
       formData.append('notes', notes);
 
-      formData.append('verified_panel_count', verifiedPanelCount.toString());
+      formData.append('verified_panel_count', String(verifiedCount));
       formData.append('detection_mode', uploadMode === 'ai' ? detectionMode : 'manual');
 
       if (uploadMode === 'ai') {
@@ -853,6 +906,9 @@ export default function UploadSiteProgressScreen({
               </TouchableOpacity>
               <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Upload a site progress</Text>
               <View style={{ width: 24 }} />
+            </View>
+            <View style={formContentStyle}>
+              <SiteUpdateStepper currentStep={visibleStep} completed={stepperCompleted} />
             </View>
 
             <ScrollView
@@ -967,69 +1023,6 @@ export default function UploadSiteProgressScreen({
                 />
               )}
 
-
-
-              {/* Glass Panels Count (Editable) */}
-              <View
-                className="mt-8 mb-6 rounded-2xl border p-4"
-                style={{ backgroundColor: theme.surface, borderColor: theme.primary }}
-              >
-
-                <View className="flex-row items-center justify-between mb-4">
-                  <View className="flex-row items-center">
-                    <View
-                      className="mr-3 h-10 w-10 items-center justify-center rounded-full"
-                      style={{ backgroundColor: theme.primaryLight }}
-                    >
-                      <Ionicons name="apps" size={20} color={PRIMARY} />
-                    </View>
-                    <Text className="text-[14px] font-semibold" style={{ color: theme.text }}>
-                      Glass Panels Count
-                    </Text>
-                  </View>
-                </View>
-                
-                <View
-                  className="flex-row items-center justify-between rounded-xl border p-3"
-                  style={{ backgroundColor: theme.elevated, borderColor: theme.border }}
-                >
-                  <TouchableOpacity 
-                    onPress={() => {
-                      const nextCount = Math.max(0, verifiedPanelCount - 1);
-                      setVerifiedPanelCount(nextCount);
-                      if (nextCount !== verifiedPanelCount) markDirty();
-                    }}
-                    className="h-10 w-10 items-center justify-center rounded-full"
-                    style={{ backgroundColor: theme.input }}>
-                      <Ionicons name="remove" size={24} color={PRIMARY} />
-                  </TouchableOpacity>
-                  
-                  <TextInput
-                    value={String(verifiedPanelCount)}
-                    onChangeText={(v) => {
-                      const nextCount = parseInt(v) || 0;
-                      setVerifiedPanelCount(nextCount);
-                      if (nextCount !== verifiedPanelCount) markDirty();
-                    }}
-                    keyboardType="numeric"
-                    className="text-[24px] font-bold text-center"
-                    style={{ minWidth: 60, color: theme.primary }}
-                  />
-                  
-                  <TouchableOpacity 
-                    onPress={() => {
-                      setVerifiedPanelCount(verifiedPanelCount + 1);
-                      markDirty();
-                    }}
-                    className="h-10 w-10 items-center justify-center rounded-full bg-[#7370FF]">
-                      <Ionicons name="add" size={24} color="white" />
-                  </TouchableOpacity>
-                </View>
-                <Text className="mt-2 text-center text-[10px]" style={{ color: theme.textMuted }}>
-                  Verify and adjust the count above
-                </Text>
-              </View>
-
               <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Notes / Comments</Text>
               <TextInput
                 value={notes}
@@ -1057,13 +1050,11 @@ export default function UploadSiteProgressScreen({
                 <Text className="text-[14px] font-semibold" style={{ color: theme.textMuted }}>Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => {
-                  if (requireValidSchedule()) setStep(selectedPhotos.length > 0 ? 2 : 3);
-                }}
-                disabled={!isProjectActive || !scheduleReady}
+                onPress={openAiChoice}
+                disabled={!isProjectActive || !scheduleReady || analyzing}
                 className="h-12 flex-1 items-center justify-center rounded-[14px]"
-                style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}>
-                <Text className="text-[14px] font-bold text-white">Next</Text>
+                style={{ backgroundColor: isProjectActive && scheduleReady && !analyzing ? PRIMARY : theme.textMuted }}>
+                {analyzing ? <ActivityIndicator color="white" /> : <Text className="text-[14px] font-bold text-white">Continue</Text>}
               </TouchableOpacity>
             </View>
           </>
@@ -1236,12 +1227,15 @@ export default function UploadSiteProgressScreen({
         {step === 3 && (
           <>
             <View className="flex-row items-center border-b pb-4" style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 44), borderColor: theme.border, backgroundColor: theme.background }]}>
-              <TouchableOpacity onPress={() => setStep(selectedPhotos.length > 0 ? 2 : 1)} className="-ml-2 -mt-1 mr-3">
+              <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 -mt-1 mr-3">
                 <Ionicons name="caret-back-outline" size={24} color={theme.text} />
               </TouchableOpacity>
               <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
-                Finalize Record
+                Panel Count
               </Text>
+            </View>
+            <View style={formContentStyle}>
+              <SiteUpdateStepper currentStep={visibleStep} completed={stepperCompleted} />
             </View>
 
             {/* Photo preview with per-photo Gemini counts */}
@@ -1441,17 +1435,19 @@ export default function UploadSiteProgressScreen({
                   </View>
                 ) : null}
 
-                {/* ── Verified Panel Count (Editable) ───────────── */}
+                {/* The AI-generated count remains editable because the authorized user provides final verification. */}
                 <View className="mt-1">
-                  <Text className="text-[11px] font-semibold mb-2" style={{ color: theme.textSecondary }}>
-                    Verified Panel Count
+                  <Text className="text-[13px] font-bold mb-1" style={{ color: theme.text }}>
+                    Number of Glass Panels
+                  </Text>
+                  <Text className="mb-3 text-[11px] leading-4" style={{ color: theme.textSecondary }}>
+                    Review the AI result or enter the verified number of visible glass panels.
                   </Text>
                   <View className="flex-row items-center justify-between rounded-xl border p-2 px-4" style={{ backgroundColor: theme.elevated, borderColor: theme.border }}>
                     <TouchableOpacity 
                       onPress={() => {
-                        const nextCount = Math.max(0, verifiedPanelCount - 1);
-                        setVerifiedPanelCount(nextCount);
-                        if (nextCount !== verifiedPanelCount) markDirty();
+                        const currentCount = panelCountInput === '' ? 0 : Number(panelCountInput);
+                        setVerifiedCountFromInput(String(Math.max(0, currentCount - 1)));
                       }}
                       className="h-8 w-8 items-center justify-center rounded-full"
                       style={{ backgroundColor: theme.input }}>
@@ -1459,21 +1455,19 @@ export default function UploadSiteProgressScreen({
                     </TouchableOpacity>
                     
                     <TextInput
-                      value={String(verifiedPanelCount)}
-                      onChangeText={(v) => {
-                        const nextCount = parseInt(v) || 0;
-                        setVerifiedPanelCount(nextCount);
-                        if (nextCount !== verifiedPanelCount) markDirty();
-                      }}
+                      value={panelCountInput}
+                      onChangeText={setVerifiedCountFromInput}
                       keyboardType="numeric"
+                      placeholder="0"
+                      placeholderTextColor={theme.textMuted}
                       className="text-[20px] font-bold text-center"
                       style={{ minWidth: 50, color: theme.primary }}
                     />
                     
                     <TouchableOpacity 
                       onPress={() => {
-                        setVerifiedPanelCount(verifiedPanelCount + 1);
-                        markDirty();
+                        const currentCount = panelCountInput === '' ? 0 : Number(panelCountInput);
+                        setVerifiedCountFromInput(String(currentCount + 1));
                       }}
                       className="h-8 w-8 items-center justify-center rounded-full"
                       style={{ backgroundColor: theme.primary }}>
@@ -1482,8 +1476,8 @@ export default function UploadSiteProgressScreen({
                   </View>
                   <Text className="mt-1.5 text-center text-[10px]" style={{ color: theme.textMuted }}>
                     {uploadMode === 'ai'
-                      ? 'AI count is only a suggestion. Please adjust the verified count if needed.'
-                      : 'Manual count will be saved without AI validation.'}
+                      ? 'AI count is only a suggestion. Final saved count is user-verified.'
+                      : 'Manual count will be saved as the user-verified count.'}
                   </Text>
                 </View>
               </View>
@@ -1502,9 +1496,9 @@ export default function UploadSiteProgressScreen({
               ]}>
               <TouchableOpacity
                 onPress={handleSave}
-                disabled={saving || !isProjectActive || !scheduleReady}
+                disabled={saving || !isProjectActive || !scheduleReady || !panelCountIsValid}
                 className="h-14 items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}>
+                style={{ backgroundColor: isProjectActive && scheduleReady && panelCountIsValid ? PRIMARY : theme.textMuted }}>
                 {saving ? (
                   <ActivityIndicator color="white" />
                 ) : (
@@ -1520,6 +1514,9 @@ export default function UploadSiteProgressScreen({
         {/* ── STEP 4: Success ── */}
         {step === 4 && (
           <View className="flex-1 items-center justify-center px-8">
+            <View className="absolute left-8 right-8" style={{ top: Math.max(insets.top + 16, 48) }}>
+              <SiteUpdateStepper currentStep={3} completed />
+            </View>
 
 
             <View
@@ -1573,6 +1570,7 @@ export default function UploadSiteProgressScreen({
                 <Text className="text-[12px]" style={{ color: theme.textMuted }}>Required to complete this site update</Text>
               </View>
             </View>
+            <SiteUpdateStepper currentStep={3} />
             <Text className="mb-4 mt-2 text-[13px] leading-5" style={{ color: theme.textSecondary }}>
               Enter the quantity consumed for every material linked to this task.
             </Text>
