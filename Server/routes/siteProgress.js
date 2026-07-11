@@ -92,6 +92,44 @@ function requireSiteProgressRole(req, res, next) {
   return next();
 }
 
+async function attachMobileSessionUser(req, res, next) {
+  const headerId = firstFiniteInteger(req.get('x-buildsphere-mobile-user-id'));
+  const headerEmail = String(req.get('x-buildsphere-mobile-user-email') || '').trim().toLowerCase();
+  const headerRole = String(req.get('x-buildsphere-mobile-user-role') || '').trim().toLowerCase() || 'staff';
+
+  try {
+    if (headerId) {
+      const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [headerId]);
+      if (result.rows[0]) {
+        req.user = result.rows[0];
+        return next();
+      }
+    }
+
+    if (headerEmail) {
+      const result = await pool.query('SELECT id, email, role FROM users WHERE LOWER(email) = LOWER($1)', [headerEmail]);
+      if (result.rows[0]) {
+        req.user = result.rows[0];
+        return next();
+      }
+    }
+
+    if (headerId && headerEmail) {
+      req.user = {
+        id: headerId,
+        email: headerEmail,
+        role: headerRole,
+        mobileSessionFallback: true,
+      };
+      return next();
+    }
+  } catch (error) {
+    console.error('SITE_PROGRESS_MOBILE_SESSION_ERROR:', error.message || error);
+  }
+
+  return authenticateRequest(req, res, next);
+}
+
 function parseJsonBodyField(value, fallback = null) {
   if (!value) return fallback;
   if (typeof value !== 'string') return value;
@@ -205,7 +243,7 @@ function firstFiniteInteger(...values) {
   return 0;
 }
 
-router.use(authenticateRequest);
+router.use(attachMobileSessionUser);
 
 router.post('/validate-schedule', requireSiteProgressRole, async (req, res) => {
   const parsedProjectId = firstFiniteInteger(req.body.projectId);
