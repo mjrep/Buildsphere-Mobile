@@ -233,6 +233,10 @@ async function getInventoryFallback(path: string, params: URLSearchParams) {
     return makeJsonResponse(rows.map((row: any) => ({
       ...row,
       quantity: row.quantity ?? row.current_stock ?? 0,
+      current_stock: row.current_stock ?? row.quantity ?? 0,
+      linked_task_ids: Array.isArray(row.linked_task_ids)
+        ? row.linked_task_ids.map(Number).filter((id: number) => Number.isInteger(id) && id > 0)
+        : [],
     })));
   }
 

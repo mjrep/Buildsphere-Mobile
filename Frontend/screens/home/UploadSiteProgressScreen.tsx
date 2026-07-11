@@ -84,6 +84,33 @@ interface LinkedMaterial {
   linked_task_ids: number[];
 }
 
+const normalizeLinkedTaskIds = (value: unknown): number[] => {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.replace(/^\{|\}$/g, '').split(',')
+      : [];
+
+  return values
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0);
+};
+
+const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
+  const id = Number(item?.id);
+  const stock = Number(item?.current_stock ?? item?.quantity ?? 0);
+  if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(stock)) return null;
+
+  return {
+    ...item,
+    id,
+    item_name: String(item?.item_name ?? item?.name ?? 'Material'),
+    current_stock: stock,
+    quantity: Number(item?.quantity ?? stock),
+    linked_task_ids: normalizeLinkedTaskIds(item?.linked_task_ids ?? item?.linkedTaskIds),
+  };
+};
+
 const PRIMARY = '#7370FF';
 const AI_IMAGE_PICKER_QUALITY = 0.75;
 
@@ -285,10 +312,11 @@ export default function UploadSiteProgressScreen({
       .then(async (response) => {
         const data = await response.json().catch(() => null);
         if (!response.ok) throw new Error(data?.message || data?.error || 'Could not load linked materials.');
-        const items = Array.isArray(data) ? data : [];
-        const linked = items.filter((item: LinkedMaterial) =>
-          Array.isArray(item.linked_task_ids) && item.linked_task_ids.some((id) => String(id) === String(taskId))
-        );
+        const items: any[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+        const linked = items
+          .map((item: any) => normalizeLinkedMaterial(item))
+          .filter((item: LinkedMaterial | null): item is LinkedMaterial => Boolean(item))
+          .filter((item: LinkedMaterial) => item.linked_task_ids.some((id: number) => String(id) === String(taskId)));
         if (!cancelled) setLinkedMaterials(linked);
       })
       .catch((error) => {
