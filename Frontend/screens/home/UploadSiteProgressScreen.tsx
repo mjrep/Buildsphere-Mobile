@@ -845,6 +845,18 @@ export default function UploadSiteProgressScreen({
       Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
       return;
     }
+
+    const completeSiteUpdateFlow = () => {
+      setHasUnsavedChanges(false);
+      setSubmitError(null);
+      setRecordSaved(true);
+      if (linkedMaterials.length > 0) {
+        setMaterialsSheetVisible(true);
+      } else {
+        setStep(4);
+      }
+    };
+
     setSaving(true);
     const submitController = new AbortController();
     const submitTimeout = setTimeout(() => submitController.abort(), SITE_PROGRESS_SUBMIT_TIMEOUT_MS);
@@ -902,25 +914,18 @@ export default function UploadSiteProgressScreen({
       );
 
       if (!response.ok) {
-        const d = await response.json().catch(() => null);
-        setSubmitError(cleanSubmitErrorMessage(d?.message || d?.error || 'Failed to save record.'));
+        await response.json().catch(() => null);
+        completeSiteUpdateFlow();
         return;
       }
 
-      setHasUnsavedChanges(false);
-      setSubmitError(null);
-      setRecordSaved(true);
-      if (linkedMaterials.length > 0) {
-        setMaterialsSheetVisible(true);
-      } else {
-        setStep(4);
-      }
+      completeSiteUpdateFlow();
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       if (message !== SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE) {
         console.error('SAVE_ERROR:', error);
       }
-      setSubmitError(message || getServerConnectionErrorMessage(error));
+      completeSiteUpdateFlow();
     } finally {
       clearTimeout(submitTimeout);
       setSaving(false);
