@@ -33,7 +33,7 @@ import { UserInfo } from '../../App';
 import { analyzeGlassPanelsWithGemini, GeminiAuditResult } from '../../lib/generative-ai';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SkeletonBox, SkeletonCard, SkeletonText, TaskCardSkeleton } from '../../components/skeletons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 import { INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE, isActiveProjectStatus } from '../../utils/projectProgress';
 import SystemBars from '../../components/SystemBars';
@@ -114,9 +114,9 @@ const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
 const PRIMARY = '#7370FF';
 const AI_IMAGE_PICKER_QUALITY = 0.75;
 
-// Step 1: Pick photo + basic info
-// Step 2: Full photo preview + AI analysis
-// Step 3: Form details + human verification
+// Step 1: Upload details
+// Step 2: AI or manual selection (still shown as Upload in the stepper)
+// Step 3: Panel count and human verification
 // Step 4: Success
 
 // Analysis status states for user feedback
@@ -199,7 +199,7 @@ export default function UploadSiteProgressScreen({
       : null;
   // Schedule enforcement is temporarily relaxed so site updates can be QA'd while project schedules are being backfilled.
   const scheduleReady = Boolean(selectedTask);
-  // NOTE: The visible workflow contains three main steps: upload, verified panel count, and inventory update.
+  // The visible stepper represents the three major workflow stages only.
   const visibleStep: SiteUpdateStep = materialsSheetVisible ? 3 : step === 4 ? 3 : step === 1 || step === 2 ? 1 : 2;
   const stepperCompleted = step === 4;
   const panelCountIsValid = panelCountInput !== '' && /^\d+$/.test(panelCountInput);
@@ -557,12 +557,8 @@ export default function UploadSiteProgressScreen({
       return;
     }
 
-    // AI or manual selection is an intermediate choice and is not displayed as a separate step.
-    Alert.alert('Panel Count', 'Choose how to count visible glass panels.', [
-      { text: 'Use AI Check', onPress: handleCountGlass },
-      { text: 'Enter Count Manually', onPress: handleManualUpload },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    // NOTE: AI or manual selection is retained as an intermediate page between Upload and Panel Count.
+    setStep(2);
   };
 
   const handleCountGlass = async () => {
@@ -878,7 +874,10 @@ export default function UploadSiteProgressScreen({
     photoAnalysisResults.find((result) => result.photoIndex === index);
 
   const safeUserTasks = Array.isArray(userTasks) ? userTasks : [];
-  const finalizeFooterBottomPadding = Math.max(insets.bottom + 28, Platform.OS === 'android' ? 48 : 40);
+  const uploadPhotoWidth = Math.min(Math.max(width * 0.38, 132), 220);
+  const panelPhotoSize = Math.min(Math.max(width * 0.28, 104), 150);
+  // Responsive spacing uses the device safe area instead of large fixed top margins.
+  const finalizeFooterBottomPadding = 12;
   const finalizeScrollBottomPadding = finalizeFooterBottomPadding + 96;
 
   return (
@@ -889,22 +888,23 @@ export default function UploadSiteProgressScreen({
       onRequestClose={handleClose}>
       <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
       {/* NOTE: KeyboardAvoidingView and safe-area padding prevent the submit button and input fields from being covered by the mobile keyboard or system navigation bar. */}
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
-        style={{ flex: 1, backgroundColor: theme.background }}
-      >
-        <View className="flex-1" style={{ backgroundColor: theme.background }}>
+      <SafeAreaView className="flex-1" edges={['top', 'bottom']} style={{ backgroundColor: theme.background }}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+          style={{ flex: 1, backgroundColor: theme.background }}
+        >
+          <View className="flex-1" style={{ backgroundColor: theme.background }}>
         {/* ── STEP 1: Upload photo + quick info ── */}
         {step === 1 && (
           <>
 
             {/* Header */}
-            <View className="flex-row items-center justify-between border-b pb-4" style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 44), borderColor: theme.border, backgroundColor: theme.background }]}>
+            <View className="flex-row items-center justify-between border-b px-4 pb-2 pt-2" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
               <TouchableOpacity onPress={handleClose}>
                 <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
-              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Upload a site progress</Text>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Upload Details</Text>
               <View style={{ width: 24 }} />
             </View>
             <View style={formContentStyle}>
@@ -912,10 +912,10 @@ export default function UploadSiteProgressScreen({
             </View>
 
             <ScrollView
-              className="flex-1 pt-5"
+              className="flex-1"
               style={{ backgroundColor: theme.background }}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 40 + insets.bottom, backgroundColor: theme.background }}
+              contentContainerStyle={{ paddingTop: 10, paddingBottom: 24, backgroundColor: theme.background }}
             >
               <View style={formContentStyle}>
               {!isProjectActive && (
@@ -934,7 +934,7 @@ export default function UploadSiteProgressScreen({
                       <View key={index} className="mr-3">
                         <Image
                           source={{ uri: photo.uri }}
-                          style={{ width: 140, height: 160, borderRadius: 16 }}
+                          style={{ width: uploadPhotoWidth, aspectRatio: 0.95, borderRadius: 16 }}
                           resizeMode="cover"
                         />
                         <TouchableOpacity
@@ -948,7 +948,7 @@ export default function UploadSiteProgressScreen({
                       onPress={showPhotoOptions}
                       disabled={!isProjectActive}
                       className="items-center justify-center rounded-[16px] border-2 border-dashed"
-                      style={{ width: 100, height: 160, backgroundColor: isProjectActive ? theme.primaryLight : theme.input, borderColor: isProjectActive ? theme.primary : theme.border }}>
+                      style={{ width: 100, aspectRatio: 0.95, backgroundColor: isProjectActive ? theme.primaryLight : theme.input, borderColor: isProjectActive ? theme.primary : theme.border }}>
                       <Ionicons name="add" size={32} color={isProjectActive ? PRIMARY : theme.textMuted} />
                       <Text className="text-[10px]" style={{ color: isProjectActive ? theme.primary : theme.textMuted }}>Add more</Text>
                     </TouchableOpacity>
@@ -958,8 +958,8 @@ export default function UploadSiteProgressScreen({
                 <TouchableOpacity
                   onPress={showPhotoOptions}
                   disabled={!isProjectActive}
-                  className="mb-6 items-center justify-center rounded-[16px] border-2 border-dashed"
-                  style={{ height: 160, backgroundColor: theme.surface, borderColor: isProjectActive ? theme.primary : theme.border }}>
+                  className="mb-6 w-full items-center justify-center rounded-[16px] border-2 border-dashed"
+                  style={{ minHeight: 148, aspectRatio: 1.75, backgroundColor: theme.surface, borderColor: isProjectActive ? theme.primary : theme.border }}>
                   <View className="mb-2 h-14 w-14 items-center justify-center rounded-full" style={{ backgroundColor: isProjectActive ? theme.primaryLight : theme.input }}>
                     <Ionicons name="camera" size={26} color={isProjectActive ? PRIMARY : theme.textMuted} />
                   </View>
@@ -1041,7 +1041,7 @@ export default function UploadSiteProgressScreen({
             {/* Footer Buttons */}
             <View
               className="flex-row gap-3 border-t pt-3"
-              style={[formContentStyle, { paddingBottom: Math.max(insets.bottom + 12, 40), borderColor: theme.border, backgroundColor: theme.background }]}
+              style={[formContentStyle, { paddingBottom: 12, borderColor: theme.border, backgroundColor: theme.background }]}
             >
               <TouchableOpacity
                 onPress={handleClose}
@@ -1060,174 +1060,65 @@ export default function UploadSiteProgressScreen({
           </>
         )}
 
-        {/* ── STEP 2: Photo Preview (Framed) ── */}
+        {/* STEP 2: AI/manual selection stays in the Upload stage of the visible stepper. */}
         {step === 2 && selectedPhotos.length > 0 && (
-          <View className="flex-1" style={{ backgroundColor: theme.background }}>
-            {/* Header */}
-            <View className="flex-row items-center border-b pb-4" style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 44), backgroundColor: theme.background, borderColor: theme.border }]}>
-              <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 -mt-1 mr-3">
-                <Ionicons name="caret-back-outline" size={24} color={theme.text} />
-              </TouchableOpacity>
-              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
-                Preview Photos ({selectedPhotos.length})
-              </Text>
+          <>
+            {/* NOTE: AI or manual selection is retained as an intermediate page between Upload and Panel Count. */}
+            <View className="flex-row items-center border-b px-4 pb-2 pt-2" style={[formContentStyle, { backgroundColor: theme.background, borderColor: theme.border }]}>
+              <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 mr-3"><Ionicons name="caret-back-outline" size={24} color={theme.text} /></TouchableOpacity>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Choose Analysis Method</Text>
             </View>
-
-            {/* Framed Image Container */}
-            <View className="flex-1 justify-center px-5 py-8">
-              <View 
-                className="overflow-hidden rounded-[24px] shadow-xl"
-                style={{ 
-                  backgroundColor: '#121212', 
-                  height: '100%', 
-                  shadowColor: '#000', 
-                  shadowOpacity: 0.15, 
-                  shadowRadius: 15, 
-                  elevation: 5 
-                }}>
-                <ScrollView 
-                  horizontal 
-                  pagingEnabled 
-                  showsHorizontalScrollIndicator={false}
-                  onMomentumScrollEnd={(e) => {
-                    const contentOffset = e.nativeEvent.contentOffset.x;
-                    const viewSize = e.nativeEvent.layoutMeasurement.width;
-                    if (viewSize > 0) {
-                      const idx = Math.round(contentOffset / viewSize);
-                      setCurrentPhotoIndex(idx);
-                    }
-                  }}
-                  contentContainerStyle={{ alignItems: 'center' }}>
-                  {selectedPhotos.map((photo, index) => (
-                    <TouchableOpacity 
-                      key={index} 
-                      activeOpacity={0.9}
-                      onPress={() => setViewerIndex(index)}
-                      style={{ width: SCREEN_WIDTH - 40, height: '100%', justifyContent: 'center', alignItems: 'center' }}
-                    >
-                      <Image 
-                        source={{ uri: photo.uri }} 
-                        style={{ width: '100%', height: '100%' }} 
-                        resizeMode="contain" 
-                      />
-                    </TouchableOpacity>
-                  ))}
+            <View style={formContentStyle}><SiteUpdateStepper currentStep={1} /></View>
+            <ScrollView className="flex-1" keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}>
+              <View style={formContentStyle}>
+                <Text className="mb-3 text-[13px]" style={{ color: theme.textSecondary }}>Choose how to determine the visible glass panel count.</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-5">
+                  {selectedPhotos.map((photo, index) => <TouchableOpacity key={index} onPress={() => setViewerIndex(index)} className="mr-3"><Image source={{ uri: photo.uri }} style={{ width: Math.min(Math.max(width * 0.3, 104), 132), aspectRatio: 1, borderRadius: 12 }} resizeMode="cover" /></TouchableOpacity>)}
                 </ScrollView>
-
-                {/* Page Indicator (if multiple photos) */}
-                {selectedPhotos.length > 1 && (
-                  <View className="absolute bottom-5 left-0 right-0 flex-row justify-center gap-2">
-                    {selectedPhotos.map((_, i) => (
-                      <View 
-                        key={i} 
-                        style={{
-                          height: 6,
-                          width: i === currentPhotoIndex ? 16 : 6,
-                          borderRadius: 3,
-                          backgroundColor: i === currentPhotoIndex ? PRIMARY : 'rgba(255, 255, 255, 0.6)',
-                        }}
-                      />
-                    ))}
+                {analysisStatus === 'complete' && (
+                  <View className="mb-3 flex-row items-center rounded-xl bg-[#E8F5E9] px-4 py-3">
+                    <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                    <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#2E7D32]">
+                      {aiDetectedCount} panels detected. You can review and correct the count next.
+                    </Text>
                   </View>
                 )}
+                {analysisStatus === 'no_panels' && (
+                  <View className="mb-3 flex-row items-center rounded-xl bg-[#FFF3E0] px-4 py-3">
+                    <Ionicons name="alert-circle" size={20} color="#F57C00" />
+                    <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#E65100]">
+                      No glass panels detected. You can enter the count manually on the next page.
+                    </Text>
+                  </View>
+                )}
+                {analysisStatus === 'failed' && (
+                  <View className="mb-3 flex-row items-center rounded-xl bg-[#FFEBEE] px-4 py-3">
+                    <Ionicons name="close-circle" size={20} color="#E53935" />
+                    <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#C62828]">
+                      AI analysis failed. Enter the verified count manually on the next page.
+                    </Text>
+                  </View>
+                )}
+                {!isProjectActive && <View className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}><Text className="text-[12px]" style={{ color: theme.textSecondary }}>{INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}</Text></View>}
+                <TouchableOpacity onPress={handleCountGlass} disabled={analyzing || !isProjectActive || !scheduleReady} className="mb-3 rounded-xl border p-4" style={{ backgroundColor: theme.primaryLight, borderColor: theme.primary }}>
+                  <View className="flex-row items-center"><Ionicons name="sparkles" size={20} color={PRIMARY} /><Text className="ml-3 text-[15px] font-bold" style={{ color: theme.text }}>Use AI Analysis</Text></View>
+                  <Text className="mt-2 text-[12px] leading-4" style={{ color: theme.textSecondary }}>Analyze the selected photo(s) with Gemini, then review and correct the result.</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleManualUpload} disabled={analyzing || !isProjectActive || !scheduleReady} className="rounded-xl border p-4" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                  <View className="flex-row items-center"><Ionicons name="create-outline" size={20} color={PRIMARY} /><Text className="ml-3 text-[15px] font-bold" style={{ color: theme.text }}>Enter Count Manually</Text></View>
+                  <Text className="mt-2 text-[12px] leading-4" style={{ color: theme.textSecondary }}>Skip AI and enter the verified glass panel count yourself.</Text>
+                </TouchableOpacity>
+                {analyzing && <View className="mt-4 flex-row items-center"><ActivityIndicator color={PRIMARY} /><Text className="ml-3 text-[13px]" style={{ color: theme.textSecondary }}>{analysisProgressLabel}</Text></View>}
               </View>
-            </View>
-
-            {/* Footer Buttons */}
-            <View className="border-t px-5 pt-4" style={{ paddingBottom: Math.max(insets.bottom + 12, 40), backgroundColor: theme.background, borderColor: theme.border }}>
-              {/* Analysis status banner */}
-              {analysisStatus === 'complete' && (
-                <View className="mb-3 flex-row items-center rounded-xl bg-[#E8F5E9] px-4 py-3">
-                  <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
-                  <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#2E7D32]">
-                    {aiDetectedCount} panels detected. Verify the panel count before saving.
-                  </Text>
-                </View>
-              )}
-              {analysisStatus === 'no_panels' && (
-                <View className="mb-3 flex-row items-center rounded-xl bg-[#FFF3E0] px-4 py-3">
-                  <Ionicons name="alert-circle" size={20} color="#F57C00" />
-                  <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#E65100]">
-                    No glass panels detected — enter count manually
-                  </Text>
-                </View>
-              )}
-              {analysisStatus === 'failed' && (
-                <View className="mb-3 flex-row items-center rounded-xl bg-[#FFEBEE] px-4 py-3">
-                  <Ionicons name="close-circle" size={20} color="#E53935" />
-                  <Text className="ml-2 flex-1 text-[13px] font-semibold text-[#C62828]">
-                    AI analysis failed — enter count manually
-                  </Text>
-                </View>
-              )}
-              {analyzing && (
-                <SkeletonCard style={{ borderRadius: 16, borderColor: theme.primary, marginBottom: 12 }}>
-                  <View className="mb-3 flex-row items-center">
-                    <SkeletonBox width={34} height={34} borderRadius={17} style={{ marginRight: 10 }} />
-                    <View className="flex-1">
-                      <Text className="text-[13px] font-semibold" style={{ color: theme.primary }}>
-                        {analysisProgressLabel}
-                      </Text>
-                      <SkeletonText width="72%" height={10} style={{ marginTop: 8 }} />
-                    </View>
-                  </View>
-                  <SkeletonBox height={72} borderRadius={12} />
-                </SkeletonCard>
-              )}
-
-              {/* NOTE: Users choose explicitly between AI validation and manual upload after photo preview. */}
-              {!isProjectActive && (
-                <View className="mb-3 rounded-xl border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.warning || theme.border }}>
-                  <Text className="text-[12px] font-semibold leading-5" style={{ color: theme.textSecondary }}>
-                    {INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE}
-                  </Text>
-                </View>
-              )}
-              <TouchableOpacity
-                onPress={handleCountGlass}
-                disabled={analyzing || !isProjectActive || !scheduleReady}
-                className="h-14 flex-row items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}>
-                {analyzing ? (
-                  <View className="flex-row items-center px-4">
-                    <ActivityIndicator color="white" />
-                    <Text className="ml-3 text-[14px] font-semibold text-white">
-                      {analysisProgressLabel}
-                    </Text>
-                  </View>
-                ) : (
-                  <>
-                    <Ionicons name="sparkles" size={20} color="white" />
-                    <Text className="ml-2 text-[16px] font-bold text-white">
-                      Use AI Check
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={handleManualUpload}
-                disabled={analyzing || !isProjectActive || !scheduleReady}
-                className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
-                style={{ backgroundColor: theme.surface, borderColor: isProjectActive && scheduleReady ? theme.primary : theme.border }}>
-                <Ionicons name="cloud-upload-outline" size={20} color={isProjectActive && scheduleReady ? PRIMARY : theme.textMuted} />
-                <Text className="ml-2 text-[16px] font-bold" style={{ color: isProjectActive && scheduleReady ? theme.primary : theme.textMuted }}>
-                  Upload Without AI
-                </Text>
-              </TouchableOpacity>
-
-              <Text className="mt-3 text-center text-[11px]" style={{ color: theme.textMuted }}>
-                AI check is optional. You may upload manually if AI validation is not needed.
-              </Text>
-            </View>
-          </View>
+            </ScrollView>
+          </>
         )}
 
         {/* ── STEP 3: Form Details ── */}
         {step === 3 && (
           <>
-            <View className="flex-row items-center border-b pb-4" style={[formContentStyle, { paddingTop: Math.max(insets.top + 12, 44), borderColor: theme.border, backgroundColor: theme.background }]}>
-              <TouchableOpacity onPress={() => setStep(1)} className="-ml-2 -mt-1 mr-3">
+            <View className="flex-row items-center border-b px-4 pb-2 pt-2" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
+              <TouchableOpacity onPress={() => setStep(2)} className="-ml-2 mr-3">
                 <Ionicons name="caret-back-outline" size={24} color={theme.text} />
               </TouchableOpacity>
               <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
@@ -1260,7 +1151,7 @@ export default function UploadSiteProgressScreen({
                       >
                         <Image
                           source={{ uri: photo.uri }}
-                          style={{ width: 110, height: 110, borderRadius: 16 }}
+                          style={{ width: panelPhotoSize, height: panelPhotoSize, borderRadius: 16 }}
                           resizeMode="cover"
                         />
                         {photoResult ? (
@@ -1283,7 +1174,7 @@ export default function UploadSiteProgressScreen({
               className="flex-1"
               style={{ backgroundColor: theme.background }}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingTop: 20, paddingBottom: finalizeScrollBottomPadding, backgroundColor: theme.background }}
+              contentContainerStyle={{ paddingTop: 10, paddingBottom: finalizeScrollBottomPadding, backgroundColor: theme.background }}
             >
               <View style={formContentStyle}>
               {!isProjectActive && (
@@ -1513,12 +1404,12 @@ export default function UploadSiteProgressScreen({
 
         {/* ── STEP 4: Success ── */}
         {step === 4 && (
-          <View className="flex-1 items-center justify-center px-8">
-            <View className="absolute left-8 right-8" style={{ top: Math.max(insets.top + 16, 48) }}>
+          <View className="flex-1 px-8">
+            <View className="w-full">
               <SiteUpdateStepper currentStep={3} completed />
             </View>
 
-
+            <View className="flex-1 items-center justify-center">
             <View
               className="mb-6 h-24 w-24 items-center justify-center rounded-full bg-[#7370FF]"
               style={{
@@ -1543,10 +1434,12 @@ export default function UploadSiteProgressScreen({
               style={{ backgroundColor: PRIMARY }}>
               <Text className="text-[16px] font-bold text-white">Back to Project</Text>
             </TouchableOpacity>
+            </View>
           </View>
         )}
-      </View>
-    </KeyboardAvoidingView>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
 
       {/* Required after-upload material consumption. Intentionally has no dismiss action. */}
       <Modal
