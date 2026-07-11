@@ -328,10 +328,28 @@ async function getAuthTokenCandidates() {
   const supabaseToken = data.session?.access_token || '';
   const storedToken = (await AsyncStorage.getItem('token')) || '';
 
-  if (supabaseToken) tokens.push(supabaseToken);
-  if (storedToken && storedToken !== supabaseToken) tokens.push(storedToken);
+  if (isBackendAuthToken(storedToken)) tokens.push(storedToken);
+  if (supabaseToken && !tokens.includes(supabaseToken)) tokens.push(supabaseToken);
+  if (storedToken && !tokens.includes(storedToken)) tokens.push(storedToken);
 
   return tokens;
+}
+
+function decodeJwtPayload(token: string) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+function isBackendAuthToken(token?: string | null) {
+  const payload = token ? decodeJwtPayload(token) : null;
+  return Boolean(payload?.userId && payload?.email);
 }
 
 function setBearerToken(headers: Headers, token?: string) {

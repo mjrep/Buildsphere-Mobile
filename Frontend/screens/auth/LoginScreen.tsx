@@ -133,6 +133,21 @@ export default function LoginScreen({
         onLogin(profileData, authData.token);
       };
 
+      const getBackendToken = async () => {
+        try {
+          const authRes = await apiFetch(`${API_URL}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: trimmedEmail, password }),
+          });
+          const authData = await authRes.json().catch(() => null);
+          return authRes.ok && authData?.token ? String(authData.token) : null;
+        } catch (backendTokenError) {
+          console.warn('Backend auth token request failed after Supabase login.', backendTokenError);
+          return null;
+        }
+      };
+
       if (isLocalApiUrl()) {
         await loginWithBackend();
         return;
@@ -155,7 +170,7 @@ export default function LoginScreen({
           });
         } catch (profileError) {
           console.warn('Profile lookup request failed after Supabase login. Using fallback profile.', profileError);
-          onLogin(buildFallbackProfile(trimmedEmail, authData.user?.id), authData.session.access_token);
+          onLogin(buildFallbackProfile(trimmedEmail, authData.user?.id), (await getBackendToken()) || authData.session.access_token);
           return;
         }
 
@@ -168,7 +183,7 @@ export default function LoginScreen({
         if (!profileRes.ok) {
           if (profileRes.status >= 500) {
             console.warn('Profile lookup failed after Supabase login. Using fallback profile.', profileData);
-            onLogin(buildFallbackProfile(trimmedEmail, authData.user?.id), authData.session.access_token);
+            onLogin(buildFallbackProfile(trimmedEmail, authData.user?.id), (await getBackendToken()) || authData.session.access_token);
             return;
           }
 
@@ -180,7 +195,7 @@ export default function LoginScreen({
           return;
         }
 
-        onLogin(profileData, authData.session.access_token);
+        onLogin(profileData, (await getBackendToken()) || authData.session.access_token);
         return;
       }
 
