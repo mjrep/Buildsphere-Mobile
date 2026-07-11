@@ -210,6 +210,17 @@ const fetchJsonArray = async (url: string, label: string) => {
   return [];
 };
 
+const fetchSupabaseArray = async (table: string, label: string) => {
+  let { data, error } = await supabase.from(table).select('*').order('created_at', { ascending: false });
+  if (error) {
+    const retry = await supabase.from(table).select('*');
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) throw new Error(`${label}: ${error.message}`);
+  return Array.isArray(data) ? data : [];
+};
+
 
 export default function HomeScreen({
   onLogout,
@@ -476,7 +487,7 @@ export default function HomeScreen({
       } catch (backendError) {
         logProjectRequest(`${API_URL}/projects`, backendError instanceof ApiRequestError ? backendError.status : 0, backendError instanceof Error ? backendError.message : String(backendError), false);
         warnProjectsBackendFailure(backendError);
-        throw backendError;
+        allProjects = await fetchSupabaseArray('projects', 'Supabase projects fallback failed');
       }
 
       let assignedTasks: AssignedTaskProject[] = [];
@@ -488,8 +499,12 @@ export default function HomeScreen({
         try {
           assignedTasks = await fetchJsonArray(`${API_URL}/tasks`, 'Backend tasks fetch failed');
         } catch (taskError) {
-          canApplyAssignedTaskFilter = false;
-          console.warn('Dashboard task filter backend fetch failed. Keeping backend project list unfiltered:', taskError);
+          try {
+            assignedTasks = await fetchSupabaseArray('tasks', 'Supabase tasks fallback failed');
+          } catch (fallbackTaskError) {
+            canApplyAssignedTaskFilter = false;
+            console.warn('Dashboard task filter fetch failed. Keeping backend project list unfiltered:', taskError, fallbackTaskError);
+          }
         }
       }
 
