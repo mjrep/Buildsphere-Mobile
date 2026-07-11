@@ -338,6 +338,12 @@ async function fetchAssignedTasks(userId) {
          p.project_name as project,
          pp.phase_key as phase,
          pm.milestone_name as milestone,
+         pm.project_phase_id as milestone_phase_id,
+         pm.start_date as milestone_start_date,
+         pm.end_date as milestone_end_date,
+         pp.phase_key as milestone_phase_name,
+         pp.start_date as phase_start_date,
+         pp.end_date as phase_end_date,
          pm.has_quantity as milestone_has_quantity,
          pm.target_quantity as milestone_target_quantity,
          pm.current_quantity as milestone_current_quantity,
@@ -345,8 +351,8 @@ async function fetchAssignedTasks(userId) {
          u.first_name || ' ' || u.last_name as assigned_to_name
        FROM "public"."tasks" t
        LEFT JOIN "public"."projects" p ON t.project_id = p.id
-       LEFT JOIN "public"."project_phases" pp ON t.phase_id = pp.id
        LEFT JOIN "public"."project_milestones" pm ON t.milestone_id = pm.id
+       LEFT JOIN "public"."project_phases" pp ON pm.project_phase_id = pp.id
        LEFT JOIN "public"."users" u ON t.assigned_to = u.id
        WHERE t.assigned_to = $1 AND t.deleted_at IS NULL
        ORDER BY t.created_at DESC`,
@@ -583,6 +589,12 @@ router.get('/project/:projectId', async (req, res) => {
          p.project_name as project,
          pp.phase_key as phase,
          pm.milestone_name as milestone,
+         pm.project_phase_id as milestone_phase_id,
+         pm.start_date as milestone_start_date,
+         pm.end_date as milestone_end_date,
+         pp.phase_key as milestone_phase_name,
+         pp.start_date as phase_start_date,
+         pp.end_date as phase_end_date,
          pm.has_quantity as milestone_has_quantity,
          pm.target_quantity as milestone_target_quantity,
          pm.current_quantity as milestone_current_quantity,
@@ -590,8 +602,8 @@ router.get('/project/:projectId', async (req, res) => {
          u.first_name || ' ' || u.last_name as assigned_to_name
        FROM tasks t
        LEFT JOIN projects p ON t.project_id = p.id
-       LEFT JOIN project_phases pp ON t.phase_id = pp.id
        LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
+       LEFT JOIN project_phases pp ON pm.project_phase_id = pp.id
        LEFT JOIN users u ON t.assigned_to = u.id
        WHERE t.project_id = $1 AND t.deleted_at IS NULL 
        ORDER BY t.created_at DESC`,

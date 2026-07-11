@@ -6,12 +6,13 @@
  */
 export {
   API_URL,
+  getApiRequestUrlCandidates,
   getApiConfigurationError,
   isLocalApiUrl,
   isTemporaryTunnelApiUrl,
 } from './apiConfig';
 
-import { API_URL } from './apiConfig';
+import { API_URL, getApiRequestUrlCandidates, getApiUrlCandidates } from './apiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { qaDebug } from '../utils/qaDebug';
@@ -46,36 +47,39 @@ export function getServerConnectionErrorMessage(error?: unknown) {
 export async function checkApiHealth(timeoutMs = 15000) {
   if (!API_URL) return false;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  for (const baseUrl of getApiUrlCandidates()) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    let response = await fetch(`${API_URL}/health`, {
-      method: 'GET',
-      signal: controller.signal,
-    });
-
-    if (response.status === 404) {
-      response = await fetch(`${API_URL}/`, {
+    try {
+      let response = await fetch(`${baseUrl}/health`, {
         method: 'GET',
         signal: controller.signal,
       });
-      if (!response.ok) return false;
-      const text = await response.text();
-      return text.includes('BuildSphere API is running');
+
+      if (response.status === 404) {
+        response = await fetch(`${baseUrl}/`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+        if (!response.ok) continue;
+        const text = await response.text();
+        return text.includes('BuildSphere API is running');
+      }
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      qaDebug('API health check', { endpoint: '/health', status: response.status });
+      return data?.status === 'ok' && data?.service === 'BuildSphere API';
+    } catch (error) {
+      qaDebug('API health check failed', { endpoint: '/health', status: 0 });
+    } finally {
+      clearTimeout(timeout);
     }
-
-    if (!response.ok) return false;
-
-    const data = await response.json();
-    qaDebug('API health check', { endpoint: '/health', status: response.status });
-    return data?.status === 'ok' && data?.service === 'BuildSphere API';
-  } catch (error) {
-    qaDebug('API health check failed', { endpoint: '/health', status: 0 });
-    return false;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  return false;
 }
 
 export async function loadStoredApiUrl() {
@@ -114,34 +118,41 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
 
   const method = init.method || 'GET';
   const endpoint = typeof input === 'string' ? input.replace(API_URL, '') : 'unknown';
-  try {
-    const response = await fetch(input, {
-      ...init,
-      headers,
-    });
+  const candidateUrls = getApiRequestUrlCandidates(input);
+  let lastError: unknown = null;
 
-    qaDebug('API request', {
-      method,
-      endpoint,
-      status: response.status,
-      authenticated: headers.has('Authorization'),
-    });
+  for (const requestUrl of candidateUrls) {
+    try {
+      const response = await fetch(requestUrl, {
+        ...init,
+        headers,
+      });
 
-    if (response.status === 401) {
-      await AsyncStorage.multiRemove(['user', 'token']);
-      notifyUnauthorized();
+      qaDebug('API request', {
+        method,
+        endpoint,
+        status: response.status,
+        authenticated: headers.has('Authorization'),
+      });
+
+      if (response.status === 401) {
+        await AsyncStorage.multiRemove(['user', 'token']);
+        notifyUnauthorized();
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error;
+      qaDebug('API request failed', {
+        method,
+        endpoint,
+        status: 0,
+        authenticated: headers.has('Authorization'),
+        reason: error instanceof Error ? error.message : 'network-error',
+      });
     }
-
-    return response;
-  } catch (error) {
-    qaDebug('API request failed', {
-      method,
-      endpoint,
-      status: 0,
-      authenticated: headers.has('Authorization'),
-      reason: error instanceof Error ? error.message : 'network-error',
-    });
-    throw error;
   }
+
+  throw lastError;
 }
 

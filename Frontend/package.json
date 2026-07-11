@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start -c --go",
+    "start:android-localhost": "node ./scripts/start-android-localhost.js",
     "start:clear": "expo start -c --go",
     "start:tunnel": "expo start -c --tunnel",
     "start:go": "expo start -c --go",

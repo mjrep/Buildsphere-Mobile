@@ -17,6 +17,11 @@ const { logProjectActivity } = require('../services/activityLogService');
 const { authenticateRequest } = require('../middleware/auth');
 const { canUploadSiteProgress, canViewReports, rejectInactiveProjectWork } = require('../rbac');
 const { qaDebug } = require('../services/qaDebug');
+const {
+  canUserUploadForTask,
+  resolveTaskSchedule,
+  validateSiteUpdateSchedule,
+} = require('../services/siteUpdateScheduleService');
 
 let supabase = null;
 let siteProgressImageSchemaReady = false;
@@ -202,6 +207,53 @@ function firstFiniteInteger(...values) {
 
 router.use(authenticateRequest);
 
+router.post('/validate-schedule', requireSiteProgressRole, async (req, res) => {
+  const parsedProjectId = firstFiniteInteger(req.body.projectId);
+  const parsedTaskId = firstFiniteInteger(req.body.taskId);
+  const parsedUserId = firstFiniteInteger(req.user.id);
+  if (!parsedProjectId || !parsedTaskId || !parsedUserId) {
+    return res.status(400).json({ success: false, message: 'Project, task, and user are required to validate the schedule.' });
+  }
+
+  try {
+    if (await rejectInactiveProjectWork(pool, res, parsedProjectId)) return;
+
+    const schedule = await resolveTaskSchedule(pool, parsedTaskId);
+    if (!schedule) return res.status(404).json({ success: false, message: 'Task not found.' });
+    if (Number(schedule.project_id) !== parsedProjectId) {
+      return res.status(400).json({ success: false, message: 'Selected task does not belong to the selected project.' });
+    }
+    if (
+      schedule.milestone_id &&
+      (
+        Number(schedule.milestone_project_id) !== parsedProjectId ||
+        Number(schedule.phase_project_id) !== parsedProjectId ||
+        Number(schedule.task_phase_id) !== Number(schedule.milestone_phase_id)
+      )
+    ) {
+      return res.status(422).json({
+        success: false,
+        code: 'TASK_SCHEDULE_RELATIONSHIP_INVALID',
+        message: 'The selected task is not linked to a valid milestone and phase schedule.',
+      });
+    }
+    if (!canUserUploadForTask(schedule, parsedUserId)) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to upload progress for this task.' });
+    }
+
+    const validation = validateSiteUpdateSchedule(schedule, req.body.workDate);
+    if (!validation.valid) {
+      const { status, ...responseBody } = validation;
+      return res.status(status).json({ success: false, ...responseBody });
+    }
+
+    return res.json({ success: true, ...validation });
+  } catch (error) {
+    console.error('SITE_UPDATE_SCHEDULE_VALIDATION_ERROR:', error);
+    return res.status(500).json({ success: false, message: 'Could not validate the site update schedule.' });
+  }
+});
+
 router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, res) => {
   // NOTE: POST /site-progress saves project/task/shift/work date/photos plus optional AI metadata.
   // photoUrls can come from body or req.files
@@ -230,6 +282,39 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
 
     // NOTE: Inventory and site upload mutations require both role permission and active project status.
     if (await rejectInactiveProjectWork(pool, res, parsedProjectId)) return;
+
+    // The task determines the related milestone and phase used for schedule validation.
+    const taskMilestone = await resolveTaskSchedule(pool, parsedTaskId);
+    if (!taskMilestone) {
+      return res.status(404).json({ success: false, message: 'Task not found.' });
+    }
+    if (Number(taskMilestone.project_id) !== parsedProjectId) {
+      return res.status(400).json({ success: false, message: 'Selected task does not belong to the selected project.' });
+    }
+    if (
+      taskMilestone.milestone_id &&
+      (
+        Number(taskMilestone.milestone_project_id) !== parsedProjectId ||
+        Number(taskMilestone.phase_project_id) !== parsedProjectId ||
+        Number(taskMilestone.task_phase_id) !== Number(taskMilestone.milestone_phase_id)
+      )
+    ) {
+      return res.status(422).json({
+        success: false,
+        code: 'TASK_SCHEDULE_RELATIONSHIP_INVALID',
+        message: 'The selected task is not linked to a valid milestone and phase schedule.',
+      });
+    }
+    if (!canUserUploadForTask(taskMilestone, parsedUserId)) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to upload progress for this task.' });
+    }
+
+    // Backend validation prevents users from bypassing the mobile date restriction.
+    const scheduleValidation = validateSiteUpdateSchedule(taskMilestone, workDate);
+    if (!scheduleValidation.valid) {
+      const { status, ...responseBody } = scheduleValidation;
+      return res.status(status).json({ success: false, ...responseBody });
+    }
 
     const supabaseStorage = getSupabaseStorageClient();
     const uploadedImageFiles = getUploadedImageFiles(req);
@@ -286,42 +371,6 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     const evidenceImagePath = allPhotoUrls.length > 1 ? allPhotoUrls.join(',') : finalPhotoPath;
     const perPhotoCounts = parseJsonBodyField(per_photo_counts, null);
 
-    // 1. Fetch milestone data from the task. Quantity milestones drive task status automatically.
-    const taskRes = await pool.query(
-      `SELECT
-         t.id,
-         t.title,
-         t.project_id,
-         t.assigned_to,
-         t.assigned_by,
-         t.created_by,
-         t.milestone_id,
-         p.project_in_charge_id,
-         pm.has_quantity,
-         pm.target_quantity
-       FROM tasks t
-       LEFT JOIN projects p ON p.id = t.project_id
-       LEFT JOIN project_milestones pm ON t.milestone_id = pm.id
-       WHERE t.id = $1`,
-      [parsedTaskId]
-    );
-    const taskMilestone = taskRes.rows[0] || {};
-    if (!taskMilestone.id) {
-      return res.status(404).json({ message: 'Task not found.' });
-    }
-    if (Number(taskMilestone.project_id) !== parsedProjectId) {
-      return res.status(400).json({ message: 'Selected task does not belong to the selected project.' });
-    }
-    const canUploadForTask = [
-      taskMilestone.assigned_to,
-      taskMilestone.assigned_by,
-      taskMilestone.created_by,
-      taskMilestone.project_in_charge_id,
-    ].some((candidate) => String(candidate || '') === String(parsedUserId));
-    if (!canUploadForTask) {
-      return res.status(403).json({ message: 'You do not have permission to upload progress for this task.' });
-    }
-
     const milestoneId = taskMilestone.milestone_id || null;
     const savedQuantity = firstFiniteInteger(verified_panel_count, quantityInstalled, glassCount);
 
@@ -343,7 +392,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
         JSON.stringify(allPhotoUrls),
         notes,
         shift || 'Morning',
-        workDate || new Date(),
+        scheduleValidation.work_date,
         ai_detected_count != null ? parseInt(ai_detected_count) : null,
         verified_panel_count != null ? parseInt(verified_panel_count) : null,
         avg_confidence != null ? parseFloat(avg_confidence) : null,

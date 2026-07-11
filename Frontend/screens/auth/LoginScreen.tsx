@@ -20,9 +20,11 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view
 import {
   API_URL,
   SERVER_UNREACHABLE_MESSAGE,
+  apiFetch,
   checkApiHealth,
   getApiConfigurationError,
   getServerConnectionErrorMessage,
+  isLocalApiUrl,
 } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { UserInfo } from '../../App';
@@ -62,7 +64,7 @@ export default function LoginScreen({
       const trimmedEmail = email.trim().toLowerCase();
 
       const loginWithBackend = async () => {
-        const authRes = await fetch(`${API_URL}/auth/login`, {
+        const authRes = await apiFetch(`${API_URL}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: trimmedEmail, password }),
@@ -74,7 +76,7 @@ export default function LoginScreen({
 
         let profileData = authData?.user;
         try {
-          const profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
+          const profileRes = await apiFetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`);
           const fetchedProfile = await profileRes.json().catch(() => null);
           if (profileRes.ok) {
             profileData = fetchedProfile;
@@ -88,6 +90,11 @@ export default function LoginScreen({
         onLogin(profileData, authData.token);
       };
 
+      if (isLocalApiUrl()) {
+        await loginWithBackend();
+        return;
+      }
+
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password,
@@ -97,7 +104,7 @@ export default function LoginScreen({
         let profileRes: Response;
 
         try {
-          profileRes = await fetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`, {
+          profileRes = await apiFetch(`${API_URL}/users/by-email/${encodeURIComponent(trimmedEmail)}`, {
             headers: {
               Authorization: `Bearer ${authData.session.access_token}`,
             },
@@ -145,17 +152,11 @@ export default function LoginScreen({
         return;
       }
 
-      const isApiKeyError = authError?.message?.toLowerCase().includes('api key');
-      if (isApiKeyError) {
-        console.warn('Supabase anon key is invalid. Falling back to backend auth login.');
+      if (authError) {
+        console.warn('Supabase login failed. Falling back to backend auth login.', authError.message);
         await loginWithBackend();
         return;
       }
-
-      Alert.alert(
-        'Login Failed',
-        authError?.message || 'Invalid email or password.'
-      );
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
       Alert.alert(message ? 'Login Failed' : 'BuildSphere server is unreachable', message || getServerConnectionErrorMessage(err));

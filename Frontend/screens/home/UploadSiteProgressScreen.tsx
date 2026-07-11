@@ -37,13 +37,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { centeredContent, FORM_CONTENT_MAX_WIDTH } from '../../utils/responsive';
 import { INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE, isActiveProjectStatus } from '../../utils/projectProgress';
 import SystemBars from '../../components/SystemBars';
+import { formatDateOnlyDisplay, parseDateOnly, toDateOnlyString } from '../../utils/dateOnly';
+import {
+  clampDateToAllowedRange,
+  getAllowedSiteUpdateDateRange,
+  SiteUpdateTaskSchedule,
+  validateSiteUpdateSchedule,
+} from '../../utils/siteUpdateSchedule';
 
 interface Props {
   visible: boolean;
   user: UserInfo;
   onClose: () => void;
   projects: { id: number; name: string; status?: string | null }[];
-  initialTask?: any;
+  initialTask?: SiteUpdateTaskSchedule;
   initialShift?: 'Morning' | 'Noon' | 'Afternoon';
   initialProjectId?: number;
 }
@@ -66,6 +73,15 @@ interface PhotoAnalysisResult {
   summary?: string;
   uncertainCount?: number;
   status: 'complete' | 'failed';
+}
+
+interface LinkedMaterial {
+  id: number;
+  item_name: string;
+  current_stock: number;
+  quantity: number;
+  unit?: string | null;
+  linked_task_ids: number[];
 }
 
 const PRIMARY = '#7370FF';
@@ -106,7 +122,7 @@ export default function UploadSiteProgressScreen({
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
   const [projectId, setProjectId] = useState<number | null>(initialTask?.project_id || initialProjectId || null);
   const [taskId, setTaskId] = useState<number | null>(initialTask?.id || null);
-  const [userTasks, setUserTasks] = useState<any[]>([]);
+  const [userTasks, setUserTasks] = useState<SiteUpdateTaskSchedule[]>([]);
   const [quantityInstalled, setQuantityInstalled] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -122,6 +138,12 @@ export default function UploadSiteProgressScreen({
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [glassCount, setGlassCount] = useState<number>(0);
   const [uploadMode, setUploadMode] = useState<UploadMode>(null);
+  const [linkedMaterials, setLinkedMaterials] = useState<LinkedMaterial[]>([]);
+  const [materialQuantities, setMaterialQuantities] = useState<Record<number, string>>({});
+  const [loadingLinkedMaterials, setLoadingLinkedMaterials] = useState(false);
+  const [linkedMaterialsError, setLinkedMaterialsError] = useState<string | null>(null);
+  const [materialsSheetVisible, setMaterialsSheetVisible] = useState(false);
+  const [submittingMaterials, setSubmittingMaterials] = useState(false);
 
   // Image Viewer & preview states
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState<number>(0);
@@ -139,6 +161,18 @@ export default function UploadSiteProgressScreen({
   const [photoAnalysisResults, setPhotoAnalysisResults] = useState<PhotoAnalysisResult[]>([]);
   const [analyzingPhotoIndex, setAnalyzingPhotoIndex] = useState<number | null>(null);
   const selectedProject = projects.find((project) => String(project.id) === String(projectId));
+  const selectedTask =
+    userTasks.find((task) => String(task.id) === String(taskId)) ||
+    (String(initialTask?.id || '') === String(taskId || '') ? initialTask : undefined);
+  const allowedDateRange = getAllowedSiteUpdateDateRange(selectedTask);
+  const pickerDateRange =
+    allowedDateRange && allowedDateRange.selectableStart <= allowedDateRange.selectableEnd
+      ? allowedDateRange
+      : null;
+  const scheduleValidation = selectedTask
+    ? validateSiteUpdateSchedule(selectedTask, toDateOnlyString(workDate))
+    : { valid: false, message: 'Please select a task.' };
+  const scheduleReady = scheduleValidation.valid;
   const hasSelectedProject = projectId !== null && projectId !== undefined;
   const isProjectActive =
     !hasSelectedProject ||
@@ -178,6 +212,12 @@ export default function UploadSiteProgressScreen({
     setAnalyzingPhotoIndex(null);
     setCurrentPhotoIndex(0);
     setViewerIndex(null);
+    setLinkedMaterials([]);
+    setMaterialQuantities({});
+    setLoadingLinkedMaterials(false);
+    setLinkedMaterialsError(null);
+    setMaterialsSheetVisible(false);
+    setSubmittingMaterials(false);
   };
 
   const markDirty = () => {
@@ -220,7 +260,110 @@ export default function UploadSiteProgressScreen({
     }
   }, [visible, initialShift, initialProjectId, initialTask]);
 
+  React.useEffect(() => {
+    if (!pickerDateRange) return;
+
+    // Today remains selected when valid; otherwise use the nearest approved calendar date.
+    setWorkDate((currentDate) =>
+      clampDateToAllowedRange(currentDate, pickerDateRange.selectableStart, pickerDateRange.selectableEnd)
+    );
+  }, [taskId, pickerDateRange?.selectableStart, pickerDateRange?.selectableEnd]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLinkedMaterials([]);
+    setMaterialQuantities({});
+    setLinkedMaterialsError(null);
+
+    if (!visible || !taskId || !projectId) {
+      setLoadingLinkedMaterials(false);
+      return () => { cancelled = true; };
+    }
+
+    setLoadingLinkedMaterials(true);
+    apiFetch(`${API_URL}/inventory?projectId=${encodeURIComponent(String(projectId))}`)
+      .then(async (response) => {
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.message || data?.error || 'Could not load linked materials.');
+        const items = Array.isArray(data) ? data : [];
+        const linked = items.filter((item: LinkedMaterial) =>
+          Array.isArray(item.linked_task_ids) && item.linked_task_ids.some((id) => String(id) === String(taskId))
+        );
+        if (!cancelled) setLinkedMaterials(linked);
+      })
+      .catch((error) => {
+        console.warn('LINKED_MATERIALS_ERROR:', error);
+        if (!cancelled) setLinkedMaterialsError(error?.message || 'Could not load linked materials.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingLinkedMaterials(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [visible, taskId, projectId]);
+
+  const readableScheduleDate = (value: string) => {
+    const parsed = parseDateOnly(value);
+    return parsed
+      ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : formatDateOnlyDisplay(value);
+  };
+
+  const scheduleMessage = (() => {
+    if (
+      scheduleValidation.code === 'SITE_UPDATE_OUTSIDE_MILESTONE_DATES' &&
+      scheduleValidation.allowedStartDate &&
+      scheduleValidation.allowedEndDate
+    ) {
+      return `Selected work date is outside the milestone schedule. Please choose a date from ${readableScheduleDate(scheduleValidation.allowedStartDate)} to ${readableScheduleDate(scheduleValidation.allowedEndDate)}.`;
+    }
+    return scheduleValidation.message;
+  })();
+
+  const requireValidSchedule = () => {
+    if (!selectedTask) {
+      Alert.alert('Missing info', 'Please select a task.');
+      return false;
+    }
+    if (!scheduleReady) {
+      Alert.alert('Schedule required', scheduleMessage || 'Please select a valid work date.');
+      return false;
+    }
+    return true;
+  };
+
+  const renderScheduleHelper = () => {
+    if (!selectedTask) return null;
+    if (!allowedDateRange) {
+      return (
+        <Text className="-mt-2 mb-4 text-[11px] leading-4" style={{ color: theme.danger }}>
+          {scheduleMessage}
+        </Text>
+      );
+    }
+
+    return (
+      <View className="-mt-2 mb-4 rounded-lg px-3 py-2" style={{ backgroundColor: theme.surface }}>
+        <Text className="text-[11px] leading-4" style={{ color: theme.textSecondary }}>
+          Milestone: {selectedTask.milestone || 'Unnamed milestone'} · Phase: {selectedTask.milestone_phase_name || 'Unnamed phase'}
+        </Text>
+        <Text className="text-[11px] leading-4" style={{ color: theme.textSecondary }}>
+          Allowed update dates: {readableScheduleDate(allowedDateRange.milestoneStart)} – {readableScheduleDate(allowedDateRange.milestoneEnd)}
+        </Text>
+        {!scheduleReady && (
+          <Text className="mt-1 text-[11px] leading-4" style={{ color: theme.danger }}>
+            {scheduleMessage}
+          </Text>
+        )}
+      </View>
+    );
+  };
+
   const handleClose = () => {
+    if (materialsSheetVisible || submittingMaterials) {
+      Alert.alert('Materials required', 'Submit the quantities used for every linked material before leaving.');
+      return;
+    }
     if (step === 4 || recordSaved || !hasUnsavedChanges) {
       reset();
       onClose();
@@ -238,6 +381,51 @@ export default function UploadSiteProgressScreen({
         },
       },
     ]);
+  };
+
+  const materialsAreValid = linkedMaterials.length > 0 && linkedMaterials.every((material) => {
+    const quantity = Number(materialQuantities[material.id]);
+    return Number.isFinite(quantity) && quantity > 0 && quantity <= material.current_stock;
+  });
+
+  const submitMaterials = async () => {
+    if (!taskId || !materialsAreValid || submittingMaterials) return;
+    setSubmittingMaterials(true);
+    const submittedIds: number[] = [];
+    try {
+      for (const material of linkedMaterials) {
+        const response = await apiFetch(`${API_URL}/inventory/${material.id}/transaction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: 'CONSUMPTION',
+            quantity: Number(materialQuantities[material.id]),
+            reference_task_id: taskId,
+            notes: 'Consumed during site progress update.',
+          }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error(data?.message || data?.error || `Failed to record ${material.item_name}.`);
+        }
+        submittedIds.push(material.id);
+      }
+      setMaterialsSheetVisible(false);
+      setMaterialQuantities({});
+      setStep(4);
+    } catch (error: any) {
+      if (submittedIds.length > 0) {
+        setLinkedMaterials((current) => current.filter((material) => !submittedIds.includes(material.id)));
+        setMaterialQuantities((current) => {
+          const remaining = { ...current };
+          submittedIds.forEach((id) => delete remaining[id]);
+          return remaining;
+        });
+      }
+      Alert.alert('Materials not submitted', error?.message || getServerConnectionErrorMessage(error));
+    } finally {
+      setSubmittingMaterials(false);
+    }
   };
 
   const pickFromLibrary = async (multiple = true) => {
@@ -350,6 +538,7 @@ export default function UploadSiteProgressScreen({
       showInactiveProjectMessage();
       return;
     }
+    if (!requireValidSchedule()) return;
     if (selectedPhotos.length === 0) {
       return;
     }
@@ -359,7 +548,6 @@ export default function UploadSiteProgressScreen({
       return;
     }
 
-    setUploadMode('ai');
     setAnalyzing(true);
     setAnalysisStatus('uploading');
     setPhotoAnalysisResults([]);
@@ -368,6 +556,31 @@ export default function UploadSiteProgressScreen({
     setHasWarnings(false);
     setWarningMessage('');
     try {
+      // Confirm the schedule with the backend before starting unnecessary Gemini analysis.
+      let scheduleResponse: Response;
+      try {
+        scheduleResponse = await apiFetch(`${API_URL}/site-progress/validate-schedule`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            taskId,
+            workDate: toDateOnlyString(workDate),
+          }),
+        });
+      } catch (scheduleError) {
+        setAnalysisStatus('idle');
+        Alert.alert('Connection Error', getServerConnectionErrorMessage(scheduleError));
+        return;
+      }
+      const scheduleBody = await scheduleResponse.json().catch(() => null);
+      if (!scheduleResponse.ok) {
+        Alert.alert('Schedule required', scheduleBody?.message || 'Could not validate the site update schedule.');
+        setAnalysisStatus('idle');
+        return;
+      }
+
+      setUploadMode('ai');
       if (validSelectedPhotos.length > 0) {
         const nextResults: PhotoAnalysisResult[] = [];
         const failedPhotoNumbers: number[] = [];
@@ -484,6 +697,7 @@ export default function UploadSiteProgressScreen({
       showInactiveProjectMessage();
       return;
     }
+    if (!requireValidSchedule()) return;
     setUploadMode('manual');
     setAnalysisStatus('idle');
     setDetectionMode('manual');
@@ -497,6 +711,14 @@ export default function UploadSiteProgressScreen({
   };
 
   const handleSave = async () => {
+    if (loadingLinkedMaterials) {
+      Alert.alert('Please wait', 'Checking the materials linked to this task.');
+      return;
+    }
+    if (linkedMaterialsError) {
+      Alert.alert('Materials unavailable', 'Linked materials could not be checked. Select the task again or check your connection before submitting.');
+      return;
+    }
     // NOTE: "Looks Good" confirms AI results; manual mode submits the same record without AI fields.
     if (!projectId || !taskId) {
       Alert.alert('Missing info', 'Please select a project and a task.');
@@ -506,6 +728,7 @@ export default function UploadSiteProgressScreen({
       showInactiveProjectMessage();
       return;
     }
+    if (!requireValidSchedule()) return;
     const validSelectedPhotos = selectedPhotos.filter(photo => Boolean(photo.uri?.trim()));
     if (validSelectedPhotos.length === 0) {
       Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
@@ -519,11 +742,8 @@ export default function UploadSiteProgressScreen({
       formData.append('glassCount', verifiedPanelCount.toString());
       formData.append('shift', shift);
       
-      // Use local date string (YYYY-MM-DD) to avoid UTC timezone shifts
-      const year = workDate.getFullYear();
-      const month = String(workDate.getMonth() + 1).padStart(2, '0');
-      const day = String(workDate.getDate()).padStart(2, '0');
-      const formattedDate = `${year}-${month}-${day}`;
+      // Use local date parts (YYYY-MM-DD) to avoid UTC timezone shifts.
+      const formattedDate = toDateOnlyString(workDate);
       
       formData.append('workDate', formattedDate);
       formData.append('notes', notes);
@@ -570,7 +790,11 @@ export default function UploadSiteProgressScreen({
 
       setHasUnsavedChanges(false);
       setRecordSaved(true);
-      setStep(4);
+      if (linkedMaterials.length > 0) {
+        setMaterialsSheetVisible(true);
+      } else {
+        setStep(4);
+      }
     } catch (error) {
       console.error('SAVE_ERROR:', error);
       Alert.alert('Connection Error', getServerConnectionErrorMessage(error));
@@ -704,6 +928,7 @@ export default function UploadSiteProgressScreen({
                 )}
                 <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
+              {renderScheduleHelper()}
 
               {/* Shift Dropdown */}
               <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Shift</Text>
@@ -730,6 +955,8 @@ export default function UploadSiteProgressScreen({
                   value={workDate}
                   mode="date"
                   display="default"
+                  minimumDate={pickerDateRange ? parseDateOnly(pickerDateRange.selectableStart) || undefined : undefined}
+                  maximumDate={pickerDateRange ? parseDateOnly(pickerDateRange.selectableEnd) || undefined : undefined}
                   onChange={(event, selectedDate) => {
                     setShowDatePicker(false);
                     if (selectedDate) {
@@ -831,10 +1058,12 @@ export default function UploadSiteProgressScreen({
                 <Text className="text-[14px] font-semibold" style={{ color: theme.textMuted }}>Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => (selectedPhotos.length > 0 ? setStep(2) : setStep(3))}
-                disabled={!isProjectActive}
+                onPress={() => {
+                  if (requireValidSchedule()) setStep(selectedPhotos.length > 0 ? 2 : 3);
+                }}
+                disabled={!isProjectActive || !scheduleReady}
                 className="h-12 flex-1 items-center justify-center rounded-[14px]"
-                style={{ backgroundColor: isProjectActive ? PRIMARY : theme.textMuted }}>
+                style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}>
                 <Text className="text-[14px] font-bold text-white">Next</Text>
               </TouchableOpacity>
             </View>
@@ -966,9 +1195,9 @@ export default function UploadSiteProgressScreen({
               )}
               <TouchableOpacity
                 onPress={handleCountGlass}
-                disabled={analyzing || !isProjectActive}
+                disabled={analyzing || !isProjectActive || !scheduleReady}
                 className="h-14 flex-row items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: isProjectActive ? PRIMARY : theme.textMuted }}>
+                style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}>
                 {analyzing ? (
                   <View className="flex-row items-center px-4">
                     <ActivityIndicator color="white" />
@@ -988,11 +1217,11 @@ export default function UploadSiteProgressScreen({
 
               <TouchableOpacity
                 onPress={handleManualUpload}
-                disabled={analyzing || !isProjectActive}
+                disabled={analyzing || !isProjectActive || !scheduleReady}
                 className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
-                style={{ backgroundColor: theme.surface, borderColor: isProjectActive ? theme.primary : theme.border }}>
-                <Ionicons name="cloud-upload-outline" size={20} color={isProjectActive ? PRIMARY : theme.textMuted} />
-                <Text className="ml-2 text-[16px] font-bold" style={{ color: isProjectActive ? theme.primary : theme.textMuted }}>
+                style={{ backgroundColor: theme.surface, borderColor: isProjectActive && scheduleReady ? theme.primary : theme.border }}>
+                <Ionicons name="cloud-upload-outline" size={20} color={isProjectActive && scheduleReady ? PRIMARY : theme.textMuted} />
+                <Text className="ml-2 text-[16px] font-bold" style={{ color: isProjectActive && scheduleReady ? theme.primary : theme.textMuted }}>
                   Upload Without AI
                 </Text>
               </TouchableOpacity>
@@ -1086,6 +1315,7 @@ export default function UploadSiteProgressScreen({
                 )}
                 <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
               </TouchableOpacity>
+              {renderScheduleHelper()}
 
               {/* Shift Dropdown */}
               <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Shift</Text>
@@ -1112,6 +1342,8 @@ export default function UploadSiteProgressScreen({
                   value={workDate}
                   mode="date"
                   display="default"
+                  minimumDate={pickerDateRange ? parseDateOnly(pickerDateRange.selectableStart) || undefined : undefined}
+                  maximumDate={pickerDateRange ? parseDateOnly(pickerDateRange.selectableEnd) || undefined : undefined}
                   onChange={(event, selectedDate) => {
                     setShowDatePicker(false);
                     if (selectedDate) {
@@ -1271,9 +1503,9 @@ export default function UploadSiteProgressScreen({
               ]}>
               <TouchableOpacity
                 onPress={handleSave}
-                disabled={saving || !isProjectActive}
+                disabled={saving || !isProjectActive || !scheduleReady}
                 className="h-14 items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: isProjectActive ? PRIMARY : theme.textMuted }}>
+                style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}>
                 {saving ? (
                   <ActivityIndicator color="white" />
                 ) : (
@@ -1313,12 +1545,80 @@ export default function UploadSiteProgressScreen({
               onPress={handleClose}
               className="h-14 w-full items-center justify-center rounded-[16px]"
               style={{ backgroundColor: PRIMARY }}>
-              <Text className="text-[16px] font-bold text-white">Back to home</Text>
+              <Text className="text-[16px] font-bold text-white">Back to Project</Text>
             </TouchableOpacity>
           </View>
         )}
       </View>
     </KeyboardAvoidingView>
+
+      {/* Required after-upload material consumption. Intentionally has no dismiss action. */}
+      <Modal
+        visible={materialsSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => Alert.alert('Materials required', 'Enter and submit all material quantities to finish this site update.')}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          className="flex-1 justify-end"
+          style={{ backgroundColor: theme.overlay }}>
+          <View
+            className="max-h-[85%] w-full rounded-t-[30px] px-5 pt-6"
+            style={{ backgroundColor: theme.elevated, maxWidth: 680, alignSelf: 'center', paddingBottom: Math.max(insets.bottom, 20) }}>
+            <View className="mb-2 flex-row items-center">
+              <View className="mr-3 h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
+                <Ionicons name="construct-outline" size={21} color={PRIMARY} />
+              </View>
+              <View className="flex-1">
+                <Text className="text-[19px] font-bold" style={{ color: theme.text }}>Materials Used</Text>
+                <Text className="text-[12px]" style={{ color: theme.textMuted }}>Required to complete this site update</Text>
+              </View>
+            </View>
+            <Text className="mb-4 mt-2 text-[13px] leading-5" style={{ color: theme.textSecondary }}>
+              Enter the quantity consumed for every material linked to this task.
+            </Text>
+
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {linkedMaterials.map((material) => {
+                const entered = materialQuantities[material.id] || '';
+                const numericValue = Number(entered);
+                const invalid = entered.length > 0 && (!Number.isFinite(numericValue) || numericValue <= 0 || numericValue > material.current_stock);
+                return (
+                  <View key={material.id} className="mb-3 rounded-2xl border p-4" style={{ borderColor: invalid ? '#EF4444' : theme.border, backgroundColor: theme.surface }}>
+                    <View className="mb-3 flex-row items-center justify-between">
+                      <Text className="mr-3 flex-1 text-[14px] font-semibold" style={{ color: theme.text }}>{material.item_name}</Text>
+                      <Text className="text-[12px]" style={{ color: theme.textMuted }}>
+                        Stock: {material.current_stock} {material.unit || 'pcs'}
+                      </Text>
+                    </View>
+                    <TextInput
+                      value={entered}
+                      onChangeText={(value) => setMaterialQuantities((current) => ({ ...current, [material.id]: value }))}
+                      editable={!submittingMaterials}
+                      keyboardType="decimal-pad"
+                      placeholder="Quantity consumed"
+                      placeholderTextColor={theme.textMuted}
+                      className="h-12 rounded-xl border px-4 text-[14px]"
+                      style={{ borderColor: invalid ? '#EF4444' : theme.border, backgroundColor: theme.input, color: theme.text }}
+                    />
+                    {invalid && (
+                      <Text className="mt-1 text-[11px] text-[#EF4444]">Enter a quantity greater than 0 and not above current stock.</Text>
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={submitMaterials}
+              disabled={!materialsAreValid || submittingMaterials}
+              className="mt-3 h-14 items-center justify-center rounded-[16px]"
+              style={{ backgroundColor: materialsAreValid && !submittingMaterials ? PRIMARY : theme.textMuted }}>
+              {submittingMaterials ? <ActivityIndicator color="white" /> : <Text className="text-[16px] font-bold text-white">Submit Materials</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* ── Task Selection Modal ── */}
       <Modal visible={isTaskModalVisible} animationType="slide" transparent>

@@ -44,6 +44,15 @@ function parsePositiveInteger(value) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function normalizeLinkedTaskIds(value) {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.replace(/^\{|\}$/g, '').split(',')
+      : [];
+  return [...new Set(values.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+}
+
 function mapInventoryItem(row) {
   if (!row) return row;
   return {
@@ -56,6 +65,7 @@ function mapInventoryItem(row) {
     critical_stock: parseNumeric(row.critical_stock ?? row.critical_level),
     minimum_stock: parseNumeric(row.minimum_stock ?? row.critical_level),
     price: parseNumeric(row.price),
+    linked_task_ids: normalizeLinkedTaskIds(row.linked_task_ids),
   };
 }
 
@@ -77,6 +87,10 @@ async function ensureInventoryColumns() {
   await pool.query(`
     ALTER TABLE project_inventory_items
       ADD COLUMN IF NOT EXISTS unit VARCHAR(30) DEFAULT 'pcs'
+  `);
+  await pool.query(`
+    ALTER TABLE project_inventory_items
+      ADD COLUMN IF NOT EXISTS linked_task_ids INTEGER[] NOT NULL DEFAULT '{}'
   `);
   await pool.query(`
     ALTER TABLE project_inventory_logs
@@ -268,7 +282,7 @@ router.get('/', async (req, res) => {
     await ensureInventoryColumns();
 
     const result = await pool.query(
-      `SELECT id, project_id, item_name, category, current_stock AS quantity, critical_level, price, unit, created_at, updated_at
+      `SELECT id, project_id, item_name, category, current_stock AS quantity, critical_level, price, unit, linked_task_ids, created_at, updated_at
        FROM project_inventory_items
        WHERE project_id = $1
        ORDER BY created_at DESC`,
@@ -384,6 +398,9 @@ router.post('/:itemId/transaction', async (req, res) => {
 
     const item = itemCheck.rows[0];
     if (await rejectInventoryProjectWork(req, res, item.project_id, inventoryContext)) return;
+    if (['CONSUMPTION', 'SPOILAGE'].includes(actionTypeValue) && numQty > parseNumeric(item.current_stock)) {
+      return res.status(400).json({ success: false, message: 'Quantity cannot exceed current stock.' });
+    }
 
     const logResult = await pool.query(
       `INSERT INTO project_inventory_logs (item_id, action_type, quantity, reference_task_id, notes, created_by, created_at)
@@ -497,11 +514,14 @@ router.post('/', async (req, res) => {
     price,
     unit_price,
     unit,
+    linked_task_ids,
+    linkedTaskIds,
   } = req.body;
   const actorId = req.user.id;
   const parsedProjectId = parsePositiveInteger(projectId ?? project_id);
   const normalizedName = String(itemName ?? item_name ?? name ?? title ?? '').trim();
   const normalizedCategory = String(category || '').trim();
+  const normalizedLinkedTaskIds = normalizeLinkedTaskIds(linked_task_ids ?? linkedTaskIds);
 
   if (!parsedProjectId) {
     return res.status(400).json({ success: false, message: 'Please select a project before adding an inventory item.' });
@@ -551,9 +571,9 @@ router.post('/', async (req, res) => {
     await ensureInventoryColumns();
 
     const result = await pool.query(
-      `INSERT INTO project_inventory_items (project_id, item_name, category, current_stock, critical_level, price, unit, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *, current_stock AS quantity`,
-      [parsedProjectId, normalizedName, normalizedCategory, numQty, numCrit, numPrice, unit || 'pcs', actorId]
+      `INSERT INTO project_inventory_items (project_id, item_name, category, current_stock, critical_level, price, unit, linked_task_ids, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) RETURNING *, current_stock AS quantity`,
+      [parsedProjectId, normalizedName, normalizedCategory, numQty, numCrit, numPrice, unit || 'pcs', normalizedLinkedTaskIds, actorId]
     );
     const item = mapInventoryItem(result.rows[0]);
 
