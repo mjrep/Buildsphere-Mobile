@@ -51,10 +51,12 @@ function validateSiteUpdateSchedule(schedule, workDate) {
 
   if (!schedule?.milestone_id) {
     return {
-      valid: false,
-      status: 422,
+      valid: true,
+      status: 200,
       code: 'TASK_MILESTONE_REQUIRED',
       message: 'The selected task is not linked to a milestone schedule.',
+      warning: true,
+      work_date: normalizedWorkDate,
     };
   }
 
@@ -62,19 +64,23 @@ function validateSiteUpdateSchedule(schedule, workDate) {
   const milestoneEndDate = normalizeDateOnly(schedule.milestone_end_date);
   if (!milestoneStartDate || !milestoneEndDate || milestoneStartDate > milestoneEndDate) {
     return {
-      valid: false,
-      status: 422,
+      valid: true,
+      status: 200,
       code: 'MILESTONE_SCHEDULE_INCOMPLETE',
-      message: 'The selected milestone does not have a complete schedule. A site update cannot be submitted until its dates are configured.',
+      message: 'The selected milestone does not have a complete schedule.',
+      warning: true,
+      work_date: normalizedWorkDate,
     };
   }
 
   if (!isDateWithinInclusiveRange(normalizedWorkDate, milestoneStartDate, milestoneEndDate)) {
     return {
-      valid: false,
-      status: 422,
+      valid: true,
+      status: 200,
       code: 'SITE_UPDATE_OUTSIDE_MILESTONE_DATES',
       message: 'Selected work date is outside the milestone schedule.',
+      warning: true,
+      work_date: normalizedWorkDate,
       allowed_start_date: milestoneStartDate,
       allowed_end_date: milestoneEndDate,
     };
@@ -85,19 +91,23 @@ function validateSiteUpdateSchedule(schedule, workDate) {
   const hasAnyPhaseDate = Boolean(schedule.phase_start_date || schedule.phase_end_date);
   if (hasAnyPhaseDate && (!phaseStartDate || !phaseEndDate || phaseStartDate > phaseEndDate)) {
     return {
-      valid: false,
-      status: 422,
+      valid: true,
+      status: 200,
       code: 'PHASE_SCHEDULE_INCOMPLETE',
-      message: 'The approved phase does not have a complete schedule. A site update cannot be submitted until its dates are configured.',
+      message: 'The approved phase does not have a complete schedule.',
+      warning: true,
+      work_date: normalizedWorkDate,
     };
   }
 
   if (phaseStartDate && phaseEndDate && !isDateWithinInclusiveRange(normalizedWorkDate, phaseStartDate, phaseEndDate)) {
     return {
-      valid: false,
-      status: 422,
+      valid: true,
+      status: 200,
       code: 'SITE_UPDATE_OUTSIDE_PHASE_DATES',
       message: 'Selected work date is outside the approved phase schedule.',
+      warning: true,
+      work_date: normalizedWorkDate,
       allowed_start_date: phaseStartDate,
       allowed_end_date: phaseEndDate,
     };

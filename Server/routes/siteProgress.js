@@ -223,20 +223,6 @@ router.post('/validate-schedule', requireSiteProgressRole, async (req, res) => {
     if (Number(schedule.project_id) !== parsedProjectId) {
       return res.status(400).json({ success: false, message: 'Selected task does not belong to the selected project.' });
     }
-    if (
-      schedule.milestone_id &&
-      (
-        Number(schedule.milestone_project_id) !== parsedProjectId ||
-        Number(schedule.phase_project_id) !== parsedProjectId ||
-        Number(schedule.task_phase_id) !== Number(schedule.milestone_phase_id)
-      )
-    ) {
-      return res.status(422).json({
-        success: false,
-        code: 'TASK_SCHEDULE_RELATIONSHIP_INVALID',
-        message: 'The selected task is not linked to a valid milestone and phase schedule.',
-      });
-    }
     if (!canUserUploadForTask(schedule, parsedUserId)) {
       return res.status(403).json({ success: false, message: 'You do not have permission to upload progress for this task.' });
     }
@@ -290,20 +276,6 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     }
     if (Number(taskMilestone.project_id) !== parsedProjectId) {
       return res.status(400).json({ success: false, message: 'Selected task does not belong to the selected project.' });
-    }
-    if (
-      taskMilestone.milestone_id &&
-      (
-        Number(taskMilestone.milestone_project_id) !== parsedProjectId ||
-        Number(taskMilestone.phase_project_id) !== parsedProjectId ||
-        Number(taskMilestone.task_phase_id) !== Number(taskMilestone.milestone_phase_id)
-      )
-    ) {
-      return res.status(422).json({
-        success: false,
-        code: 'TASK_SCHEDULE_RELATIONSHIP_INVALID',
-        message: 'The selected task is not linked to a valid milestone and phase schedule.',
-      });
     }
     if (!canUserUploadForTask(taskMilestone, parsedUserId)) {
       return res.status(403).json({ success: false, message: 'You do not have permission to upload progress for this task.' });

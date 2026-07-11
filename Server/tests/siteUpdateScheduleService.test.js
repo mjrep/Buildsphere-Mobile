@@ -27,21 +27,32 @@ test('normalization uses the calendar portion and rejects invalid dates', () => 
   assert.equal(normalizeDateOnly('2026-02-30'), null);
 });
 
-test('rejects a task without a milestone', () => {
-  assert.equal(validateSiteUpdateSchedule({}, '2026-07-05').code, 'TASK_MILESTONE_REQUIRED');
+test('warns but allows a task without a milestone', () => {
+  const result = validateSiteUpdateSchedule({}, '2026-07-05');
+  assert.equal(result.valid, true);
+  assert.equal(result.warning, true);
+  assert.equal(result.code, 'TASK_MILESTONE_REQUIRED');
 });
 
-test('rejects missing milestone start or end dates', () => {
-  assert.equal(validateSiteUpdateSchedule({ milestone_id: 1, milestone_end_date: '2026-07-10' }, '2026-07-05').code, 'MILESTONE_SCHEDULE_INCOMPLETE');
-  assert.equal(validateSiteUpdateSchedule({ milestone_id: 1, milestone_start_date: '2026-07-01' }, '2026-07-05').code, 'MILESTONE_SCHEDULE_INCOMPLETE');
+test('warns but allows missing milestone start or end dates', () => {
+  const missingStart = validateSiteUpdateSchedule({ milestone_id: 1, milestone_end_date: '2026-07-10' }, '2026-07-05');
+  const missingEnd = validateSiteUpdateSchedule({ milestone_id: 1, milestone_start_date: '2026-07-01' }, '2026-07-05');
+  assert.equal(missingStart.valid, true);
+  assert.equal(missingStart.warning, true);
+  assert.equal(missingStart.code, 'MILESTONE_SCHEDULE_INCOMPLETE');
+  assert.equal(missingEnd.valid, true);
+  assert.equal(missingEnd.warning, true);
+  assert.equal(missingEnd.code, 'MILESTONE_SCHEDULE_INCOMPLETE');
 });
 
-test('rejects a date inside the milestone but outside its phase', () => {
+test('warns but allows a date inside the milestone but outside its phase', () => {
   const result = validateSiteUpdateSchedule({
     ...completeSchedule,
     phase_start_date: '2026-07-06',
     phase_end_date: '2026-07-31',
   }, '2026-07-05');
+  assert.equal(result.valid, true);
+  assert.equal(result.warning, true);
   assert.equal(result.code, 'SITE_UPDATE_OUTSIDE_PHASE_DATES');
 });
 

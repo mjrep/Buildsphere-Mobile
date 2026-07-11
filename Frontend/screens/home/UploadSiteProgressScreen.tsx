@@ -42,7 +42,6 @@ import {
   clampDateToAllowedRange,
   getAllowedSiteUpdateDateRange,
   SiteUpdateTaskSchedule,
-  validateSiteUpdateSchedule,
 } from '../../utils/siteUpdateSchedule';
 
 interface Props {
@@ -196,10 +195,8 @@ export default function UploadSiteProgressScreen({
     allowedDateRange && allowedDateRange.selectableStart <= allowedDateRange.selectableEnd
       ? allowedDateRange
       : null;
-  const scheduleValidation = selectedTask
-    ? validateSiteUpdateSchedule(selectedTask, toDateOnlyString(workDate))
-    : { valid: false, message: 'Please select a task.' };
-  const scheduleReady = scheduleValidation.valid;
+  // Schedule enforcement is temporarily relaxed so site updates can be QA'd while project schedules are being backfilled.
+  const scheduleReady = Boolean(selectedTask);
   const hasSelectedProject = projectId !== null && projectId !== undefined;
   const isProjectActive =
     !hasSelectedProject ||
@@ -337,24 +334,9 @@ export default function UploadSiteProgressScreen({
       : formatDateOnlyDisplay(value);
   };
 
-  const scheduleMessage = (() => {
-    if (
-      scheduleValidation.code === 'SITE_UPDATE_OUTSIDE_MILESTONE_DATES' &&
-      scheduleValidation.allowedStartDate &&
-      scheduleValidation.allowedEndDate
-    ) {
-      return `Selected work date is outside the milestone schedule. Please choose a date from ${readableScheduleDate(scheduleValidation.allowedStartDate)} to ${readableScheduleDate(scheduleValidation.allowedEndDate)}.`;
-    }
-    return scheduleValidation.message;
-  })();
-
   const requireValidSchedule = () => {
     if (!selectedTask) {
       Alert.alert('Missing info', 'Please select a task.');
-      return false;
-    }
-    if (!scheduleReady) {
-      Alert.alert('Schedule required', scheduleMessage || 'Please select a valid work date.');
       return false;
     }
     return true;
@@ -362,13 +344,7 @@ export default function UploadSiteProgressScreen({
 
   const renderScheduleHelper = () => {
     if (!selectedTask) return null;
-    if (!allowedDateRange) {
-      return (
-        <Text className="-mt-2 mb-4 text-[11px] leading-4" style={{ color: theme.danger }}>
-          {scheduleMessage}
-        </Text>
-      );
-    }
+    if (!allowedDateRange) return null;
 
     return (
       <View className="-mt-2 mb-4 rounded-lg px-3 py-2" style={{ backgroundColor: theme.surface }}>
@@ -378,11 +354,6 @@ export default function UploadSiteProgressScreen({
         <Text className="text-[11px] leading-4" style={{ color: theme.textSecondary }}>
           Allowed update dates: {readableScheduleDate(allowedDateRange.milestoneStart)} – {readableScheduleDate(allowedDateRange.milestoneEnd)}
         </Text>
-        {!scheduleReady && (
-          <Text className="mt-1 text-[11px] leading-4" style={{ color: theme.danger }}>
-            {scheduleMessage}
-          </Text>
-        )}
       </View>
     );
   };
