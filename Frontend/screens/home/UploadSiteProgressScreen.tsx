@@ -113,6 +113,7 @@ const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
 
 const PRIMARY = '#7370FF';
 const AI_IMAGE_PICKER_QUALITY = 0.75;
+const SITE_PROGRESS_SUBMIT_TIMEOUT_MS = 25000;
 const AUTH_REQUIRED_PATTERN = /authentication is required/i;
 
 const cleanSubmitErrorMessage = (message?: string | null) => {
@@ -793,6 +794,8 @@ export default function UploadSiteProgressScreen({
       return;
     }
     setSaving(true);
+    const submitController = new AbortController();
+    const submitTimeout = setTimeout(() => submitController.abort(), SITE_PROGRESS_SUBMIT_TIMEOUT_MS);
     try {
       const formData = new FormData();
       const verifiedCount = Number(panelCountInput);
@@ -836,6 +839,7 @@ export default function UploadSiteProgressScreen({
       const response = await apiFetch(`${API_URL}/site-progress`, {
         method: 'POST',
         body: formData,
+        signal: submitController.signal,
         headers: {
           'Accept': 'application/json',
         },
@@ -859,6 +863,7 @@ export default function UploadSiteProgressScreen({
       console.error('SAVE_ERROR:', error);
       setSubmitError(getServerConnectionErrorMessage(error));
     } finally {
+      clearTimeout(submitTimeout);
       setSaving(false);
     }
   };
