@@ -113,7 +113,8 @@ const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
 
 const PRIMARY = '#7370FF';
 const AI_IMAGE_PICKER_QUALITY = 0.75;
-const SITE_PROGRESS_SUBMIT_TIMEOUT_MS = 12000;
+const SITE_PROGRESS_SUBMIT_TIMEOUT_MS = 60000;
+const SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE = 'Upload is taking too long. Please check your connection and try again.';
 const AUTH_REQUIRED_PATTERN = /authentication is required/i;
 
 const cleanSubmitErrorMessage = (message?: string | null) => {
@@ -234,7 +235,7 @@ export default function UploadSiteProgressScreen({
 
     const timeout = setTimeout(() => {
       setSaving(false);
-      setSubmitError('Upload is taking too long. Please try again.');
+      setSubmitError(SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE);
     }, SITE_PROGRESS_SUBMIT_TIMEOUT_MS + 5000);
 
     return () => clearTimeout(timeout);
@@ -865,7 +866,7 @@ export default function UploadSiteProgressScreen({
           },
         }),
         SITE_PROGRESS_SUBMIT_TIMEOUT_MS,
-        'Upload is taking too long. Please try again.'
+        SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE
       );
 
       if (!response.ok) {
@@ -883,8 +884,11 @@ export default function UploadSiteProgressScreen({
         setStep(4);
       }
     } catch (error) {
-      console.error('SAVE_ERROR:', error);
-      setSubmitError(getServerConnectionErrorMessage(error));
+      const message = error instanceof Error ? error.message : '';
+      if (message !== SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE) {
+        console.error('SAVE_ERROR:', error);
+      }
+      setSubmitError(message || getServerConnectionErrorMessage(error));
     } finally {
       clearTimeout(submitTimeout);
       setSaving(false);
