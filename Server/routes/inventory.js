@@ -449,6 +449,8 @@ router.post('/:itemId/transaction', async (req, res) => {
     }
     if (['CONSUMPTION', 'SPOILAGE'].includes(actionTypeValue) && numQty > parseNumeric(item.current_stock)) {
       await client.query('ROLLBACK');
+      client.release();
+      client = null;
       return res.status(422).json({ success: false, code: 'INSUFFICIENT_STOCK', message: `Only ${parseNumeric(item.current_stock)} ${item.unit || 'pcs'} currently available.` });
     }
 
@@ -467,10 +469,14 @@ router.post('/:itemId/transaction', async (req, res) => {
       const task = taskResult.rows[0];
       if (!task || Number(task.project_id) !== Number(item.project_id)) {
         await client.query('ROLLBACK');
+        client.release();
+        client = null;
         return res.status(422).json({ success: false, code: 'TASK_PROJECT_MISMATCH', message: 'The selected task does not belong to this inventory project.' });
       }
       if (!normalizeLinkedTaskIds(item.linked_task_ids).includes(Number(task.id))) {
         await client.query('ROLLBACK');
+        client.release();
+        client = null;
         return res.status(422).json({ success: false, code: 'MATERIAL_NOT_LINKED_TO_TASK', message: 'This material is not linked to the selected task.' });
       }
     }
