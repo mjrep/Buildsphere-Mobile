@@ -70,7 +70,7 @@ function requireProjectRole(allowedRoles, message) {
 }
 
 function canViewAllProjects(req) {
-  return PROJECT_VIEW_ALL_ROLES.has(userRole(req));
+  return PROJECT_VIEW_ALL_ROLES.has(userRole(req)) || req.user?.authOnly;
 }
 
 function ongoingProjectWhereClause(alias = 'p') {
@@ -221,6 +221,20 @@ async function fetchBasicProjects(req) {
   }
 }
 
+async function fetchVisibleProjectsFallback(req) {
+  const role = userRole(req);
+  const shouldFilterOngoing = role === 'procurement';
+  const statusWhere = shouldFilterOngoing ? `WHERE ${ongoingProjectWhereClause('p')}` : '';
+
+  try {
+    const result = await pool.query(`SELECT p.* FROM projects p ${statusWhere} ORDER BY p.created_at DESC`);
+    return result.rows;
+  } catch (error) {
+    const result = await pool.query(`SELECT p.* FROM projects p ${statusWhere} ORDER BY p.id DESC`);
+    return result.rows;
+  }
+}
+
 function mapProjectForMobile(row, progress = row.progress) {
   const progressPercentage = normalizeProgressValue(row.progress_percentage ?? progress);
   return {
@@ -256,7 +270,12 @@ router.get('/', authenticateRequest, async (req, res) => {
       rows = result.rows;
     } catch (progressError) {
       console.warn('PROJECT_PROGRESS_QUERY_FAILED:', progressError.message);
-      rows = await fetchBasicProjects(req);
+      try {
+        rows = await fetchBasicProjects(req);
+      } catch (basicError) {
+        console.warn('PROJECT_BASIC_QUERY_FAILED:', basicError.message);
+        rows = await fetchVisibleProjectsFallback(req);
+      }
     }
 
     const mapped = rows.map((row) => mapProjectForMobile(row, row.progress_percentage));
