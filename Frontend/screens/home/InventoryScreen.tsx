@@ -63,6 +63,8 @@ interface InventoryLog {
 
 interface Props {
   projectId: number;
+  projectName?: string | null;
+  projectLocation?: string | null;
   projectStatus?: string | null;
   onBack: () => void;
   userRole?: UserRole;
@@ -149,6 +151,8 @@ const INVENTORY_NO_ACCESS_MESSAGE = 'You do not have permission to access Invent
 
 export default function InventoryScreen({
   projectId,
+  projectName,
+  projectLocation,
   projectStatus,
   onBack,
   userRole,
@@ -280,6 +284,9 @@ export default function InventoryScreen({
   };
 
   const safeProjectTasks = Array.isArray(projectTasks) ? projectTasks : [];
+  const displayProjectName = projectName || 'Current Project';
+  const displayProjectLocation = projectLocation || 'No location set';
+  const displayActorName = 'Current user';
 
   // Fetch tasks for CONSUMPTION task-linking
   const fetchTasks = async () => {
@@ -1039,21 +1046,21 @@ export default function InventoryScreen({
                               <Ionicons name="business-outline" size={14} color={theme.primary} />
                               <Text className="ml-2 flex-1 text-[12px]" style={{ color: theme.textSecondary }}>
                                 <Text className="font-semibold" style={{ color: theme.text }}>Project: </Text>
-                                {log.project_name || 'N/A'}
+                                {log.project_name || displayProjectName}
                               </Text>
                             </View>
                             <View className="flex-row items-center">
                               <Ionicons name="location-outline" size={14} color={theme.primary} />
                               <Text className="ml-2 flex-1 text-[12px]" style={{ color: theme.textSecondary }}>
                                 <Text className="font-semibold" style={{ color: theme.text }}>Location: </Text>
-                                {log.location || 'N/A'}
+                                {log.location || displayProjectLocation}
                               </Text>
                             </View>
                             <View className="flex-row items-center">
                               <Ionicons name="person-outline" size={14} color={theme.primary} />
                               <Text className="ml-2 text-[12px]" style={{ color: theme.textSecondary }}>
                                 <Text className="font-semibold" style={{ color: theme.text }}>By: </Text>
-                                {log.actor_name || 'Unknown'}
+                                {log.actor_name || displayActorName}
                               </Text>
                             </View>
                           </View>

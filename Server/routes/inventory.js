@@ -370,10 +370,10 @@ router.get('/logs', async (req, res) => {
         i.category,
         i.unit,
         p.id AS project_id,
-        p.project_name,
-        p.address AS location,
+        COALESCE(p.project_name, p.name) AS project_name,
+        COALESCE(p.address, p.location) AS location,
         u.id AS actor_user_id,
-        TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS actor_name,
+        COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.email) AS actor_name,
         t.title AS task_title
       FROM project_inventory_logs l
       JOIN project_inventory_items i ON i.id = l.item_id

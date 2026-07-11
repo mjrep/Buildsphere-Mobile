@@ -274,6 +274,8 @@ export default function HomeScreen({
   const [showInventoryProjectPicker, setShowInventoryProjectPicker] = useState(false);
   const [inventoryProjectId, setInventoryProjectId] = useState<number | null>(null);
   const [inventoryProjectStatus, setInventoryProjectStatus] = useState<string | null>(null);
+  const [inventoryProjectName, setInventoryProjectName] = useState<string | null>(null);
+  const [inventoryProjectLocation, setInventoryProjectLocation] = useState<string | null>(null);
   const [highlightInventoryItemId, setHighlightInventoryItemId] = useState<number | null>(null);
   const fabAnim = useRef(new Animated.Value(0)).current;
   const [selectedTask, setSelectedTask] = useState<any>(null);
@@ -325,6 +327,8 @@ export default function HomeScreen({
     setShowInventoryProjectPicker(false);
     setInventoryProjectId(null);
     setInventoryProjectStatus(null);
+    setInventoryProjectName(null);
+    setInventoryProjectLocation(null);
     setHighlightInventoryItemId(null);
   };
 
@@ -344,6 +348,8 @@ export default function HomeScreen({
     const project = projects.find((item) => Number(item.id) === Number(projectId));
     setInventoryProjectId(projectId);
     setInventoryProjectStatus(project?.status || null);
+    setInventoryProjectName(project?.name || project?.project_name || project?.projectName || null);
+    setInventoryProjectLocation(project?.location || null);
     setHighlightInventoryItemId(inventoryItemId ?? null);
     setShowInventory(true);
     return true;
@@ -945,6 +951,8 @@ export default function HomeScreen({
                       onPress={() => {
                         setInventoryProjectId(project.id);
                         setInventoryProjectStatus(project.status || null);
+                        setInventoryProjectName(project.name || project.project_name || project.projectName || null);
+                        setInventoryProjectLocation(project.location || null);
                         setHighlightInventoryItemId(null);
                         setShowInventoryProjectPicker(false);
                         setShowInventory(true);
@@ -1012,10 +1020,14 @@ export default function HomeScreen({
         <Modal visible={showInventory} animationType="slide" transparent={false}>
           <InventoryScreen
             projectId={inventoryProjectId}
+            projectName={inventoryProjectName}
+            projectLocation={inventoryProjectLocation}
             projectStatus={inventoryProjectStatus}
             onBack={() => {
               setShowInventory(false);
               setInventoryProjectStatus(null);
+              setInventoryProjectName(null);
+              setInventoryProjectLocation(null);
               setHighlightInventoryItemId(null);
             }}
             userRole={user.role}
