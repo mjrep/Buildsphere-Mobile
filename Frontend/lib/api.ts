@@ -301,19 +301,42 @@ async function trySupabaseGetFallback(input: string, method: string) {
 }
 
 export async function getSupabaseAccessToken() {
-  // Supabase session is preferred; AsyncStorage token remains as a fallback for older sessions.
+  // Supabase session is preferred for most calls; AsyncStorage token remains as a fallback for older sessions.
   const { data } = await supabase.auth.getSession();
   if (data.session?.access_token) return data.session.access_token;
   return AsyncStorage.getItem('token');
 }
 
-export async function apiFetch(input: string, init: RequestInit = {}) {
-  const token = await getSupabaseAccessToken();
-  const headers = new Headers(init.headers || {});
+async function getAuthTokenCandidates() {
+  const tokens: string[] = [];
 
-  if (token && !headers.has('Authorization')) {
-    // Mobile uses the backend as the source of truth, so protected calls carry auth.
+  const { data } = await supabase.auth.getSession();
+  const supabaseToken = data.session?.access_token || '';
+  const storedToken = (await AsyncStorage.getItem('token')) || '';
+
+  if (supabaseToken) tokens.push(supabaseToken);
+  if (storedToken && storedToken !== supabaseToken) tokens.push(storedToken);
+
+  return tokens;
+}
+
+function setBearerToken(headers: Headers, token?: string) {
+  if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  } else {
+    headers.delete('Authorization');
+  }
+}
+
+export async function apiFetch(input: string, init: RequestInit = {}) {
+  const baseHeaders = new Headers(init.headers || {});
+  const explicitAuthorization = baseHeaders.has('Authorization');
+  const tokenCandidates = explicitAuthorization ? [] : await getAuthTokenCandidates();
+  const headers = new Headers(baseHeaders);
+
+  if (!explicitAuthorization) {
+    // Mobile uses the backend as the source of truth, so protected calls carry auth.
+    setBearerToken(headers, tokenCandidates[0]);
   }
 
   const method = init.method || 'GET';
@@ -323,7 +346,7 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
 
   for (const requestUrl of candidateUrls) {
     try {
-      const response = await fetch(requestUrl, {
+      let response = await fetch(requestUrl, {
         ...init,
         headers,
       });
@@ -334,6 +357,28 @@ export async function apiFetch(input: string, init: RequestInit = {}) {
         status: response.status,
         authenticated: headers.has('Authorization'),
       });
+
+      if (response.status === 401 && !explicitAuthorization && tokenCandidates.length > 1) {
+        for (const retryToken of tokenCandidates.slice(1)) {
+          const retryHeaders = new Headers(baseHeaders);
+          setBearerToken(retryHeaders, retryToken);
+
+          const retryResponse = await fetch(requestUrl, {
+            ...init,
+            headers: retryHeaders,
+          });
+
+          qaDebug('API request auth retry', {
+            method,
+            endpoint,
+            status: retryResponse.status,
+            authenticated: retryHeaders.has('Authorization'),
+          });
+
+          if (retryResponse.status !== 401) return retryResponse;
+          response = retryResponse;
+        }
+      }
 
       if (!response.ok) {
         const fallback = await trySupabaseGetFallback(input, method);
