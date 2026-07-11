@@ -4,7 +4,7 @@
  * Handles site progress uploads. Users can run the Gemini AI count flow or skip
  * AI validation and submit a manual upload with the same project/date/shift/photo data.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -113,7 +113,7 @@ const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
 
 const PRIMARY = '#7370FF';
 const AI_IMAGE_PICKER_QUALITY = 0.75;
-const SITE_PROGRESS_SUBMIT_TIMEOUT_MS = 25000;
+const SITE_PROGRESS_SUBMIT_TIMEOUT_MS = 12000;
 const AUTH_REQUIRED_PATTERN = /authentication is required/i;
 
 const cleanSubmitErrorMessage = (message?: string | null) => {
@@ -123,6 +123,14 @@ const cleanSubmitErrorMessage = (message?: string | null) => {
 
   return message;
 };
+
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, message: string) =>
+  Promise.race<T>([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
 
 // Step 1: Upload details
 // Step 2: AI or manual selection (still shown as Upload in the stepper)
@@ -220,6 +228,17 @@ export default function UploadSiteProgressScreen({
     selectedProject?.status === undefined ||
     selectedProject?.status === null ||
     isActiveProjectStatus(selectedProject.status);
+
+  useEffect(() => {
+    if (!saving) return undefined;
+
+    const timeout = setTimeout(() => {
+      setSaving(false);
+      setSubmitError('Upload is taking too long. Please try again.');
+    }, SITE_PROGRESS_SUBMIT_TIMEOUT_MS + 5000);
+
+    return () => clearTimeout(timeout);
+  }, [saving]);
 
   const showInactiveProjectMessage = () => {
     Alert.alert('Project not active', INACTIVE_PROJECT_SITE_UPLOAD_MESSAGE);
@@ -836,14 +855,18 @@ export default function UploadSiteProgressScreen({
         });
       }
 
-      const response = await apiFetch(`${API_URL}/site-progress`, {
-        method: 'POST',
-        body: formData,
-        signal: submitController.signal,
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
+      const response = await withTimeout(
+        apiFetch(`${API_URL}/site-progress`, {
+          method: 'POST',
+          body: formData,
+          signal: submitController.signal,
+          headers: {
+            'Accept': 'application/json',
+          },
+        }),
+        SITE_PROGRESS_SUBMIT_TIMEOUT_MS,
+        'Upload is taking too long. Please try again.'
+      );
 
       if (!response.ok) {
         const d = await response.json().catch(() => null);
