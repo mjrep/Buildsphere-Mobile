@@ -204,7 +204,10 @@ const fetchJsonArray = async (url: string, label: string) => {
   }
 
   const data = text ? JSON.parse(text) : [];
-  return Array.isArray(data) ? data : [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.projects)) return data.projects;
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
 };
 
 
