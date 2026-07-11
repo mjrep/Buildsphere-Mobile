@@ -1581,13 +1581,6 @@ export default function UploadSiteProgressScreen({
                   paddingBottom: finalizeFooterBottomPadding,
                 },
               ]}>
-              {submitError ? (
-                <View className="mb-3 rounded-xl border px-3 py-2" style={{ borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }}>
-                  <Text className="text-[12px] font-semibold leading-5 text-[#B91C1C]">
-                    {submitError}
-                  </Text>
-                </View>
-              ) : null}
               <TouchableOpacity
                 onPress={handleSave}
                 disabled={saving || !isProjectActive || !scheduleReady || !panelCountIsValid}
