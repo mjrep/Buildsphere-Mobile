@@ -423,24 +423,59 @@ router.post('/:itemId/transaction', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Quantity must be a positive number.' });
   }
 
+  let client;
   try {
     await ensureInventoryColumns();
+    client = await pool.connect();
+    await client.query('BEGIN');
 
-    const itemCheck = await pool.query(
-      'SELECT id, item_name, project_id, current_stock, critical_level FROM project_inventory_items WHERE id = $1',
+    const itemCheck = await client.query(
+      'SELECT id, item_name, project_id, current_stock, critical_level, unit, linked_task_ids FROM project_inventory_items WHERE id = $1 FOR UPDATE',
       [parsedItemId]
     );
     if (itemCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      client.release();
+      client = null;
       return res.status(404).json({ success: false, message: 'Inventory item not found.' });
     }
 
     const item = itemCheck.rows[0];
-    if (await rejectInventoryProjectWork(req, res, item.project_id, inventoryContext)) return;
+    if (await rejectInventoryProjectWork(req, res, item.project_id, inventoryContext)) {
+      await client.query('ROLLBACK');
+      client.release();
+      client = null;
+      return;
+    }
     if (['CONSUMPTION', 'SPOILAGE'].includes(actionTypeValue) && numQty > parseNumeric(item.current_stock)) {
-      return res.status(400).json({ success: false, message: 'Quantity cannot exceed current stock.' });
+      await client.query('ROLLBACK');
+      return res.status(422).json({ success: false, code: 'INSUFFICIENT_STOCK', message: `Only ${parseNumeric(item.current_stock)} ${item.unit || 'pcs'} currently available.` });
     }
 
-    const logResult = await pool.query(
+    if (actionTypeValue === 'CONSUMPTION' && !parsePositiveInteger(taskId)) {
+      await client.query('ROLLBACK');
+      client.release();
+      client = null;
+      return res.status(422).json({ success: false, code: 'TASK_REQUIRED', message: 'A task is required for material consumption.' });
+    }
+
+    if (actionTypeValue === 'CONSUMPTION' && taskId) {
+      const taskResult = await client.query(
+        'SELECT id, project_id FROM tasks WHERE id = $1 AND deleted_at IS NULL',
+        [parsePositiveInteger(taskId)]
+      );
+      const task = taskResult.rows[0];
+      if (!task || Number(task.project_id) !== Number(item.project_id)) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({ success: false, code: 'TASK_PROJECT_MISMATCH', message: 'The selected task does not belong to this inventory project.' });
+      }
+      if (!normalizeLinkedTaskIds(item.linked_task_ids).includes(Number(task.id))) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({ success: false, code: 'MATERIAL_NOT_LINKED_TO_TASK', message: 'This material is not linked to the selected task.' });
+      }
+    }
+
+    const logResult = await client.query(
       `INSERT INTO project_inventory_logs (item_id, action_type, quantity, reference_task_id, notes, created_by, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING *`,
@@ -448,7 +483,7 @@ router.post('/:itemId/transaction', async (req, res) => {
     );
 
     const stockDelta = ['RECEIVING', 'ADJUSTMENT'].includes(actionTypeValue) ? numQty : -numQty;
-    let updatedItem = await pool.query(
+    let updatedItem = await client.query(
       'SELECT id, item_name, current_stock, current_stock AS quantity, critical_level, unit FROM project_inventory_items WHERE id = $1',
       [parsedItemId]
     );
@@ -456,7 +491,7 @@ router.post('/:itemId/transaction', async (req, res) => {
     const currentStock = parseNumeric(updatedItem.rows[0]?.current_stock);
 
     if (currentStock === previousStock) {
-      updatedItem = await pool.query(
+      updatedItem = await client.query(
         `UPDATE project_inventory_items
          SET current_stock = current_stock + $1,
              updated_at = NOW()
@@ -467,6 +502,11 @@ router.post('/:itemId/transaction', async (req, res) => {
     }
 
     const refreshedItem = mapInventoryItem(updatedItem.rows[0]);
+    const stockBefore = parseNumeric(item.current_stock);
+    const stockAfter = parseNumeric(refreshedItem?.current_stock ?? refreshedItem?.quantity);
+    await client.query('COMMIT');
+    client.release();
+    client = null;
     await logInventoryActivitySafe({
       projectId: item.project_id,
       userId: actorId,
@@ -522,11 +562,20 @@ router.post('/:itemId/transaction', async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Inventory log saved successfully.',
-      transaction: mapInventoryLog(logResult.rows[0]),
+      message: 'Material usage recorded successfully.',
+      transaction: {
+        ...mapInventoryLog(logResult.rows[0]),
+        type: actionTypeValue,
+        stock_before: stockBefore,
+        stock_after: stockAfter,
+      },
       item: refreshedItem,
     });
   } catch (err) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
     console.error('Transaction error:', err);
     res.status(500).json({ success: false, message: 'Failed to process inventory transaction.' });
   }

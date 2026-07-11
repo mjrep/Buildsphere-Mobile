@@ -87,9 +87,7 @@ function parseInventoryNumber(value: number | string | null | undefined) {
 }
 
 function inventoryNumberInput(value: string) {
-  const sanitized = value.replace(/[^0-9.]/g, '');
-  const [whole, ...decimalParts] = sanitized.split('.');
-  return decimalParts.length > 0 ? `${whole}.${decimalParts.join('')}` : whole;
+  return value.replace(/\D/g, '');
 }
 
 function displayInventoryNumber(value: number | string | null | undefined, fallback = '0') {
@@ -535,13 +533,14 @@ export default function InventoryScreen({
         }),
       });
       if (!res.ok) {
-        await res.json().catch(() => ({}));
-        await completeTransactionFlow();
-        return;
+        throw new Error(await readErrorMessage(res, 'Material usage could not be recorded. Please try again.'));
       }
+      const result = await res.json().catch(() => null);
+      if (result?.success === false) throw new Error(result.message || 'Material usage could not be recorded. Please try again.');
       await completeTransactionFlow();
     } catch (err: any) {
-      await completeTransactionFlow();
+      console.warn('INVENTORY_CONSUMPTION_ERROR:', err?.message || err);
+      Alert.alert('Could not record usage', err?.message || 'Material usage could not be recorded. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -553,6 +552,8 @@ export default function InventoryScreen({
     if (!txnItem) return;
     const qty = parseInventoryNumber(txnQty);
     if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
+    if (txnItem.unit === 'pcs' && !Number.isInteger(qty)) return Alert.alert('Invalid quantity', 'Pieces must be entered as a whole number.');
+    if (qty > (parseInventoryNumber(txnItem.quantity) ?? 0)) return Alert.alert('Insufficient stock', 'Quantity cannot exceed current stock.');
     if (txnAction === 'CONSUMPTION' && !txnTaskId) {
       return Alert.alert('Task Required', 'You must select a task for material consumption.');
     }
@@ -618,13 +619,14 @@ export default function InventoryScreen({
         }),
       });
       if (!res.ok) {
-        await res.json().catch(() => ({}));
-        await completeAddLogFlow();
-        return;
+        throw new Error(await readErrorMessage(res, 'Material usage could not be recorded. Please try again.'));
       }
+      const result = await res.json().catch(() => null);
+      if (result?.success === false) throw new Error(result.message || 'Material usage could not be recorded. Please try again.');
       await completeAddLogFlow();
     } catch (err: any) {
-      await completeAddLogFlow();
+      console.warn('INVENTORY_LOG_ERROR:', err?.message || err);
+      Alert.alert('Could not record usage', err?.message || 'Material usage could not be recorded. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -637,6 +639,9 @@ export default function InventoryScreen({
     }
     const qty = parseInventoryNumber(logQty);
     if (!qty || qty <= 0) return Alert.alert('Required', 'Quantity must be greater than 0.');
+    const selectedLogItem = items.find((item) => String(item.id) === String(logItemId));
+    if (selectedLogItem?.unit === 'pcs' && !Number.isInteger(qty)) return Alert.alert('Invalid quantity', 'Pieces must be entered as a whole number.');
+    if (selectedLogItem && qty > (parseInventoryNumber(selectedLogItem.quantity) ?? 0)) return Alert.alert('Insufficient stock', 'Quantity cannot exceed current stock.');
     if (logActionType === 'CONSUMPTION' && !logTaskId) {
       return Alert.alert('Task Required', 'You must select a task for material consumption.');
     }
