@@ -44,6 +44,7 @@ import {
   clampDateToAllowedRange,
   getAllowedSiteUpdateDateRange,
   SiteUpdateTaskSchedule,
+  validateSiteUpdateSchedule,
 } from '../../utils/siteUpdateSchedule';
 
 interface Props {
@@ -258,8 +259,7 @@ export default function UploadSiteProgressScreen({
     allowedDateRange && allowedDateRange.selectableStart <= allowedDateRange.selectableEnd
       ? allowedDateRange
       : null;
-  // Schedule enforcement is temporarily relaxed so site updates can be QA'd while project schedules are being backfilled.
-  const scheduleReady = Boolean(selectedTask);
+  const scheduleReady = Boolean(selectedTask && allowedDateRange);
   // The visible stepper represents the three major workflow stages only.
   const visibleStep: SiteUpdateStep = materialsSheetVisible ? 3 : step === 4 ? 3 : step === 1 || step === 2 ? 1 : 2;
   const stepperCompleted = step === 4;
@@ -418,6 +418,11 @@ export default function UploadSiteProgressScreen({
       Alert.alert('Missing info', 'Please select a task.');
       return false;
     }
+    const validation = validateSiteUpdateSchedule(selectedTask, toDateOnlyString(workDate));
+    if (!validation.valid) {
+      Alert.alert('Schedule required', validation.message || 'The selected work date is outside the approved schedule.');
+      return false;
+    }
     return true;
   };
 
@@ -431,7 +436,7 @@ export default function UploadSiteProgressScreen({
           Milestone: {selectedTask.milestone || 'Unnamed milestone'} · Phase: {selectedTask.milestone_phase_name || 'Unnamed phase'}
         </Text>
         <Text className="text-[11px] leading-4" style={{ color: theme.textSecondary }}>
-          Allowed update dates: {readableScheduleDate(allowedDateRange.milestoneStart)} – {readableScheduleDate(allowedDateRange.milestoneEnd)}
+          Allowed update dates: {readableScheduleDate(allowedDateRange.selectableStart)} – {readableScheduleDate(allowedDateRange.selectableEnd)}
         </Text>
       </View>
     );
@@ -914,8 +919,8 @@ export default function UploadSiteProgressScreen({
       );
 
       if (!response.ok) {
-        await response.json().catch(() => null);
-        completeSiteUpdateFlow();
+        const body = await response.json().catch(() => null);
+        Alert.alert('Could not submit', cleanSubmitErrorMessage(body?.message || body?.error));
         return;
       }
 
@@ -925,7 +930,7 @@ export default function UploadSiteProgressScreen({
       if (message !== SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE) {
         console.error('SAVE_ERROR:', error);
       }
-      completeSiteUpdateFlow();
+      Alert.alert('Could not submit', cleanSubmitErrorMessage(message));
     } finally {
       clearTimeout(submitTimeout);
       setSaving(false);

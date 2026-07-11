@@ -51,11 +51,10 @@ function validateSiteUpdateSchedule(schedule, workDate) {
 
   if (!schedule?.milestone_id) {
     return {
-      valid: true,
-      status: 200,
+      valid: false,
+      status: 422,
       code: 'TASK_MILESTONE_REQUIRED',
       message: 'The selected task is not linked to a milestone schedule.',
-      warning: true,
       work_date: normalizedWorkDate,
     };
   }
@@ -64,60 +63,59 @@ function validateSiteUpdateSchedule(schedule, workDate) {
   const milestoneEndDate = normalizeDateOnly(schedule.milestone_end_date);
   if (!milestoneStartDate || !milestoneEndDate || milestoneStartDate > milestoneEndDate) {
     return {
-      valid: true,
-      status: 200,
+      valid: false,
+      status: 422,
       code: 'MILESTONE_SCHEDULE_INCOMPLETE',
       message: 'The selected milestone does not have a complete schedule.',
-      warning: true,
       work_date: normalizedWorkDate,
-    };
-  }
-
-  if (!isDateWithinInclusiveRange(normalizedWorkDate, milestoneStartDate, milestoneEndDate)) {
-    return {
-      valid: true,
-      status: 200,
-      code: 'SITE_UPDATE_OUTSIDE_MILESTONE_DATES',
-      message: 'Selected work date is outside the milestone schedule.',
-      warning: true,
-      work_date: normalizedWorkDate,
-      allowed_start_date: milestoneStartDate,
-      allowed_end_date: milestoneEndDate,
     };
   }
 
   const phaseStartDate = normalizeDateOnly(schedule.phase_start_date);
   const phaseEndDate = normalizeDateOnly(schedule.phase_end_date);
   const hasAnyPhaseDate = Boolean(schedule.phase_start_date || schedule.phase_end_date);
-  if (hasAnyPhaseDate && (!phaseStartDate || !phaseEndDate || phaseStartDate > phaseEndDate)) {
+  if (!hasAnyPhaseDate || !phaseStartDate || !phaseEndDate || phaseStartDate > phaseEndDate) {
     return {
-      valid: true,
-      status: 200,
+      valid: false,
+      status: 422,
       code: 'PHASE_SCHEDULE_INCOMPLETE',
-      message: 'The approved phase does not have a complete schedule.',
-      warning: true,
+      message: 'The related phase does not have a complete schedule.',
       work_date: normalizedWorkDate,
     };
   }
 
-  if (phaseStartDate && phaseEndDate && !isDateWithinInclusiveRange(normalizedWorkDate, phaseStartDate, phaseEndDate)) {
+  const effectiveStartDate = milestoneStartDate > phaseStartDate ? milestoneStartDate : phaseStartDate;
+  const effectiveEndDate = milestoneEndDate < phaseEndDate ? milestoneEndDate : phaseEndDate;
+  if (effectiveStartDate > effectiveEndDate) {
     return {
-      valid: true,
-      status: 200,
-      code: 'SITE_UPDATE_OUTSIDE_PHASE_DATES',
-      message: 'Selected work date is outside the approved phase schedule.',
-      warning: true,
+      valid: false,
+      status: 422,
+      code: 'SITE_UPDATE_SCHEDULE_INVALID',
+      message: 'The milestone and phase schedules do not overlap.',
       work_date: normalizedWorkDate,
-      allowed_start_date: phaseStartDate,
-      allowed_end_date: phaseEndDate,
+      allowed_start_date: effectiveStartDate,
+      allowed_end_date: effectiveEndDate,
+    };
+  }
+
+  // Inclusive validation allows updates exactly on the effective schedule boundaries.
+  if (!isDateWithinInclusiveRange(normalizedWorkDate, effectiveStartDate, effectiveEndDate)) {
+    return {
+      valid: false,
+      status: 422,
+      code: 'SITE_UPDATE_OUTSIDE_SCHEDULE',
+      message: 'Selected work date is outside the approved milestone and phase schedule.',
+      work_date: normalizedWorkDate,
+      allowed_start_date: effectiveStartDate,
+      allowed_end_date: effectiveEndDate,
     };
   }
 
   return {
     valid: true,
     work_date: normalizedWorkDate,
-    allowed_start_date: milestoneStartDate,
-    allowed_end_date: milestoneEndDate,
+    allowed_start_date: effectiveStartDate,
+    allowed_end_date: effectiveEndDate,
   };
 }
 

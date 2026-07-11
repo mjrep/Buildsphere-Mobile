@@ -48,12 +48,13 @@ export function getAllowedSiteUpdateDateRange(task?: SiteUpdateTaskSchedule | nu
 
   const phaseStart = isValidDateOnly(task.phase_start_date);
   const phaseEnd = isValidDateOnly(task.phase_end_date);
+  if (!phaseStart || !phaseEnd || phaseStart > phaseEnd) return null;
   return {
     milestoneStart,
     milestoneEnd,
     // Picker bounds use the intersection so every selectable date satisfies both schedules.
-    selectableStart: phaseStart && phaseEnd && phaseStart <= phaseEnd && phaseStart > milestoneStart ? phaseStart : milestoneStart,
-    selectableEnd: phaseStart && phaseEnd && phaseStart <= phaseEnd && phaseEnd < milestoneEnd ? phaseEnd : milestoneEnd,
+    selectableStart: milestoneStart > phaseStart ? milestoneStart : phaseStart,
+    selectableEnd: milestoneEnd < phaseEnd ? milestoneEnd : phaseEnd,
   };
 }
 
@@ -91,37 +92,29 @@ export function validateSiteUpdateSchedule(
     };
   }
 
-  if (!isDateWithinInclusiveRange(workDate, milestoneStart, milestoneEnd)) {
-    return {
-      valid: false,
-      code: 'SITE_UPDATE_OUTSIDE_MILESTONE_DATES',
-      message: 'Selected work date is outside the milestone schedule.',
-      allowedStartDate: milestoneStart,
-      allowedEndDate: milestoneEnd,
-    };
-  }
-
   const phaseStart = isValidDateOnly(task.phase_start_date);
   const phaseEnd = isValidDateOnly(task.phase_end_date);
-  if ((task.phase_start_date || task.phase_end_date) && (!phaseStart || !phaseEnd || phaseStart > phaseEnd)) {
+  if (!phaseStart || !phaseEnd || phaseStart > phaseEnd) {
     return {
       valid: false,
       code: 'PHASE_SCHEDULE_INCOMPLETE',
-      message: 'The approved phase does not have a complete schedule. A site update cannot be submitted until its dates are configured.',
+      message: 'The related phase does not have a complete schedule. Please update the project schedule before submitting a Site Update.',
     };
   }
 
-  if (phaseStart && phaseEnd && !isDateWithinInclusiveRange(workDate, phaseStart, phaseEnd)) {
+  const effectiveStartDate = milestoneStart > phaseStart ? milestoneStart : phaseStart;
+  const effectiveEndDate = milestoneEnd < phaseEnd ? milestoneEnd : phaseEnd;
+  if (!isDateWithinInclusiveRange(workDate, effectiveStartDate, effectiveEndDate)) {
     return {
       valid: false,
-      code: 'SITE_UPDATE_OUTSIDE_PHASE_DATES',
-      message: 'Selected work date is outside the approved phase schedule.',
-      allowedStartDate: phaseStart,
-      allowedEndDate: phaseEnd,
+      code: 'SITE_UPDATE_OUTSIDE_SCHEDULE',
+      message: `Selected work date is outside the approved schedule. Please choose a date from ${effectiveStartDate} to ${effectiveEndDate}.`,
+      allowedStartDate: effectiveStartDate,
+      allowedEndDate: effectiveEndDate,
     };
   }
 
-  return { valid: true, allowedStartDate: milestoneStart, allowedEndDate: milestoneEnd };
+  return { valid: true, allowedStartDate: effectiveStartDate, allowedEndDate: effectiveEndDate };
 }
 
 export function clampDateToAllowedRange(date: Date, startDate: string, endDate: string) {
