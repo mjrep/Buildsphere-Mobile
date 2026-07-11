@@ -162,6 +162,7 @@ export default function UploadSiteProgressScreen({
   const [quantityInstalled, setQuantityInstalled] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [recordSaved, setRecordSaved] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -785,6 +786,7 @@ export default function UploadSiteProgressScreen({
       }
       return;
     }
+    setSubmitError(null);
     const validSelectedPhotos = selectedPhotos.filter(photo => Boolean(photo.uri?.trim()));
     if (validSelectedPhotos.length === 0) {
       Alert.alert('Invalid photo', 'Please select a valid photo before uploading.');
@@ -841,11 +843,12 @@ export default function UploadSiteProgressScreen({
 
       if (!response.ok) {
         const d = await response.json().catch(() => null);
-        Alert.alert('Could not submit', cleanSubmitErrorMessage(d?.message || d?.error || 'Failed to save record.'));
+        setSubmitError(cleanSubmitErrorMessage(d?.message || d?.error || 'Failed to save record.'));
         return;
       }
 
       setHasUnsavedChanges(false);
+      setSubmitError(null);
       setRecordSaved(true);
       if (linkedMaterials.length > 0) {
         setMaterialsSheetVisible(true);
@@ -854,7 +857,7 @@ export default function UploadSiteProgressScreen({
       }
     } catch (error) {
       console.error('SAVE_ERROR:', error);
-      Alert.alert('Connection Error', getServerConnectionErrorMessage(error));
+      setSubmitError(getServerConnectionErrorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -1514,6 +1517,13 @@ export default function UploadSiteProgressScreen({
                   paddingBottom: finalizeFooterBottomPadding,
                 },
               ]}>
+              {submitError ? (
+                <View className="mb-3 rounded-xl border px-3 py-2" style={{ borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }}>
+                  <Text className="text-[12px] font-semibold leading-5 text-[#B91C1C]">
+                    {submitError}
+                  </Text>
+                </View>
+              ) : null}
               <TouchableOpacity
                 onPress={handleSave}
                 disabled={saving || !isProjectActive || !scheduleReady || !panelCountIsValid}
