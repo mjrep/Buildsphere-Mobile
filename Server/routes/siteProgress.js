@@ -575,7 +575,7 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
         created_at, updated_at, duplicate_check_status, duplicate_match_site_progress_id,
         duplicate_check_reason, duplicate_checked_at, duplicate_user_override,
         duplicate_override_reason, duplicate_override_by, duplicate_review_status
-      ) VALUES ($1, $2, $3::bigint, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), $15, $16, $17, CASE WHEN $15 IS NULL THEN NULL ELSE NOW() END, $18, $19, CASE WHEN $18 THEN $3::bigint ELSE NULL END, CASE WHEN $18 THEN 'PENDING_REVIEW' ELSE 'NOT_REQUIRED' END)
+      ) VALUES ($1::bigint, $2::bigint, $3::bigint, $4::integer, $5::text, $6::jsonb, $7::text, $8::text, $9::date, $10::integer, $11::integer, $12::real, $13::text, $14::jsonb, NOW(), NOW(), $15::text, $16::bigint, $17::text, CASE WHEN $15::text IS NULL THEN NULL ELSE NOW() END, $18::boolean, $19::text, CASE WHEN $18::boolean THEN $3::bigint ELSE NULL END, CASE WHEN $18::boolean THEN 'PENDING_REVIEW' ELSE 'NOT_REQUIRED' END)
       RETURNING *`,
       [
         parsedTaskId,
