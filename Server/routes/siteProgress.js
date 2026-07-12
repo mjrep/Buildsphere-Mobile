@@ -782,6 +782,8 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       success: false,
       code: 'SITE_PROGRESS_SAVE_FAILED',
       message: 'Failed to save task progress.',
+      db_error: err.message,
+      db_stack: err.stack
     });
   }
 });
