@@ -266,7 +266,7 @@ function firstFiniteInteger(...values) {
 }
 
 function duplicatePhotoCheckEnabled() {
-  return String(process.env.AI_DUPLICATE_PHOTO_CHECK_ENABLED || '').toLowerCase() === 'true';
+  return String(process.env.AI_DUPLICATE_PHOTO_CHECK_ENABLED || '').trim().toLowerCase() === 'true';
 }
 
 function shouldBypassScheduleValidation(validation) {
@@ -281,24 +281,80 @@ function shouldBypassScheduleValidation(validation) {
 
 async function getDuplicateCandidates(projectId, taskId, milestoneId, phaseId) {
   const result = await pool.query(
-    `SELECT l.id, COALESCE(NULLIF(l.image_urls->>0, ''), NULLIF(l.evidence_image_path, '')) AS image_url,
+    `SELECT l.id, image_candidate.image_url,
             l.task_id, l.milestone_id, t.phase_id, l.work_date, l.created_at,
             t.title AS task_name, pm.milestone_name
        FROM task_progress_logs l
        JOIN tasks t ON t.id = l.task_id
        LEFT JOIN project_milestones pm ON pm.id = l.milestone_id
+       CROSS JOIN LATERAL (
+         SELECT value AS image_url
+           FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(l.image_urls) = 'array' THEN l.image_urls ELSE '[]'::jsonb END)
+         UNION ALL
+         SELECT value
+           FROM unnest(string_to_array(COALESCE(l.evidence_image_path, ''), ',')) AS legacy(value)
+       ) AS image_candidate
       WHERE t.project_id = $1
-        AND COALESCE(NULLIF(l.image_urls->>0, ''), NULLIF(l.evidence_image_path, '')) IS NOT NULL
+        AND l.task_id = $2
+        AND NULLIF(TRIM(image_candidate.image_url), '') IS NOT NULL
       ORDER BY
-        CASE WHEN l.task_id = $2 AND l.milestone_id = $3 THEN 1
-             WHEN l.task_id = $2 THEN 2
-             WHEN l.milestone_id = $3 THEN 3
-             WHEN t.phase_id = $4 THEN 4 ELSE 5 END,
+        CASE WHEN l.milestone_id = $3 THEN 1 ELSE 2 END,
         l.created_at DESC
-      LIMIT 3`,
+      LIMIT 50`,
     [projectId, taskId, milestoneId || null, phaseId || null]
   );
   return result.rows.filter((candidate) => /^https?:\/\//i.test(candidate.image_url || ''));
+}
+
+function buildDuplicatePhotoResponse({ code, message, duplicateCheck, projectId, taskId }) {
+  const matchedUpload = duplicateCheck?.matched_upload || {};
+  const matchedUploadId = duplicateCheck?.matchedUploadId || duplicateCheck?.matched_upload_id || matchedUpload.id || null;
+  const matchedPhotoUrl = duplicateCheck?.matchedPhotoUrl || duplicateCheck?.matched_photo_url || matchedUpload.image_url || null;
+  const submittedPhotoIndex = Number.isInteger(Number(duplicateCheck?.submittedPhotoIndex ?? duplicateCheck?.submitted_photo_index))
+    ? Number(duplicateCheck.submittedPhotoIndex ?? duplicateCheck.submitted_photo_index)
+    : 0;
+  const status = duplicateCheck?.status || (code === 'DUPLICATE_PHOTO_DETECTED' ? 'DUPLICATE' : 'POSSIBLE_DUPLICATE');
+
+  const duplicatePayload = {
+    ...duplicateCheck,
+    status,
+    confidence: duplicateCheck?.confidence ?? (status === 'DUPLICATE' ? 1 : null),
+    reason: duplicateCheck?.reason || message,
+    submittedPhotoIndex,
+    submitted_photo_index: submittedPhotoIndex,
+    matchedUploadId,
+    matched_upload_id: matchedUploadId,
+    matchedPhotoUrl,
+    matched_photo_url: matchedPhotoUrl,
+    matchedUploadedAt: duplicateCheck?.matchedUploadedAt || matchedUpload.created_at || matchedUpload.work_date || null,
+    matchedTaskId: duplicateCheck?.matchedTaskId || duplicateCheck?.matched_task_id || taskId,
+    matchedProjectId: duplicateCheck?.matchedProjectId || duplicateCheck?.matched_project_id || projectId,
+    matched_upload: {
+      ...matchedUpload,
+      id: matchedUploadId,
+      image_url: matchedPhotoUrl,
+    },
+  };
+
+  console.log('[POST /site-progress] Response:', {
+    statusCode: 409,
+    code,
+    message,
+    duplicateCheck: {
+      status: duplicatePayload.status,
+      submittedPhotoIndex: duplicatePayload.submittedPhotoIndex,
+      matchedUploadId: duplicatePayload.matchedUploadId,
+      matchedPhotoUrl: duplicatePayload.matchedPhotoUrl,
+    },
+  });
+
+  return {
+    success: false,
+    code,
+    message,
+    duplicateCheck: duplicatePayload,
+    duplicate_check: duplicatePayload,
+  };
 }
 
 router.use(attachMobileSessionUser);
@@ -411,6 +467,45 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       });
     }
 
+    const duplicateCheckEnabled = duplicatePhotoCheckEnabled();
+    console.log('[Duplicate Check] Starting:', { enabled: duplicateCheckEnabled, projectId: parsedProjectId, taskId: parsedTaskId, submittedPhotoCount: uploadedImageFiles.length });
+    let duplicateCheck = null;
+    if (duplicateCheckEnabled && uploadedImageFiles.length > 0) {
+      const candidates = await getDuplicateCandidates(parsedProjectId, parsedTaskId, taskMilestone.milestone_id, taskMilestone.task_phase_id || taskMilestone.milestone_phase_id);
+      console.log('[Duplicate Check] Candidates:', { projectId: parsedProjectId, taskId: parsedTaskId, count: candidates.length });
+      const checks = [];
+      for (const [submittedPhotoIndex, file] of uploadedImageFiles.entries()) {
+        const check = await compareSiteUpdatePhotos({ newImage: { buffer: file.buffer, mimeType: file.mimetype }, candidates });
+        checks.push({ ...check, submitted_photo_index: submittedPhotoIndex });
+      }
+      duplicateCheck = checks.find((check) => check.status === 'DUPLICATE') || checks.find((check) => check.status === 'POSSIBLE_DUPLICATE') || checks[0];
+      if (duplicateCheck?.matched_upload_id) {
+        const matched = candidates.find((candidate) => Number(candidate.id) === Number(duplicateCheck.matched_upload_id));
+        if (matched) duplicateCheck.matched_upload = { id: matched.id, image_url: matched.image_url, work_date: matched.work_date, created_at: matched.created_at, task_name: matched.task_name, milestone_name: matched.milestone_name };
+      }
+      console.log('[Duplicate Check] Decision:', { status: duplicateCheck?.status, submittedPhotoIndex: duplicateCheck?.submitted_photo_index, matchedUploadId: duplicateCheck?.matched_upload_id });
+      if (duplicateCheck?.status === 'DUPLICATE') {
+        return res.status(409).json(buildDuplicatePhotoResponse({
+          code: 'DUPLICATE_PHOTO_DETECTED',
+          message: 'This photo was already uploaded for this task.',
+          duplicateCheck,
+          projectId: parsedProjectId,
+          taskId: parsedTaskId,
+        }));
+      }
+      if (duplicateCheck?.status === 'POSSIBLE_DUPLICATE' && !String(duplicate_override_reason || '').trim()) {
+        return res.status(409).json(buildDuplicatePhotoResponse({
+          code: 'POSSIBLE_DUPLICATE_PHOTO',
+          message: 'This photo may be similar to a previous Site Update photo.',
+          duplicateCheck,
+          projectId: parsedProjectId,
+          taskId: parsedTaskId,
+        }));
+      }
+    } else {
+      console.log('[Duplicate Check] Skipped:', { reason: !duplicateCheckEnabled ? 'Feature disabled' : 'No submitted photos' });
+    }
+
     if (uploadedImageFiles.length > 0 && supabaseStorage) {
       for (const file of uploadedImageFiles) {
         const filename = `progress_${Date.now()}_${Math.floor(Math.random() * 1000)}${path.extname(file.originalname)}`;
@@ -462,42 +557,6 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     const evidenceImagePath = allPhotoUrls.length > 1 ? allPhotoUrls.join(',') : finalPhotoPath;
     const perPhotoCounts = parseJsonBodyField(per_photo_counts, null);
 
-    let duplicateCheck = null;
-    if (duplicatePhotoCheckEnabled() && uploadedImageFiles.length > 0) {
-      // NOTE: Duplicate-photo comparison is limited to previous uploads from the same project.
-      const candidates = await getDuplicateCandidates(parsedProjectId, parsedTaskId, taskMilestone.milestone_id, taskMilestone.task_phase_id || taskMilestone.milestone_phase_id);
-      const checks = [];
-      for (const file of uploadedImageFiles) {
-        checks.push(await compareSiteUpdatePhotos({
-          newImage: { buffer: file.buffer, mimeType: file.mimetype },
-          candidates,
-        }));
-      }
-      duplicateCheck = checks.find((check) => check.status === 'DUPLICATE')
-        || checks.find((check) => check.status === 'POSSIBLE_DUPLICATE')
-        || checks.find((check) => check.status === 'UNABLE_TO_VERIFY')
-        || checks[0];
-      if (duplicateCheck?.matched_upload_id) {
-        const matched = candidates.find((candidate) => Number(candidate.id) === Number(duplicateCheck.matched_upload_id));
-        if (matched) {
-          duplicateCheck.matched_upload = {
-            id: matched.id,
-            image_url: matched.image_url,
-            work_date: matched.work_date,
-            created_at: matched.created_at,
-            task_name: matched.task_name,
-            milestone_name: matched.milestone_name,
-          };
-        }
-      }
-      if (duplicateCheck?.status === 'DUPLICATE') {
-        return res.status(409).json({ success: false, code: 'DUPLICATE_PHOTO_DETECTED', duplicate_check: duplicateCheck });
-      }
-      if (duplicateCheck?.status === 'POSSIBLE_DUPLICATE' && !String(duplicate_override_reason || '').trim()) {
-        return res.status(409).json({ success: false, code: 'POSSIBLE_DUPLICATE_PHOTO', duplicate_check: duplicateCheck });
-      }
-    }
-
     const milestoneId = taskMilestone.milestone_id || null;
     const savedQuantity = firstFiniteInteger(verified_panel_count, quantityInstalled, glassCount);
 
@@ -545,12 +604,16 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     progress.images = progressImageUrls;
 
     if (milestoneId && hasQuantityTracking(taskMilestone)) {
-      const syncedProgress = await syncTaskQuantityStatus(pool, parsedTaskId);
+      try {
+        const syncedProgress = await syncTaskQuantityStatus(pool, parsedTaskId);
 
-      if (syncedProgress) {
-        progress.current_quantity = syncedProgress.current_quantity;
-        progress.target_quantity = syncedProgress.target_quantity;
-        progress.task_status = syncedProgress.task_status;
+        if (syncedProgress) {
+          progress.current_quantity = syncedProgress.current_quantity;
+          progress.target_quantity = syncedProgress.target_quantity;
+          progress.task_status = syncedProgress.task_status;
+        }
+      } catch (syncError) {
+        console.warn('SITE_PROGRESS_QUANTITY_SYNC_FAILED:', syncError.message || syncError);
       }
     }
 
@@ -605,6 +668,12 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
       });
     }
 
+    console.log('[POST /site-progress] Response:', {
+      statusCode: 200,
+      code: 'SITE_PROGRESS_CREATED',
+      message: 'Site progress saved.',
+      siteProgressId: progress.id,
+    });
     res.json(progress);
 
     const notifTitle = 'Task Progress Recorded';
@@ -698,7 +767,14 @@ router.post('/', requireSiteProgressRole, handleSiteProgressUpload, async (req, 
     });
   } catch (err) {
     console.error('SERVER_SAVE_ERROR:', err);
+    console.log('[POST /site-progress] Response:', {
+      statusCode: 500,
+      code: 'SITE_PROGRESS_SAVE_FAILED',
+      message: err.message || 'Failed to save task progress.',
+    });
     res.status(500).json({ 
+      success: false,
+      code: 'SITE_PROGRESS_SAVE_FAILED',
       message: 'Failed to save task progress.',
     });
   }

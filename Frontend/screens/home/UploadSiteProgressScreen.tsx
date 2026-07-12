@@ -89,7 +89,14 @@ interface LinkedMaterial {
 interface DuplicateCheckResponse {
   status: 'DUPLICATE' | 'POSSIBLE_DUPLICATE' | 'UNABLE_TO_VERIFY';
   reason?: string;
+  confidence?: number | null;
+  submitted_photo_index?: number;
+  submittedPhotoIndex?: number;
   matched_upload_id?: number | null;
+  matchedUploadId?: number | null;
+  matchedPhotoUrl?: string | null;
+  matched_photo_url?: string | null;
+  previousPhotoUrl?: string | null;
   matched_upload?: { image_url?: string; work_date?: string; task_name?: string; milestone_name?: string };
 }
 
@@ -145,6 +152,55 @@ const cleanSubmitErrorMessage = (message?: string | null) => {
   }
 
   return message;
+};
+
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+
+  try {
+    return JSON.stringify(
+      value,
+      (_key, currentValue) => {
+        if (currentValue instanceof Error) {
+          return {
+            name: currentValue.name,
+            message: currentValue.message,
+            stack: currentValue.stack,
+          };
+        }
+
+        if (typeof currentValue === 'object' && currentValue !== null) {
+          if (seen.has(currentValue)) return '[Circular]';
+          seen.add(currentValue);
+        }
+
+        return currentValue;
+      },
+      2
+    );
+  } catch {
+    return String(value);
+  }
+}
+
+const parseResponseBody = async (response: Response) => {
+  const responseText = await response.text();
+  const contentType = response.headers.get('content-type') || '';
+  const isJson = contentType.toLowerCase().includes('application/json');
+
+  try {
+    return {
+      responseText,
+      isJson,
+      data: responseText ? JSON.parse(responseText) : {},
+    };
+  } catch {
+    return {
+      responseText,
+      isJson,
+      data: responseText ? { message: responseText } : {},
+    };
+  }
 };
 
 const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, message: string) =>
@@ -519,11 +575,19 @@ export default function UploadSiteProgressScreen({
         // Inventory stock changes only through the approved consumption transaction.
         const response = await apiFetch(`${API_URL}/inventory/${material.id}/transaction`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-BuildSphere-Mobile-User-Id': String(user.id),
+            'X-BuildSphere-Mobile-User-Email': String(user.email || ''),
+            'X-BuildSphere-Mobile-User-Role': String(user.role || ''),
+          },
           body: JSON.stringify({
             action_type: 'CONSUMPTION',
             quantity: consumedQuantity,
             reference_task_id: taskId,
+            userId: user.id,
+            userEmail: user.email,
+            userRole: user.role,
             notes: 'Consumed during site progress update.',
           }),
         });
@@ -545,7 +609,7 @@ export default function UploadSiteProgressScreen({
           return remaining;
         });
       }
-      Alert.alert('Materials not submitted', error?.message || getServerConnectionErrorMessage(error));
+      Alert.alert('Materials not submitted', cleanSubmitErrorMessage(error?.message || getServerConnectionErrorMessage(error)));
     } finally {
       setSubmittingMaterials(false);
     }
@@ -866,6 +930,8 @@ export default function UploadSiteProgressScreen({
     const completeSiteUpdateFlow = () => {
       setHasUnsavedChanges(false);
       setSubmitError(null);
+      setDuplicateCheck(null);
+      setDuplicateOverrideReason('');
       setRecordSaved(true);
       // Inventory Consumption is completed on a dedicated page after the Site Update is accepted.
       setMaterialsSheetVisible(false);
@@ -914,10 +980,8 @@ export default function UploadSiteProgressScreen({
       });
     }
 
-    completeSiteUpdateFlow();
     setDuplicateCheck(null);
-    setDuplicateOverrideReason('');
-    setSaving(false);
+    setSaving(true);
 
     const submitController = new AbortController();
     const submitTimeout = setTimeout(() => submitController.abort(), SITE_PROGRESS_SUBMIT_TIMEOUT_MS);
@@ -936,22 +1000,128 @@ export default function UploadSiteProgressScreen({
           SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE
         );
 
-        if (!response.ok) {
-          const body = await response.json().catch(() => null);
-          if (body?.code === 'DUPLICATE_PHOTO_DETECTED' || body?.code === 'POSSIBLE_DUPLICATE_PHOTO') {
+        const { data: responseData, responseText, isJson } = await parseResponseBody(response);
+        console.log(`[Site Update] Backend response:\n${safeStringify({
+          url: `${API_URL}/site-progress`,
+          status: response.status,
+          ok: response.ok,
+          isJson,
+          code: responseData?.code || null,
+          message: responseData?.message || responseData?.error || null,
+          duplicateCheck: responseData?.duplicateCheck || responseData?.duplicate_check || null,
+          data: responseData,
+          responseText: isJson ? undefined : responseText,
+        })}`);
+
+        if (response.status === 409) {
+          const duplicateCode =
+            responseData?.code === 'DUPLICATE_PHOTO_DETECTED' ||
+            responseData?.code === 'POSSIBLE_DUPLICATE_PHOTO';
+
+          if (duplicateCode) {
+            const duplicatePayload = responseData?.duplicateCheck || responseData?.duplicate_check || responseData?.data || {};
+            const submittedPhotoIndex = Number(
+              duplicatePayload.submittedPhotoIndex ??
+              duplicatePayload.submitted_photo_index ??
+              0
+            );
+            const safePhotoIndex = Number.isInteger(submittedPhotoIndex) && submittedPhotoIndex >= 0 ? submittedPhotoIndex : 0;
+            const matchedPhotoUrl =
+              duplicatePayload.matchedPhotoUrl ||
+              duplicatePayload.previousPhotoUrl ||
+              duplicatePayload.matched_photo_url ||
+              duplicatePayload.matched_upload?.image_url ||
+              null;
+
+            console.log(`[Site Update] Duplicate review opened:\n${safeStringify({
+              code: responseData.code,
+              status: duplicatePayload.status,
+              submittedPhotoIndex: safePhotoIndex,
+              matchedUploadId: duplicatePayload.matchedUploadId || duplicatePayload.matched_upload_id || null,
+              matchedPhotoUrl,
+              reason: duplicatePayload.reason || responseData.message || null,
+            })}`);
+
             // Duplicate review stays under the Panel Count stage and does not add another step circle.
-            setDuplicateCheck(body.duplicate_check || { status: body.code === 'DUPLICATE_PHOTO_DETECTED' ? 'DUPLICATE' : 'POSSIBLE_DUPLICATE' });
+            setDuplicateCheck({
+              ...duplicatePayload,
+              status: duplicatePayload.status || (responseData.code === 'DUPLICATE_PHOTO_DETECTED' ? 'DUPLICATE' : 'POSSIBLE_DUPLICATE'),
+              reason: duplicatePayload.reason || responseData.message || 'A duplicate photo was detected.',
+              confidence: duplicatePayload.confidence ?? null,
+              submitted_photo_index: safePhotoIndex,
+              matched_upload_id: duplicatePayload.matchedUploadId || duplicatePayload.matched_upload_id || null,
+              matched_upload: {
+                ...(duplicatePayload.matched_upload || {}),
+                image_url: matchedPhotoUrl || duplicatePayload.matched_upload?.image_url,
+              },
+            });
+            setCurrentPhotoIndex(safePhotoIndex);
             setStep(4);
             return;
           }
         }
+
+        if (!response.ok) {
+          const serverMessage = responseData?.message || responseData?.error || `Site update failed (${response.status}).`;
+          const error: Error & {
+            status?: number;
+            statusCode?: number;
+            code?: string;
+            data?: unknown;
+            response?: { status: number; data: unknown };
+            responseText?: string;
+          } = new Error(cleanSubmitErrorMessage(serverMessage));
+          error.status = response.status;
+          error.statusCode = response.status;
+          error.code = responseData?.code;
+          error.data = responseData;
+          error.response = {
+            status: response.status,
+            data: responseData,
+          };
+          error.responseText = responseText;
+          console.error(`[Site Update] Backend error response:\n${safeStringify({
+            url: `${API_URL}/site-progress`,
+            status: response.status,
+            code: responseData?.code || null,
+            message: serverMessage,
+            isJson,
+            data: responseData,
+            responseText: isJson ? undefined : responseText,
+          })}`);
+          throw error;
+        }
+        completeSiteUpdateFlow();
       } catch (error) {
-        const message = error instanceof Error ? error.message : '';
+        const siteUpdateError = error as Error & {
+          status?: number;
+          statusCode?: number;
+          code?: string;
+          data?: any;
+          body?: any;
+          response?: { status?: number; data?: any };
+          responseText?: string;
+        };
+        const status = siteUpdateError?.response?.status ?? siteUpdateError?.status ?? siteUpdateError?.statusCode ?? null;
+        const responseData = siteUpdateError?.response?.data ?? siteUpdateError?.data ?? siteUpdateError?.body ?? null;
+        const code = responseData?.code ?? siteUpdateError?.code ?? null;
+        const message = responseData?.message ?? siteUpdateError?.message ?? String(error);
         if (message !== SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE) {
-          console.error('SAVE_ERROR:', error);
+          console.log(`[Site Update] Submit failed:\n${safeStringify({
+            name: siteUpdateError?.name,
+            message,
+            status,
+            code,
+            responseData,
+            responseText: siteUpdateError?.responseText,
+            stack: siteUpdateError?.stack,
+            fullError: siteUpdateError,
+          })}`);
+          setSubmitError(cleanSubmitErrorMessage(responseData?.message || message));
         }
       } finally {
         clearTimeout(submitTimeout);
+        setSaving(false);
       }
     })();
   };
@@ -1681,12 +1851,12 @@ export default function UploadSiteProgressScreen({
                       Alert.alert('Explanation required', 'Please explain what changed in this work area.');
                       return;
                     }
-                    setDuplicateCheck(null);
-                    setStep(5);
+                    handleSave();
                   }}
+                  disabled={saving}
                   className="h-12 items-center justify-center rounded-[14px]"
                   style={{ backgroundColor: PRIMARY }}>
-                  <Text className="font-semibold text-white">Continue with Explanation</Text>
+                  {saving ? <ActivityIndicator color="white" /> : <Text className="font-semibold text-white">Continue with Explanation</Text>}
                 </TouchableOpacity>
               )}
             </View>

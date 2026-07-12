@@ -40,7 +40,7 @@ const authStorage =
   // Server-side/web prerender contexts cannot use AsyncStorage, so use a harmless no-op store there.
   Platform.OS === 'web' && typeof window === 'undefined' ? noopStorage : AsyncStorage;
 
-const originalConsoleError = console.error;
+const originalConsoleError = console.error.bind(console);
 
 function isExpoGoNotificationError(arg: unknown) {
   const str = arg instanceof Error ? arg.message : typeof arg === 'string' ? arg : '';
