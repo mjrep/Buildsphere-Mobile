@@ -120,6 +120,7 @@ async function getDuplicateCandidates(projectId, taskId, milestoneId, phaseId) {
         AND NULLIF(TRIM(image_candidate.image_url), '') IS NOT NULL
       ORDER BY
         CASE WHEN l.milestone_id = $3 THEN 1 ELSE 2 END,
+        CASE WHEN t.phase_id = $4 THEN 1 ELSE 2 END,
         l.created_at DESC
       LIMIT 50`,
     [projectId, taskId, milestoneId || null, phaseId || null]
