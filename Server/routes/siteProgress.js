@@ -105,31 +105,40 @@ function requireSiteProgressRole(req, res, next) {
 
 async function attachMobileSessionUser(req, res, next) {
   const headerId = firstFiniteInteger(req.get('x-buildsphere-mobile-user-id'));
+  const bodyId = firstFiniteInteger(req.body?.userId || req.body?.user_id || req.body?.createdBy || req.body?.created_by || req.body?.updatedBy || req.body?.updated_by);
+  const queryId = firstFiniteInteger(req.query?.userId || req.query?.user_id);
   const headerEmail = String(req.get('x-buildsphere-mobile-user-email') || '').trim().toLowerCase();
+  const bodyEmail = String(req.body?.userEmail || req.body?.user_email || req.body?.email || '').trim().toLowerCase();
+  const queryEmail = String(req.query?.userEmail || req.query?.user_email || req.query?.email || '').trim().toLowerCase();
   const headerRole = String(req.get('x-buildsphere-mobile-user-role') || '').trim().toLowerCase() || 'staff';
+  const bodyRole = String(req.body?.userRole || req.body?.user_role || req.body?.role || '').trim().toLowerCase() || 'staff';
+  const queryRole = String(req.query?.userRole || req.query?.user_role || req.query?.role || '').trim().toLowerCase() || 'staff';
+  const resolvedId = bodyId || headerId || queryId;
+  const resolvedEmail = bodyEmail || headerEmail || queryEmail;
+  const resolvedRole = bodyRole || headerRole || queryRole;
 
   try {
-    if (headerId) {
-      const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [headerId]);
+    if (resolvedId) {
+      const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [resolvedId]);
       if (result.rows[0]) {
         req.user = result.rows[0];
         return next();
       }
     }
 
-    if (headerEmail) {
-      const result = await pool.query('SELECT id, email, role FROM users WHERE LOWER(email) = LOWER($1)', [headerEmail]);
+    if (resolvedEmail) {
+      const result = await pool.query('SELECT id, email, role FROM users WHERE LOWER(email) = LOWER($1)', [resolvedEmail]);
       if (result.rows[0]) {
         req.user = result.rows[0];
         return next();
       }
     }
 
-    if (headerId && headerEmail) {
+    if (resolvedId && resolvedEmail) {
       req.user = {
-        id: headerId,
-        email: headerEmail,
-        role: headerRole,
+        id: resolvedId,
+        email: resolvedEmail,
+        role: resolvedRole,
         mobileSessionFallback: true,
       };
       return next();

@@ -994,6 +994,9 @@ export default function UploadSiteProgressScreen({
             signal: submitController.signal,
             headers: {
               Accept: 'application/json',
+              'X-BuildSphere-Mobile-User-Id': String(user.id),
+              'X-BuildSphere-Mobile-User-Email': String(user.email || ''),
+              'X-BuildSphere-Mobile-User-Role': String(user.role || ''),
             },
           }),
           SITE_PROGRESS_SUBMIT_TIMEOUT_MS,
@@ -1341,14 +1344,16 @@ export default function UploadSiteProgressScreen({
 
             <View className="flex-1 justify-center px-5 py-6">
               <View
-                className="overflow-hidden rounded-[24px] shadow-xl"
+                className="overflow-hidden rounded-[24px] border shadow-xl"
                 style={{
-                  backgroundColor: '#121212',
-                  height: '100%',
+                  backgroundColor: theme.surface,
+                  aspectRatio: 0.84,
+                  maxHeight: Math.min(SCREEN_WIDTH * 1.18, 640),
                   shadowColor: '#000',
                   shadowOpacity: 0.15,
                   shadowRadius: 15,
                   elevation: 5,
+                  borderColor: theme.border,
                 }}
               >
                 <ScrollView
@@ -1375,12 +1380,13 @@ export default function UploadSiteProgressScreen({
                         height: '100%',
                         justifyContent: 'center',
                         alignItems: 'center',
+                        backgroundColor: theme.surface,
                       }}
                     >
                       <Image
                         source={{ uri: photo.uri }}
-                        style={{ width: '100%', height: '100%' }}
-                        resizeMode="contain"
+                        style={{ width: '100%', height: '100%', backgroundColor: theme.surface }}
+                        resizeMode="cover"
                       />
                     </TouchableOpacity>
                   ))}
