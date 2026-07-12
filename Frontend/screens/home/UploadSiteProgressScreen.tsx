@@ -566,53 +566,7 @@ export default function UploadSiteProgressScreen({
 
   const submitMaterials = async () => {
     if (!taskId || !materialsAreValid || submittingMaterials) return;
-    setSubmittingMaterials(true);
-    const submittedIds: number[] = [];
-    try {
-      for (const material of linkedMaterials) {
-        const consumedQuantity = Number(materialQuantities[material.id] || 0);
-        if (!Number.isFinite(consumedQuantity) || consumedQuantity <= 0) continue;
-        // Inventory stock changes only through the approved consumption transaction.
-        const response = await apiFetch(`${API_URL}/inventory/${material.id}/transaction`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-BuildSphere-Mobile-User-Id': String(user.id),
-            'X-BuildSphere-Mobile-User-Email': String(user.email || ''),
-            'X-BuildSphere-Mobile-User-Role': String(user.role || ''),
-          },
-          body: JSON.stringify({
-            action_type: 'CONSUMPTION',
-            quantity: consumedQuantity,
-            reference_task_id: taskId,
-            userId: user.id,
-            userEmail: user.email,
-            userRole: user.role,
-            notes: 'Consumed during site progress update.',
-          }),
-        });
-        if (!response.ok) {
-          const data = await response.json().catch(() => null);
-          throw new Error(data?.message || data?.error || `Failed to record ${material.item_name}.`);
-        }
-        submittedIds.push(material.id);
-      }
-      setMaterialsSheetVisible(false);
-      setMaterialQuantities({});
-      setStep(6);
-    } catch (error: any) {
-      if (submittedIds.length > 0) {
-        setLinkedMaterials((current) => current.filter((material) => !submittedIds.includes(material.id)));
-        setMaterialQuantities((current) => {
-          const remaining = { ...current };
-          submittedIds.forEach((id) => delete remaining[id]);
-          return remaining;
-        });
-      }
-      Alert.alert('Materials not submitted', cleanSubmitErrorMessage(error?.message || getServerConnectionErrorMessage(error)));
-    } finally {
-      setSubmittingMaterials(false);
-    }
+    handleSave();
   };
 
   const pickFromLibrary = async (multiple = true) => {
@@ -778,7 +732,14 @@ export default function UploadSiteProgressScreen({
           const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
 
           try {
-            const result: GeminiAuditResult = await analyzeGlassPanelsWithGemini(currentPhoto.base64 || '', mimeType, currentPhoto.uri);
+            const result: GeminiAuditResult = await analyzeGlassPanelsWithGemini(
+              currentPhoto.base64 || '',
+              mimeType,
+              currentPhoto.uri,
+              projectId || undefined,
+              taskId || undefined,
+              taskMilestone?.milestone_id || undefined
+            );
 
             nextResults.push({
               photoIndex: index,
@@ -927,15 +888,53 @@ export default function UploadSiteProgressScreen({
       return;
     }
 
-    const completeSiteUpdateFlow = () => {
-      setHasUnsavedChanges(false);
-      setSubmitError(null);
-      setDuplicateCheck(null);
-      setDuplicateOverrideReason('');
-      setRecordSaved(true);
-      // Inventory Consumption is completed on a dedicated page after the Site Update is accepted.
-      setMaterialsSheetVisible(false);
-      setStep(5);
+    const completeSiteUpdateFlow = async () => {
+      setSubmittingMaterials(true);
+      const submittedIds: number[] = [];
+      try {
+        for (const material of linkedMaterials) {
+          const consumedQuantity = Number(materialQuantities[material.id] || 0);
+          if (!Number.isFinite(consumedQuantity) || consumedQuantity <= 0) continue;
+          const response = await apiFetch(`${API_URL}/inventory/${material.id}/transaction`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-BuildSphere-Mobile-User-Id': String(user.id),
+              'X-BuildSphere-Mobile-User-Email': String(user.email || ''),
+              'X-BuildSphere-Mobile-User-Role': String(user.role || ''),
+            },
+            body: JSON.stringify({
+              action_type: 'CONSUMPTION',
+              quantity: consumedQuantity,
+              reference_task_id: taskId,
+              userId: user.id,
+              userEmail: user.email,
+              userRole: user.role,
+              notes: 'Consumed during site progress update.',
+            }),
+          });
+          if (!response.ok) {
+            const data = await response.json().catch(() => null);
+            throw new Error(data?.message || data?.error || `Failed to record ${material.item_name}.`);
+          }
+          submittedIds.push(material.id);
+        }
+        setMaterialsSheetVisible(false);
+        setMaterialQuantities({});
+        setHasUnsavedChanges(false);
+        setSubmitError(null);
+        setDuplicateCheck(null);
+        setDuplicateOverrideReason('');
+        setRecordSaved(true);
+        setStep(6);
+      } catch (error: any) {
+        if (submittedIds.length > 0) {
+          setLinkedMaterials((current) => current.filter((material) => !submittedIds.includes(material.id)));
+        }
+        Alert.alert('Materials Error', error.message || 'An error occurred while saving materials.');
+      } finally {
+        setSubmittingMaterials(false);
+      }
     };
 
     const formData = new FormData();
@@ -1742,7 +1741,7 @@ export default function UploadSiteProgressScreen({
             </ScrollView>
 
             <View
-              className="border-t pt-3"
+              className="border-t pt-3 flex-row gap-3"
               style={[
                 formContentStyle,
                 {
@@ -1752,17 +1751,18 @@ export default function UploadSiteProgressScreen({
                 },
               ]}>
               <TouchableOpacity
-                onPress={handleSave}
+                onPress={() => setStep(2)}
+                disabled={saving}
+                className="h-14 flex-1 items-center justify-center rounded-[16px] border"
+                style={{ borderColor: theme.border }}>
+                <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setStep(5)}
                 disabled={saving || !canSubmitSiteUpdate}
-                className="h-14 items-center justify-center rounded-[16px]"
+                className="h-14 flex-1 items-center justify-center rounded-[16px]"
                 style={{ backgroundColor: canSubmitSiteUpdate ? PRIMARY : theme.textMuted }}>
-                {saving ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text className="text-[16px] font-bold text-white">
-                    {uploadMode === 'ai' ? 'Looks Good' : 'Submit Site Update'}
-                  </Text>
-                )}
+                <Text className="text-[16px] font-bold text-white">Continue</Text>
               </TouchableOpacity>
             </View>
           </>

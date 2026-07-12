@@ -1,6 +1,7 @@
 const { getGeminiApiKeys } = require('./geminiClient');
 const { DUPLICATE_PHOTO_SYSTEM_PROMPT } = require('./duplicatePhotoPrompt');
 const crypto = require('crypto');
+const pool = require('../db');
 
 const ALLOWED_STATUSES = new Set([
   'DUPLICATE', 'POSSIBLE_DUPLICATE', 'SAME_AREA_WITH_PROGRESS',
@@ -99,4 +100,31 @@ async function compareSiteUpdatePhotos({ newImage, candidates }) {
   }
 }
 
-module.exports = { compareSiteUpdatePhotos };
+async function getDuplicateCandidates(projectId, taskId, milestoneId, phaseId) {
+  const result = await pool.query(
+    `SELECT l.id, image_candidate.image_url,
+            l.task_id, l.milestone_id, t.phase_id, l.work_date, l.created_at,
+            t.title AS task_name, pm.milestone_name
+       FROM task_progress_logs l
+       JOIN tasks t ON t.id = l.task_id
+       LEFT JOIN project_milestones pm ON pm.id = l.milestone_id
+       CROSS JOIN LATERAL (
+         SELECT value AS image_url
+           FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(l.image_urls) = 'array' THEN l.image_urls ELSE '[]'::jsonb END)
+         UNION ALL
+         SELECT value
+           FROM unnest(string_to_array(COALESCE(l.evidence_image_path, ''), ',')) AS legacy(value)
+       ) AS image_candidate
+      WHERE t.project_id = $1
+        AND l.task_id = $2
+        AND NULLIF(TRIM(image_candidate.image_url), '') IS NOT NULL
+      ORDER BY
+        CASE WHEN l.milestone_id = $3 THEN 1 ELSE 2 END,
+        l.created_at DESC
+      LIMIT 50`,
+    [projectId, taskId, milestoneId || null, phaseId || null]
+  );
+  return result.rows.filter((candidate) => /^https?:\/\//i.test(candidate.image_url || ''));
+}
+
+module.exports = { compareSiteUpdatePhotos, getDuplicateCandidates };

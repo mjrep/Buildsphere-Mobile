@@ -95,7 +95,12 @@ const getGlassAnalysisBaseUrls = () => {
 const isNetworkRequestError = (error: unknown) =>
   error instanceof Error && /network request failed|failed to fetch|networkerror/i.test(error.message);
 
-const createGlassAnalysisFormData = (photoUri: string) => {
+const createGlassAnalysisFormData = (
+  photoUri: string,
+  projectId?: string | number,
+  taskId?: string | number,
+  milestoneId?: string | number
+): FormData => {
   const filename = photoUri.split('/').pop() || 'photo.jpg';
   const ext = (filename.split('.').pop() || 'jpeg').toLowerCase();
   const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
@@ -107,13 +112,20 @@ const createGlassAnalysisFormData = (photoUri: string) => {
     type: mimeType,
   } as any);
 
+  if (projectId != null) formData.append('projectId', String(projectId));
+  if (taskId != null) formData.append('taskId', String(taskId));
+  if (milestoneId != null) formData.append('milestoneId', String(milestoneId));
+
   return formData;
 };
 
 export const countGlassPanels = async (
   _base64Image: string,
   _mimeType: string,
-  photoUri?: string
+  photoUri?: string,
+  projectId?: string | number,
+  taskId?: string | number,
+  milestoneId?: string | number
 ): Promise<BackendGlassAnalysisResponse> => {
   if (!photoUri) {
     throw new Error('Photo URI is required for backend Gemini image analysis.');
@@ -134,7 +146,7 @@ export const countGlassPanels = async (
           headers: {
             Accept: 'application/json',
           },
-          body: createGlassAnalysisFormData(photoUri),
+          body: createGlassAnalysisFormData(photoUri, projectId, taskId, milestoneId),
           signal: controller.signal,
         });
 
@@ -173,10 +185,13 @@ export const countGlassPanels = async (
 export const analyzeGlassPanelsWithGemini = async (
   base64Image: string,
   mimeType: string,
-  photoUri?: string
+  photoUri?: string,
+  projectId?: string | number,
+  taskId?: string | number,
+  milestoneId?: string | number
 ): Promise<GeminiAuditResult> => {
   try {
-    const analysis = await countGlassPanels(base64Image, mimeType, photoUri);
+    const analysis = await countGlassPanels(base64Image, mimeType, photoUri, projectId, taskId, milestoneId);
     const panels = Array.isArray(analysis.panels) ? analysis.panels : [];
     const uncertainDetections = Array.isArray(analysis.uncertain_detections)
       ? analysis.uncertain_detections

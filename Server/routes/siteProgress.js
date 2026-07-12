@@ -17,7 +17,7 @@ const { logProjectActivity } = require('../services/activityLogService');
 const { authenticateRequest } = require('../middleware/auth');
 const { canUploadSiteProgress, canViewReports, rejectInactiveProjectWork } = require('../rbac');
 const { qaDebug } = require('../services/qaDebug');
-const { compareSiteUpdatePhotos } = require('../services/geminiDuplicatePhotoService');
+const { compareSiteUpdatePhotos, getDuplicateCandidates } = require('../services/geminiDuplicatePhotoService');
 const {
   canUserUploadForTask,
   resolveTaskSchedule,
@@ -288,32 +288,6 @@ function shouldBypassScheduleValidation(validation) {
   ].includes(String(validation?.code || ''));
 }
 
-async function getDuplicateCandidates(projectId, taskId, milestoneId, phaseId) {
-  const result = await pool.query(
-    `SELECT l.id, image_candidate.image_url,
-            l.task_id, l.milestone_id, t.phase_id, l.work_date, l.created_at,
-            t.title AS task_name, pm.milestone_name
-       FROM task_progress_logs l
-       JOIN tasks t ON t.id = l.task_id
-       LEFT JOIN project_milestones pm ON pm.id = l.milestone_id
-       CROSS JOIN LATERAL (
-         SELECT value AS image_url
-           FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(l.image_urls) = 'array' THEN l.image_urls ELSE '[]'::jsonb END)
-         UNION ALL
-         SELECT value
-           FROM unnest(string_to_array(COALESCE(l.evidence_image_path, ''), ',')) AS legacy(value)
-       ) AS image_candidate
-      WHERE t.project_id = $1
-        AND l.task_id = $2
-        AND NULLIF(TRIM(image_candidate.image_url), '') IS NOT NULL
-      ORDER BY
-        CASE WHEN l.milestone_id = $3 THEN 1 ELSE 2 END,
-        l.created_at DESC
-      LIMIT 50`,
-    [projectId, taskId, milestoneId || null, phaseId || null]
-  );
-  return result.rows.filter((candidate) => /^https?:\/\//i.test(candidate.image_url || ''));
-}
 
 function buildDuplicatePhotoResponse({ code, message, duplicateCheck, projectId, taskId }) {
   const matchedUpload = duplicateCheck?.matched_upload || {};

@@ -12,6 +12,7 @@ const multer = require('multer');
 const { normalizeRole } = require('../rbac');
 const { analyzeGlassImage } = require('../services/geminiClient');
 const { qaDebug } = require('../services/qaDebug');
+const { compareSiteUpdatePhotos, getDuplicateCandidates } = require('../services/geminiDuplicatePhotoService');
 const { authenticateRequest } = require('../middleware/auth');
 
 const router = express.Router();
@@ -206,6 +207,36 @@ router.post(
           success: false,
           message: 'Image is too large for Gemini analysis. Please upload a smaller or clearer compressed image.',
         });
+      }
+
+      const { projectId, taskId, milestoneId } = req.body;
+      if (projectId && taskId) {
+        try {
+          const parsedProjectId = Number.parseInt(projectId, 10);
+          const parsedTaskId = Number.parseInt(taskId, 10);
+          const parsedMilestoneId = milestoneId ? Number.parseInt(milestoneId, 10) : null;
+          
+          if (Number.isFinite(parsedProjectId) && Number.isFinite(parsedTaskId)) {
+            const candidates = await getDuplicateCandidates(parsedProjectId, parsedTaskId, parsedMilestoneId, null);
+            if (candidates.length > 0) {
+              const duplicateCheck = await compareSiteUpdatePhotos({ 
+                newImage: { buffer: req.file.buffer, mimeType: req.file.mimetype || 'image/jpeg' }, 
+                candidates 
+              });
+              
+              if (duplicateCheck.status === 'DUPLICATE' || duplicateCheck.status === 'POSSIBLE_DUPLICATE') {
+                return res.status(409).json({
+                  success: false,
+                  code: duplicateCheck.status === 'DUPLICATE' ? 'DUPLICATE_PHOTO_DETECTED' : 'POSSIBLE_DUPLICATE_PHOTO',
+                  message: 'A duplicate or highly similar photo was detected.',
+                  duplicateCheck
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[Early Duplicate Check] Failed:', err.message);
+        }
       }
 
       const geminiResult = await analyzeGlassImage({
