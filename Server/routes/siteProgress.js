@@ -298,7 +298,7 @@ function firstFiniteInteger(...values) {
 }
 
 function duplicatePhotoCheckEnabled() {
-  return String(process.env.AI_DUPLICATE_PHOTO_CHECK_ENABLED || '').trim().toLowerCase() === 'true';
+  return String(process.env.AI_DUPLICATE_PHOTO_CHECK_ENABLED || 'true').trim().toLowerCase() === 'true';
 }
 
 function shouldBypassScheduleValidation(validation) {
