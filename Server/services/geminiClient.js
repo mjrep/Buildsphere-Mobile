@@ -114,7 +114,7 @@ async function fetchWithTimeout(url, options) {
 }
 
 async function callGeminiWithKey({ apiKey, imageBuffer, mimeType, systemInstruction, prompt }) {
-  const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
   const modelPath = model.startsWith('models/') ? model : `models/${model}`;
 
   const response = await fetchWithTimeout(
