@@ -2033,7 +2033,7 @@ export default function UploadSiteProgressScreen({
               </Text>
               <Text className="mt-2 text-[13px]" style={{ color: theme.textSecondary }}>
                 Inventory items recorded: <Text className="font-bold" style={{ color: theme.text }}>
-                  {linkedMaterials.filter((material) => Number(materialQuantities[material.id] || 0) > 0).length}
+                  {Object.values(materialQuantities).reduce((sum, qty) => sum + (Number(qty) || 0), 0)} units
                 </Text>
               </Text>
             </View>
