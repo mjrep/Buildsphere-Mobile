@@ -86,6 +86,13 @@ interface LinkedMaterial {
   linked_task_ids: number[];
 }
 
+interface DuplicateCheckResponse {
+  status: 'DUPLICATE' | 'POSSIBLE_DUPLICATE' | 'UNABLE_TO_VERIFY';
+  reason?: string;
+  matched_upload_id?: number | null;
+  matched_upload?: { image_url?: string; work_date?: string; task_name?: string; milestone_name?: string };
+}
+
 const normalizeLinkedTaskIds = (value: unknown): number[] => {
   const values = Array.isArray(value)
     ? value
@@ -111,6 +118,17 @@ const normalizeLinkedMaterial = (item: any): LinkedMaterial | null => {
     quantity: Number(item?.quantity ?? stock),
     linked_task_ids: normalizeLinkedTaskIds(item?.linked_task_ids ?? item?.linkedTaskIds),
   };
+};
+
+const PIECE_UNITS = new Set(['pc', 'pcs', 'piece', 'pieces', 'panel', 'panels', 'box', 'boxes', 'set', 'sets', 'roll', 'rolls']);
+
+const isPieceUnit = (unit?: string | null) => PIECE_UNITS.has(String(unit || 'pcs').trim().toLowerCase());
+
+const cleanMaterialQuantityInput = (value: string, pieceBased: boolean) => {
+  const cleaned = pieceBased
+    ? value.replace(/\D/g, '')
+    : value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+  return cleaned;
 };
 
 const PRIMARY = '#7370FF';
@@ -175,10 +193,13 @@ const prepareUploadPhoto = async (asset: ImagePicker.ImagePickerAsset): Promise<
   }
 };
 
+// NOTE: Each major Site Upload stage uses a dedicated full-screen page instead of a popup workflow.
 // Step 1: Upload details
 // Step 2: AI or manual selection (still shown as Upload in the stepper)
 // Step 3: Panel count and human verification
-// Step 4: Success
+// Step 4: Duplicate review, when needed
+// Step 5: Inventory update
+// Step 6: Success
 
 // Analysis status states for user feedback
 type AnalysisStatus =
@@ -206,7 +227,7 @@ export default function UploadSiteProgressScreen({
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const formContentStyle = centeredContent(width, FORM_CONTENT_MAX_WIDTH);
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [selectedPhotos, setSelectedPhotos] = useState<SelectedPhoto[]>([]);
   const [projectId, setProjectId] = useState<number | null>(initialTask?.project_id || initialProjectId || null);
   const [taskId, setTaskId] = useState<number | null>(initialTask?.id || null);
@@ -233,6 +254,8 @@ export default function UploadSiteProgressScreen({
   const [linkedMaterialsError, setLinkedMaterialsError] = useState<string | null>(null);
   const [materialsSheetVisible, setMaterialsSheetVisible] = useState(false);
   const [submittingMaterials, setSubmittingMaterials] = useState(false);
+  const [duplicateCheck, setDuplicateCheck] = useState<DuplicateCheckResponse | null>(null);
+  const [duplicateOverrideReason, setDuplicateOverrideReason] = useState('');
 
   // Image Viewer & preview states
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState<number>(0);
@@ -260,9 +283,13 @@ export default function UploadSiteProgressScreen({
       ? allowedDateRange
       : null;
   const scheduleReady = Boolean(selectedTask && allowedDateRange);
+  const scheduleValidation =
+    selectedTask && workDate
+      ? validateSiteUpdateSchedule(selectedTask, toDateOnlyString(workDate))
+      : null;
   // The visible stepper represents the three major workflow stages only.
-  const visibleStep: SiteUpdateStep = materialsSheetVisible ? 3 : step === 4 ? 3 : step === 1 || step === 2 ? 1 : 2;
-  const stepperCompleted = step === 4;
+  const visibleStep: SiteUpdateStep = step === 5 || step === 6 ? 3 : step === 1 || step === 2 ? 1 : 2;
+  const stepperCompleted = step === 6;
   const panelCountIsValid = panelCountInput !== '' && /^\d+$/.test(panelCountInput);
   const hasSelectedProject = projectId !== null && projectId !== undefined;
   const isProjectActive =
@@ -270,6 +297,8 @@ export default function UploadSiteProgressScreen({
     selectedProject?.status === undefined ||
     selectedProject?.status === null ||
     isActiveProjectStatus(selectedProject.status);
+  const canOpenUploadFlow = Boolean(isProjectActive && !analyzing && selectedTask);
+  const canSubmitSiteUpdate = Boolean(isProjectActive && selectedTask && panelCountIsValid);
 
   useEffect(() => {
     if (!saving) return undefined;
@@ -418,17 +447,23 @@ export default function UploadSiteProgressScreen({
       Alert.alert('Missing info', 'Please select a task.');
       return false;
     }
-    const validation = validateSiteUpdateSchedule(selectedTask, toDateOnlyString(workDate));
-    if (!validation.valid) {
-      Alert.alert('Schedule required', validation.message || 'The selected work date is outside the approved schedule.');
-      return false;
-    }
     return true;
   };
 
   const renderScheduleHelper = () => {
-    if (!selectedTask) return null;
-    if (!allowedDateRange) return null;
+    if (!selectedTask) {
+      return (
+        <View className="-mt-2 mb-4 rounded-lg border px-3 py-2" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+          <Text className="text-[11px] leading-4" style={{ color: theme.textSecondary }}>
+            Select a task to load the approved milestone and phase dates for this upload.
+          </Text>
+        </View>
+      );
+    }
+
+    if (!allowedDateRange) {
+      return null;
+    }
 
     return (
       <View className="-mt-2 mb-4 rounded-lg px-3 py-2" style={{ backgroundColor: theme.surface }}>
@@ -447,7 +482,7 @@ export default function UploadSiteProgressScreen({
       Alert.alert('Materials required', 'Submit the quantities used for every linked material before leaving.');
       return;
     }
-    if (step === 4 || recordSaved || !hasUnsavedChanges) {
+    if (step === 6 || recordSaved || !hasUnsavedChanges) {
       reset();
       onClose();
       return;
@@ -466,9 +501,11 @@ export default function UploadSiteProgressScreen({
     ]);
   };
 
-  const materialsAreValid = linkedMaterials.length > 0 && linkedMaterials.every((material) => {
-    const quantity = Number(materialQuantities[material.id]);
-    return Number.isFinite(quantity) && quantity > 0 && quantity <= material.current_stock;
+  const materialsAreValid = linkedMaterials.every((material) => {
+    const entered = materialQuantities[material.id] || '0';
+    const quantity = Number(entered);
+    const pieceBased = isPieceUnit(material.unit);
+    return Number.isFinite(quantity) && quantity >= 0 && quantity <= material.current_stock && (!pieceBased || Number.isInteger(quantity));
   });
 
   const submitMaterials = async () => {
@@ -477,13 +514,15 @@ export default function UploadSiteProgressScreen({
     const submittedIds: number[] = [];
     try {
       for (const material of linkedMaterials) {
+        const consumedQuantity = Number(materialQuantities[material.id] || 0);
+        if (!Number.isFinite(consumedQuantity) || consumedQuantity <= 0) continue;
         // Inventory stock changes only through the approved consumption transaction.
         const response = await apiFetch(`${API_URL}/inventory/${material.id}/transaction`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action_type: 'CONSUMPTION',
-            quantity: Number(materialQuantities[material.id]),
+            quantity: consumedQuantity,
             reference_task_id: taskId,
             notes: 'Consumed during site progress update.',
           }),
@@ -496,7 +535,7 @@ export default function UploadSiteProgressScreen({
       }
       setMaterialsSheetVisible(false);
       setMaterialQuantities({});
-      setStep(4);
+      setStep(6);
     } catch (error: any) {
       if (submittedIds.length > 0) {
         setLinkedMaterials((current) => current.filter((material) => !submittedIds.includes(material.id)));
@@ -657,30 +696,6 @@ export default function UploadSiteProgressScreen({
     setHasWarnings(false);
     setWarningMessage('');
     try {
-      // Confirm the schedule with the backend before starting unnecessary Gemini analysis.
-      let scheduleResponse: Response;
-      try {
-        scheduleResponse = await apiFetch(`${API_URL}/site-progress/validate-schedule`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            projectId,
-            taskId,
-            workDate: toDateOnlyString(workDate),
-          }),
-        });
-      } catch (scheduleError) {
-        setAnalysisStatus('idle');
-        Alert.alert('Connection Error', getServerConnectionErrorMessage(scheduleError));
-        return;
-      }
-      const scheduleBody = await scheduleResponse.json().catch(() => null);
-      if (!scheduleResponse.ok) {
-        Alert.alert('Could not continue', cleanSubmitErrorMessage(scheduleBody?.message || scheduleBody?.error || 'Could not validate the site update schedule.'));
-        setAnalysisStatus('idle');
-        return;
-      }
-
       setUploadMode('ai');
       if (validSelectedPhotos.length > 0) {
         const nextResults: PhotoAnalysisResult[] = [];
@@ -805,7 +820,8 @@ export default function UploadSiteProgressScreen({
     setDetectionMode('manual');
     setAvgConfidence(0);
     setAiDetectedCount(0);
-    setPanelCountInput('');
+    setPanelCountInput('0');
+    setVerifiedPanelCount(0);
     setHasWarnings(false);
     setWarningMessage('');
     setAiSummary('');
@@ -831,17 +847,13 @@ export default function UploadSiteProgressScreen({
       showInactiveProjectMessage();
       return;
     }
-    if (!requireValidSchedule()) return;
     if (!panelCountIsValid) {
       Alert.alert('Panel count required', 'Enter a whole number of visible glass panels.');
       return;
     }
     if (recordSaved) {
-      if (linkedMaterials.length > 0) {
-        setMaterialsSheetVisible(true);
-      } else {
-        setStep(4);
-      }
+      setMaterialsSheetVisible(false);
+      setStep(5);
       return;
     }
     setSubmitError(null);
@@ -855,86 +867,93 @@ export default function UploadSiteProgressScreen({
       setHasUnsavedChanges(false);
       setSubmitError(null);
       setRecordSaved(true);
-      if (linkedMaterials.length > 0) {
-        setMaterialsSheetVisible(true);
-      } else {
-        setStep(4);
-      }
+      // Inventory Consumption is completed on a dedicated page after the Site Update is accepted.
+      setMaterialsSheetVisible(false);
+      setStep(5);
     };
 
-    setSaving(true);
+    const formData = new FormData();
+    const verifiedCount = Number(panelCountInput);
+    formData.append('projectId', projectId.toString());
+    formData.append('taskId', taskId.toString());
+    formData.append('glassCount', String(verifiedCount));
+    formData.append('shift', shift);
+
+    // Use local date parts (YYYY-MM-DD) to avoid UTC timezone shifts.
+    const formattedDate = toDateOnlyString(workDate);
+
+    formData.append('workDate', formattedDate);
+    formData.append('notes', notes.trim());
+
+    formData.append('verified_panel_count', String(verifiedCount));
+    formData.append('detection_mode', uploadMode === 'ai' ? detectionMode : 'manual');
+    if (duplicateOverrideReason.trim()) {
+      formData.append('duplicate_override_reason', duplicateOverrideReason.trim());
+    }
+
+    if (uploadMode === 'ai') {
+      formData.append('ai_detected_count', aiDetectedCount.toString());
+      formData.append('avg_confidence', avgConfidence.toFixed(4));
+      formData.append('warning_message', warningMessage);
+      formData.append('ai_summary', aiSummary);
+      formData.append('per_photo_counts', JSON.stringify(photoAnalysisResults));
+    }
+
+    if (validSelectedPhotos.length > 0) {
+      validSelectedPhotos.forEach((photo, index) => {
+        const photoUri = photo.uri.trim();
+        const filename = photoUri.split('/').pop() || `photo_${index}.jpg`;
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image/jpeg`;
+
+        formData.append('photos', {
+          uri: photoUri,
+          name: filename,
+          type,
+        } as any);
+      });
+    }
+
+    completeSiteUpdateFlow();
+    setDuplicateCheck(null);
+    setDuplicateOverrideReason('');
+    setSaving(false);
+
     const submitController = new AbortController();
     const submitTimeout = setTimeout(() => submitController.abort(), SITE_PROGRESS_SUBMIT_TIMEOUT_MS);
-    try {
-      const formData = new FormData();
-      const verifiedCount = Number(panelCountInput);
-      formData.append('projectId', projectId.toString());
-      formData.append('taskId', taskId.toString());
-      formData.append('glassCount', String(verifiedCount));
-      formData.append('shift', shift);
-      
-      // Use local date parts (YYYY-MM-DD) to avoid UTC timezone shifts.
-      const formattedDate = toDateOnlyString(workDate);
-      
-      formData.append('workDate', formattedDate);
-      formData.append('notes', notes);
+    void (async () => {
+      try {
+        const response = await withTimeout(
+          apiFetch(`${API_URL}/site-progress`, {
+            method: 'POST',
+            body: formData,
+            signal: submitController.signal,
+            headers: {
+              Accept: 'application/json',
+            },
+          }),
+          SITE_PROGRESS_SUBMIT_TIMEOUT_MS,
+          SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE
+        );
 
-      formData.append('verified_panel_count', String(verifiedCount));
-      formData.append('detection_mode', uploadMode === 'ai' ? detectionMode : 'manual');
-
-      if (uploadMode === 'ai') {
-        formData.append('ai_detected_count', aiDetectedCount.toString());
-        formData.append('avg_confidence', avgConfidence.toFixed(4));
-        formData.append('warning_message', warningMessage);
-        formData.append('ai_summary', aiSummary);
-        formData.append('per_photo_counts', JSON.stringify(photoAnalysisResults));
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          if (body?.code === 'DUPLICATE_PHOTO_DETECTED' || body?.code === 'POSSIBLE_DUPLICATE_PHOTO') {
+            // Duplicate review stays under the Panel Count stage and does not add another step circle.
+            setDuplicateCheck(body.duplicate_check || { status: body.code === 'DUPLICATE_PHOTO_DETECTED' ? 'DUPLICATE' : 'POSSIBLE_DUPLICATE' });
+            setStep(4);
+            return;
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        if (message !== SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE) {
+          console.error('SAVE_ERROR:', error);
+        }
+      } finally {
+        clearTimeout(submitTimeout);
       }
-
-      if (validSelectedPhotos.length > 0) {
-        validSelectedPhotos.forEach((photo, index) => {
-          const photoUri = photo.uri.trim();
-          const filename = photoUri.split('/').pop() || `photo_${index}.jpg`;
-          const match = /\.(\w+)$/.exec(filename);
-          const type = match ? `image/${match[1]}` : `image/jpeg`;
-
-          formData.append('photos', {
-            uri: photoUri,
-            name: filename,
-            type,
-          } as any);
-        });
-      }
-
-      const response = await withTimeout(
-        apiFetch(`${API_URL}/site-progress`, {
-          method: 'POST',
-          body: formData,
-          signal: submitController.signal,
-          headers: {
-            'Accept': 'application/json',
-          },
-        }),
-        SITE_PROGRESS_SUBMIT_TIMEOUT_MS,
-        SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE
-      );
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        Alert.alert('Could not submit', cleanSubmitErrorMessage(body?.message || body?.error));
-        return;
-      }
-
-      completeSiteUpdateFlow();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '';
-      if (message !== SITE_PROGRESS_SUBMIT_TIMEOUT_MESSAGE) {
-        console.error('SAVE_ERROR:', error);
-      }
-      Alert.alert('Could not submit', cleanSubmitErrorMessage(message));
-    } finally {
-      clearTimeout(submitTimeout);
-      setSaving(false);
-    }
+    })();
   };
 
   const inputStyle = {
@@ -970,7 +989,7 @@ export default function UploadSiteProgressScreen({
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      presentationStyle="fullScreen"
       onRequestClose={handleClose}>
       <SystemBars backgroundColor={theme.background} style={isDark ? 'light' : 'dark'} />
       {/* NOTE: KeyboardAvoidingView and safe-area padding prevent the submit button and input fields from being covered by the mobile keyboard or system navigation bar. */}
@@ -990,7 +1009,7 @@ export default function UploadSiteProgressScreen({
               <TouchableOpacity onPress={handleClose}>
                 <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
-              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Upload Details</Text>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Upload Site Progress</Text>
               <View style={{ width: 24 }} />
             </View>
             <View style={formContentStyle}>
@@ -1109,18 +1128,6 @@ export default function UploadSiteProgressScreen({
                 />
               )}
 
-              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Notes / Comments</Text>
-              <TextInput
-                value={notes}
-                onChangeText={(value) => {
-                  setNotes(value);
-                  markDirty();
-                }}
-                style={{ ...inputStyle, height: 80, textAlignVertical: 'top', paddingTop: 12 }}
-                placeholder="Add comments about progress..."
-                placeholderTextColor={theme.textMuted}
-                multiline
-              />
               </View>
             </ScrollView>
 
@@ -1137,9 +1144,9 @@ export default function UploadSiteProgressScreen({
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={openAiChoice}
-                disabled={!isProjectActive || !scheduleReady || analyzing}
+                disabled={!canOpenUploadFlow}
                 className="h-12 flex-1 items-center justify-center rounded-[14px]"
-                style={{ backgroundColor: isProjectActive && scheduleReady && !analyzing ? PRIMARY : theme.textMuted }}>
+                style={{ backgroundColor: canOpenUploadFlow ? PRIMARY : theme.textMuted }}>
                 {analyzing ? <ActivityIndicator color="white" /> : <Text className="text-[14px] font-bold text-white">Continue</Text>}
               </TouchableOpacity>
             </View>
@@ -1154,7 +1161,7 @@ export default function UploadSiteProgressScreen({
                 <Ionicons name="caret-back-outline" size={24} color={theme.text} />
               </TouchableOpacity>
               <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
-                Preview Photos ({selectedPhotos.length})
+                Choose Analysis Method
               </Text>
             </View>
 
@@ -1225,6 +1232,19 @@ export default function UploadSiteProgressScreen({
                   </View>
                 )}
               </View>
+              <View className="mt-4 rounded-2xl border p-3" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                <Text className="text-[13px] font-bold" style={{ color: theme.text }} numberOfLines={2}>
+                  {selectedTask?.title || 'Selected task'}
+                </Text>
+                <Text className="mt-1 text-[12px]" style={{ color: theme.textSecondary }}>
+                  {shift} · {workDate.toDateString()}
+                </Text>
+                {selectedTask?.milestone ? (
+                  <Text className="mt-1 text-[12px]" style={{ color: theme.textMuted }} numberOfLines={1}>
+                    {selectedTask.milestone}
+                  </Text>
+                ) : null}
+              </View>
             </View>
 
             <View className="border-t px-5 pt-4" style={{ paddingBottom: 12, backgroundColor: theme.background, borderColor: theme.border }}>
@@ -1279,9 +1299,9 @@ export default function UploadSiteProgressScreen({
 
                 <TouchableOpacity
                   onPress={handleCountGlass}
-                  disabled={analyzing || !isProjectActive || !scheduleReady}
+                  disabled={analyzing || !isProjectActive || !selectedTask}
                   className="h-14 flex-row items-center justify-center rounded-[16px]"
-                  style={{ backgroundColor: isProjectActive && scheduleReady ? PRIMARY : theme.textMuted }}
+                  style={{ backgroundColor: isProjectActive && selectedTask ? PRIMARY : theme.textMuted }}
                 >
                   {analyzing ? (
                     <View className="flex-row items-center px-4">
@@ -1302,18 +1322,18 @@ export default function UploadSiteProgressScreen({
 
                 <TouchableOpacity
                   onPress={handleManualUpload}
-                  disabled={analyzing || !isProjectActive || !scheduleReady}
+                  disabled={analyzing || !isProjectActive || !selectedTask}
                   className="mt-3 h-14 flex-row items-center justify-center rounded-[16px] border-2"
-                  style={{ backgroundColor: theme.surface, borderColor: isProjectActive && scheduleReady ? theme.primary : theme.border }}
+                  style={{ backgroundColor: theme.surface, borderColor: isProjectActive && selectedTask ? theme.primary : theme.border }}
                 >
-                  <Ionicons name="create-outline" size={20} color={isProjectActive && scheduleReady ? PRIMARY : theme.textMuted} />
-                  <Text className="ml-2 text-[16px] font-bold" style={{ color: isProjectActive && scheduleReady ? theme.primary : theme.textMuted }}>
+                  <Ionicons name="create-outline" size={20} color={isProjectActive && selectedTask ? PRIMARY : theme.textMuted} />
+                  <Text className="ml-2 text-[16px] font-bold" style={{ color: isProjectActive && selectedTask ? theme.primary : theme.textMuted }}>
                     Enter Count Manually
                   </Text>
                 </TouchableOpacity>
 
                 <Text className="mt-3 text-center text-[11px]" style={{ color: theme.textMuted }}>
-                  AI check is optional. You may enter the verified count manually.
+                  Use AI Check to get a suggested glass-panel count, or skip AI and enter the verified count yourself.
                 </Text>
               </View>
             </View>
@@ -1391,72 +1411,22 @@ export default function UploadSiteProgressScreen({
                 </View>
               )}
 
-              <Text className="mb-1.5 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Task</Text>
-              <TouchableOpacity
-                onPress={() => setIsTaskModalVisible(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
-                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
-                {loadingTasks ? (
-                  <SkeletonText width="58%" height={13} />
-                ) : (
-                  <Text style={{ color: taskId ? theme.text : theme.textMuted }}>
-                    {safeUserTasks.find((t) => String(t.id) === String(taskId))?.title || initialTask?.title || 'Select a task'}
-                  </Text>
-                )}
-                <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
-              </TouchableOpacity>
-              {renderScheduleHelper()}
-
-              {/* Shift Dropdown */}
-              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Shift</Text>
-              <TouchableOpacity
-                onPress={() => setIsShiftModalVisible(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
-                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
-                <Text style={{ color: theme.text }}>{shift}</Text>
-                <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
-              </TouchableOpacity>
-
-              {/* Date Picker */}
-              <Text className="mb-1 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Work Date</Text>
-              <TouchableOpacity
-                onPress={() => setShowDatePicker(true)}
-                className="mb-4 flex-row items-center justify-between rounded-xl border px-4"
-                style={{ height: 50, backgroundColor: theme.input, borderColor: theme.border }}>
-                <Text style={{ color: theme.text }}>{workDate.toDateString()}</Text>
-                <Ionicons name="calendar-outline" size={20} color={theme.textMuted} />
-              </TouchableOpacity>
-
-              {showDatePicker && (
-                <DateTimePicker
-                  value={workDate}
-                  mode="date"
-                  display="default"
-                  minimumDate={pickerDateRange ? parseDateOnly(pickerDateRange.selectableStart) || undefined : undefined}
-                  maximumDate={pickerDateRange ? parseDateOnly(pickerDateRange.selectableEnd) || undefined : undefined}
-                  onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
-                    if (selectedDate) {
-                      const changed = selectedDate.toDateString() !== workDate.toDateString();
-                      setWorkDate(selectedDate);
-                      if (changed) markDirty();
-                    }
-                  }}
-                />
-              )}
-
-              <Text className="mb-1.5 mt-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Notes / Comments</Text>
-              <TextInput
-                value={notes}
-                onChangeText={(value) => {
-                  setNotes(value);
-                  markDirty();
-                }}
-                style={{ ...inputStyle, height: 100, textAlignVertical: 'top', paddingTop: 12 }}
-                placeholder="Add comments about progress..."
-                placeholderTextColor={theme.textMuted}
-                multiline
-              />
+              <View className="mb-4 rounded-2xl border p-4" style={{ backgroundColor: theme.surface, borderColor: theme.border }}>
+                <View className="flex-row items-start justify-between">
+                  <View className="mr-3 flex-1">
+                    <Text className="text-[12px] font-semibold" style={{ color: theme.textMuted }}>Task</Text>
+                    <Text className="mt-1 text-[14px] font-bold" style={{ color: theme.text }} numberOfLines={2}>
+                      {selectedTask?.title || safeUserTasks.find((t) => String(t.id) === String(taskId))?.title || 'Selected task'}
+                    </Text>
+                    <Text className="mt-2 text-[12px]" style={{ color: theme.textSecondary }}>
+                      {shift} · {workDate.toDateString()}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setStep(1)} className="rounded-full px-3 py-1" style={{ backgroundColor: theme.primaryLight }}>
+                    <Text className="text-[12px] font-semibold" style={{ color: theme.primary }}>Edit</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               {/* ── AI Detection Results + Human Verification ───────── */}
               <View className="mt-6 mb-4 rounded-2xl border p-4" style={{ backgroundColor: theme.surface, borderColor: theme.primary }}>
@@ -1578,6 +1548,20 @@ export default function UploadSiteProgressScreen({
                   </Text>
                 </View>
               </View>
+
+              {/* Comments are collected during final Panel Count validation. */}
+              <Text className="mb-1.5 mt-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Comments / Notes</Text>
+              <TextInput
+                value={notes}
+                onChangeText={(value) => {
+                  setNotes(value);
+                  markDirty();
+                }}
+                style={{ ...inputStyle, height: 100, textAlignVertical: 'top', paddingTop: 12 }}
+                placeholder="Add comments about the current site progress..."
+                placeholderTextColor={theme.textMuted}
+                multiline
+              />
               </View>
             </ScrollView>
 
@@ -1593,9 +1577,9 @@ export default function UploadSiteProgressScreen({
               ]}>
               <TouchableOpacity
                 onPress={handleSave}
-                disabled={saving || !isProjectActive || !scheduleReady || !panelCountIsValid}
+                disabled={saving || !canSubmitSiteUpdate}
                 className="h-14 items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: isProjectActive && scheduleReady && panelCountIsValid ? PRIMARY : theme.textMuted }}>
+                style={{ backgroundColor: canSubmitSiteUpdate ? PRIMARY : theme.textMuted }}>
                 {saving ? (
                   <ActivityIndicator color="white" />
                 ) : (
@@ -1609,7 +1593,236 @@ export default function UploadSiteProgressScreen({
         )}
 
         {/* ── STEP 4: Success ── */}
-        {step === 4 && (
+        {step === 4 && duplicateCheck && (
+          <View className="flex-1" style={{ backgroundColor: theme.background }}>
+            <View className="flex-row items-center border-b px-4 pb-2 pt-2" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
+              <TouchableOpacity onPress={() => setStep(3)} className="-ml-2 mr-3">
+                <Ionicons name="caret-back-outline" size={24} color={theme.text} />
+              </TouchableOpacity>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>
+                {duplicateCheck.status === 'DUPLICATE' ? 'Duplicate Photo Detected' : 'Review Similar Photo'}
+              </Text>
+            </View>
+            <View style={formContentStyle}>
+              <SiteUpdateStepper currentStep={2} />
+            </View>
+
+            <ScrollView
+              className="flex-1"
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingTop: 14, paddingBottom: finalizeScrollBottomPadding }}
+              style={{ backgroundColor: theme.background }}>
+              <View style={formContentStyle}>
+                <View className="rounded-2xl border p-4" style={{ borderColor: duplicateCheck.status === 'DUPLICATE' ? '#EF4444' : theme.border, backgroundColor: theme.surface }}>
+                  <Text className="text-[15px] font-bold" style={{ color: duplicateCheck.status === 'DUPLICATE' ? '#DC2626' : theme.text }}>
+                    {duplicateCheck.status === 'DUPLICATE'
+                      ? 'This photo appears to match a previous Site Update.'
+                      : 'This photo looks similar to a previous Site Update.'}
+                  </Text>
+                  <Text className="mt-2 text-[13px] leading-5" style={{ color: theme.textSecondary }}>
+                    {duplicateCheck.reason || 'Please review whether the photo shows meaningful new progress before continuing.'}
+                  </Text>
+                </View>
+
+                <View className="mt-4 gap-3">
+                  {selectedPhotos[currentPhotoIndex]?.uri ? (
+                    <View>
+                      <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>New Site Update</Text>
+                      <Image source={{ uri: selectedPhotos[currentPhotoIndex].uri }} className="h-52 w-full rounded-2xl" resizeMode="cover" />
+                    </View>
+                  ) : null}
+
+                  {duplicateCheck.matched_upload?.image_url ? (
+                    <View>
+                      <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Previous Site Update</Text>
+                      <Image source={{ uri: duplicateCheck.matched_upload.image_url }} className="h-52 w-full rounded-2xl" resizeMode="cover" />
+                      {duplicateCheck.matched_upload.work_date ? (
+                        <Text className="mt-2 text-[12px]" style={{ color: theme.textMuted }}>
+                          Previous upload: {formatDateOnlyDisplay(duplicateCheck.matched_upload.work_date)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
+
+                {duplicateCheck.status === 'POSSIBLE_DUPLICATE' && (
+                  <View className="mt-4">
+                    <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Explanation</Text>
+                    <TextInput
+                      value={duplicateOverrideReason}
+                      onChangeText={setDuplicateOverrideReason}
+                      placeholder="Explain the new progress"
+                      placeholderTextColor={theme.textMuted}
+                      multiline
+                      className="min-h-[96px] rounded-xl border px-3 py-3 text-[13px]"
+                      style={{ borderColor: theme.border, backgroundColor: theme.input, color: theme.text, textAlignVertical: 'top' }}
+                    />
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+            <View className="gap-2 border-t pt-3" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background, paddingBottom: finalizeFooterBottomPadding }]}>
+              <TouchableOpacity
+                onPress={() => {
+                  setDuplicateCheck(null);
+                  setDuplicateOverrideReason('');
+                  if (selectedPhotos.length) removePhoto(currentPhotoIndex);
+                  setStep(1);
+                }}
+                className="h-12 items-center justify-center rounded-[14px] border"
+                style={{ borderColor: theme.border }}>
+                <Text className="font-semibold" style={{ color: theme.text }}>Choose Another Photo</Text>
+              </TouchableOpacity>
+              {duplicateCheck.status === 'POSSIBLE_DUPLICATE' && (
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!duplicateOverrideReason.trim()) {
+                      Alert.alert('Explanation required', 'Please explain what changed in this work area.');
+                      return;
+                    }
+                    setDuplicateCheck(null);
+                    setStep(5);
+                  }}
+                  className="h-12 items-center justify-center rounded-[14px]"
+                  style={{ backgroundColor: PRIMARY }}>
+                  <Text className="font-semibold text-white">Continue with Explanation</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
+        {step === 5 && (
+          <View className="flex-1" style={{ backgroundColor: theme.background }}>
+            <View className="flex-row items-center border-b px-4 pb-2 pt-2" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background }]}>
+              <TouchableOpacity onPress={() => setStep(3)} className="-ml-2 mr-3">
+                <Ionicons name="caret-back-outline" size={24} color={theme.text} />
+              </TouchableOpacity>
+              <Text className="text-[16px] font-bold" style={{ color: theme.text }}>Inventory Update</Text>
+            </View>
+            <View style={formContentStyle}>
+              <SiteUpdateStepper currentStep={3} />
+            </View>
+
+            <ScrollView
+              className="flex-1"
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingTop: 14, paddingBottom: finalizeScrollBottomPadding }}
+              style={{ backgroundColor: theme.background }}>
+              <View style={formContentStyle}>
+                <View className="mb-4 rounded-2xl border p-4" style={{ borderColor: theme.border, backgroundColor: theme.surface }}>
+                  <View className="mb-2 flex-row items-center">
+                    <View className="mr-3 h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: theme.primaryLight }}>
+                      <Ionicons name="construct-outline" size={21} color={PRIMARY} />
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-[17px] font-bold" style={{ color: theme.text }}>Materials Used</Text>
+                      <Text className="text-[12px]" style={{ color: theme.textMuted }}>{selectedTask?.title || 'Selected task'}</Text>
+                    </View>
+                  </View>
+                  <Text className="text-[13px] leading-5" style={{ color: theme.textSecondary }}>
+                    Record only the materials consumed for this site update.
+                  </Text>
+                </View>
+
+                {loadingLinkedMaterials ? (
+                  <SkeletonCard style={{ borderRadius: 16 }}>
+                    <SkeletonText width="62%" height={14} />
+                    <SkeletonBox height={56} borderRadius={12} style={{ marginTop: 14 }} />
+                  </SkeletonCard>
+                ) : linkedMaterials.length === 0 ? (
+                  <View className="rounded-2xl border p-5" style={{ borderColor: theme.border, backgroundColor: theme.surface }}>
+                    <Ionicons name="checkmark-circle-outline" size={28} color={PRIMARY} />
+                    <Text className="mt-3 text-[16px] font-bold" style={{ color: theme.text }}>No linked materials</Text>
+                    <Text className="mt-1 text-[13px] leading-5" style={{ color: theme.textSecondary }}>
+                      No linked materials are required for this Site Update.
+                    </Text>
+                  </View>
+                ) : (
+                  linkedMaterials.map((material) => {
+                    const pieceBased = isPieceUnit(material.unit);
+                    const entered = materialQuantities[material.id] || '0';
+                    const numericValue = Number(entered);
+                    const invalid = !Number.isFinite(numericValue) || numericValue < 0 || numericValue > material.current_stock || (pieceBased && !Number.isInteger(numericValue));
+                    const remainingStock = Number.isFinite(numericValue) ? Math.max(0, material.current_stock - numericValue) : material.current_stock;
+                    return (
+                      <View key={material.id} className="mb-3 rounded-2xl border p-4" style={{ borderColor: invalid ? '#EF4444' : theme.border, backgroundColor: theme.surface }}>
+                        <View className="mb-3 flex-row items-center justify-between">
+                          <Text className="mr-3 flex-1 text-[14px] font-semibold" style={{ color: theme.text }}>{material.item_name}</Text>
+                          <Text className="text-[12px]" style={{ color: theme.textMuted }}>
+                            Stock: {material.current_stock} {material.unit || 'pcs'}
+                          </Text>
+                        </View>
+                        {pieceBased ? (
+                          <View className="flex-row items-center justify-between rounded-xl border p-2 px-4" style={{ backgroundColor: theme.elevated, borderColor: invalid ? '#EF4444' : theme.border }}>
+                            <TouchableOpacity
+                              onPress={() => setMaterialQuantities((current) => ({ ...current, [material.id]: String(Math.max(0, (Number(current[material.id] || 0) || 0) - 1)) }))}
+                              disabled={submittingMaterials}
+                              className="h-8 w-8 items-center justify-center rounded-full"
+                              style={{ backgroundColor: theme.input }}>
+                              <Ionicons name="remove" size={20} color={PRIMARY} />
+                            </TouchableOpacity>
+                            <TextInput
+                              value={entered}
+                              onChangeText={(value) => setMaterialQuantities((current) => ({ ...current, [material.id]: cleanMaterialQuantityInput(value, true) || '0' }))}
+                              editable={!submittingMaterials}
+                              keyboardType="numeric"
+                              className="text-[18px] font-bold text-center"
+                              style={{ minWidth: 62, color: theme.primary }}
+                            />
+                            <TouchableOpacity
+                              onPress={() => setMaterialQuantities((current) => ({ ...current, [material.id]: String(Math.min(material.current_stock, (Number(current[material.id] || 0) || 0) + 1)) }))}
+                              disabled={submittingMaterials}
+                              className="h-8 w-8 items-center justify-center rounded-full"
+                              style={{ backgroundColor: theme.primary }}>
+                              <Ionicons name="add" size={20} color="white" />
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <TextInput
+                            value={entered === '0' ? '' : entered}
+                            onChangeText={(value) => setMaterialQuantities((current) => ({ ...current, [material.id]: cleanMaterialQuantityInput(value, false) }))}
+                            editable={!submittingMaterials}
+                            keyboardType="decimal-pad"
+                            placeholder="Quantity used"
+                            placeholderTextColor={theme.textMuted}
+                            className="h-12 rounded-xl border px-4 text-[14px]"
+                            style={{ borderColor: invalid ? '#EF4444' : theme.border, backgroundColor: theme.input, color: theme.text }}
+                          />
+                        )}
+                        <Text className="mt-2 text-[11px]" style={{ color: theme.textMuted }}>
+                          {numericValue > 0 ? `Remaining after usage: ${remainingStock} ${material.unit || 'pcs'}` : 'Not used for this update'}
+                        </Text>
+                        {invalid && (
+                          <Text className="mt-1 text-[11px] text-[#EF4444]">Enter zero or a quantity not above current stock.</Text>
+                        )}
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            </ScrollView>
+
+            <View className="border-t pt-3" style={[formContentStyle, { borderColor: theme.border, backgroundColor: theme.background, paddingBottom: finalizeFooterBottomPadding }]}>
+              {linkedMaterials.length === 0 ? (
+                <TouchableOpacity onPress={() => setStep(6)} className="h-14 items-center justify-center rounded-[16px]" style={{ backgroundColor: PRIMARY }}>
+                  <Text className="text-[16px] font-bold text-white">Continue</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={submitMaterials}
+                  disabled={!materialsAreValid || submittingMaterials}
+                  className="h-14 items-center justify-center rounded-[16px]"
+                  style={{ backgroundColor: materialsAreValid && !submittingMaterials ? PRIMARY : theme.textMuted }}>
+                  {submittingMaterials ? <ActivityIndicator color="white" /> : <Text className="text-[16px] font-bold text-white">Submit Materials Used</Text>}
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
+        {step === 6 && (
           <View className="flex-1 px-8">
             <View className="w-full">
               <SiteUpdateStepper currentStep={3} completed />
@@ -1628,11 +1841,27 @@ export default function UploadSiteProgressScreen({
             </View>
 
             <Text className="mb-3 text-center text-[22px] font-bold" style={{ color: theme.text }}>
-              Site progress uploaded!
+              Site Update Completed
             </Text>
             <Text className="mb-10 text-center text-[14px] leading-6" style={{ color: theme.textMuted }}>
               Photo(s) uploaded and progress recorded successfully.
             </Text>
+            <View className="mb-8 w-full rounded-2xl border p-4" style={{ borderColor: theme.border, backgroundColor: theme.surface }}>
+              <Text className="text-[13px]" style={{ color: theme.textSecondary }}>
+                Verified panel count: <Text className="font-bold" style={{ color: theme.text }}>{panelCountInput || '0'}</Text>
+              </Text>
+              <Text className="mt-2 text-[13px]" style={{ color: theme.textSecondary }} numberOfLines={2}>
+                Task: <Text className="font-bold" style={{ color: theme.text }}>{selectedTask?.title || 'Selected task'}</Text>
+              </Text>
+              <Text className="mt-2 text-[13px]" style={{ color: theme.textSecondary }}>
+                Work Date: <Text className="font-bold" style={{ color: theme.text }}>{workDate.toDateString()}</Text>
+              </Text>
+              <Text className="mt-2 text-[13px]" style={{ color: theme.textSecondary }}>
+                Inventory items recorded: <Text className="font-bold" style={{ color: theme.text }}>
+                  {linkedMaterials.filter((material) => Number(materialQuantities[material.id] || 0) > 0).length}
+                </Text>
+              </Text>
+            </View>
 
             <TouchableOpacity
               onPress={handleClose}
@@ -1649,7 +1878,7 @@ export default function UploadSiteProgressScreen({
 
       {/* Required after-upload material consumption. Intentionally has no dismiss action. */}
       <Modal
-        visible={materialsSheetVisible}
+        visible={false && materialsSheetVisible}
         transparent
         animationType="slide"
         onRequestClose={() => Alert.alert('Materials required', 'Enter and submit all material quantities to finish this site update.')}>

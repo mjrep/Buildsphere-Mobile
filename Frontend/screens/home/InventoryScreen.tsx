@@ -146,6 +146,10 @@ type MobileActionType = (typeof MOBILE_ACTION_TYPES)[number];
 
 const INVENTORY_VIEW_ONLY_MESSAGE = 'You have view-only access to Inventory.';
 const INVENTORY_NO_ACCESS_MESSAGE = 'You do not have permission to access Inventory.';
+function getInventoryLogErrorMessage(message?: string | null) {
+  if (!message) return 'Material usage could not be recorded. Please try again.';
+  return message;
+}
 
 export default function InventoryScreen({
   projectId,
@@ -625,8 +629,8 @@ export default function InventoryScreen({
       if (result?.success === false) throw new Error(result.message || 'Material usage could not be recorded. Please try again.');
       await completeAddLogFlow();
     } catch (err: any) {
-      console.warn('INVENTORY_LOG_ERROR:', err?.message || err);
-      Alert.alert('Could not record usage', err?.message || 'Material usage could not be recorded. Please try again.');
+      const message = getInventoryLogErrorMessage(err?.message || err);
+      Alert.alert('Could not record usage', message);
     } finally {
       setSaving(false);
     }
