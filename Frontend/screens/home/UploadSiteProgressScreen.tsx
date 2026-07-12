@@ -920,7 +920,6 @@ export default function UploadSiteProgressScreen({
           submittedIds.push(material.id);
         }
         setMaterialsSheetVisible(false);
-        setMaterialQuantities({});
         setHasUnsavedChanges(false);
         setSubmitError(null);
         setDuplicateCheck(null);

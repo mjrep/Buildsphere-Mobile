@@ -85,7 +85,7 @@ async function compareSiteUpdatePhotos({ newImage, candidates }) {
       contents: [{ role: 'user', parts: [{ text: prompt }, { text: 'NEW IMAGE' }, { inlineData: { mimeType: newImage.mimeType, data: newImage.buffer.toString('base64') } }, ...previousParts] }],
       generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
     };
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL || 'gemini-3-flash-preview'}:generateContent?key=${keys[0].key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL || 'gemini-1.5-flash'}:generateContent?key=${keys[0].key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
     if (!response.ok) throw new Error('Gemini duplicate comparison failed.');
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
