@@ -232,21 +232,44 @@ function getSiteProgressImages(...values) {
 async function ensureSiteProgressImageColumns() {
   if (siteProgressImageSchemaReady) return;
 
-  await pool.query(`
-    ALTER TABLE task_progress_logs
-      ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'::jsonb
-  `);
-  await pool.query(`
-    ALTER TABLE task_progress_logs
-      ADD COLUMN IF NOT EXISTS duplicate_check_status TEXT,
-      ADD COLUMN IF NOT EXISTS duplicate_match_site_progress_id BIGINT,
-      ADD COLUMN IF NOT EXISTS duplicate_check_reason TEXT,
-      ADD COLUMN IF NOT EXISTS duplicate_checked_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS duplicate_user_override BOOLEAN NOT NULL DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS duplicate_override_reason TEXT,
-      ADD COLUMN IF NOT EXISTS duplicate_override_by BIGINT,
-      ADD COLUMN IF NOT EXISTS duplicate_review_status TEXT
-  `);
+  try {
+    await pool.query(`
+      ALTER TABLE task_progress_logs
+        ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS ai_detected_count INTEGER DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS verified_panel_count INTEGER DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS avg_confidence REAL DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS detection_mode VARCHAR(30) DEFAULT NULL,
+        ADD COLUMN IF NOT EXISTS ai_photo_counts JSONB DEFAULT NULL
+    `);
+  } catch (err) {
+    console.warn('Could not add image_urls/AI columns:', err.message);
+  }
+
+  try {
+    await pool.query(`
+      ALTER TABLE task_progress_logs
+        ALTER COLUMN milestone_id DROP NOT NULL
+    `);
+  } catch (err) {
+    // Ignore error if column doesn't exist or already dropped constraint
+  }
+
+  try {
+    await pool.query(`
+      ALTER TABLE task_progress_logs
+        ADD COLUMN IF NOT EXISTS duplicate_check_status TEXT,
+        ADD COLUMN IF NOT EXISTS duplicate_match_site_progress_id BIGINT,
+        ADD COLUMN IF NOT EXISTS duplicate_check_reason TEXT,
+        ADD COLUMN IF NOT EXISTS duplicate_checked_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS duplicate_user_override BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS duplicate_override_reason TEXT,
+        ADD COLUMN IF NOT EXISTS duplicate_override_by BIGINT,
+        ADD COLUMN IF NOT EXISTS duplicate_review_status TEXT
+    `);
+  } catch (err) {
+    console.warn('Could not add duplicate_check columns:', err.message);
+  }
 
   siteProgressImageSchemaReady = true;
 }
