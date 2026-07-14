@@ -1816,11 +1816,6 @@ export default function UploadSiteProgressScreen({
                           Uploaded on: {formatDateOnlyDisplay(duplicateCheck.matched_upload.created_at)}
                         </Text>
                       ) : null}
-                      {duplicateCheck.matched_upload.work_date ? (
-                        <Text className="text-[12px]" style={{ color: theme.textMuted }}>
-                          Linked work date: {formatDateOnlyDisplay(duplicateCheck.matched_upload.work_date)}
-                        </Text>
-                      ) : null}
                     </View>
                   ) : null}
                 </View>
