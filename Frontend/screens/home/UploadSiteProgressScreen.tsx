@@ -1813,7 +1813,10 @@ export default function UploadSiteProgressScreen({
                       <Image source={{ uri: duplicateCheck.matched_upload.image_url }} className="h-52 w-full rounded-2xl" resizeMode="cover" />
                       {duplicateCheck.matched_upload.created_at ? (
                         <Text className="mt-2 text-[12px]" style={{ color: theme.textMuted }}>
-                          Uploaded on: {formatDateOnlyDisplay(duplicateCheck.matched_upload.created_at)}
+                          Uploaded on: {(() => {
+                            const d = new Date(duplicateCheck.matched_upload.created_at);
+                            return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+                          })()}
                         </Text>
                       ) : null}
                     </View>
