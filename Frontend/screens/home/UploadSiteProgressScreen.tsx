@@ -1811,9 +1811,14 @@ export default function UploadSiteProgressScreen({
                     <View>
                       <Text className="mb-2 text-[12px] font-semibold" style={{ color: theme.textSecondary }}>Previous Site Update</Text>
                       <Image source={{ uri: duplicateCheck.matched_upload.image_url }} className="h-52 w-full rounded-2xl" resizeMode="cover" />
-                      {duplicateCheck.matched_upload.work_date ? (
+                      {duplicateCheck.matched_upload.created_at ? (
                         <Text className="mt-2 text-[12px]" style={{ color: theme.textMuted }}>
-                          Previous upload: {formatDateOnlyDisplay(duplicateCheck.matched_upload.work_date)}
+                          Uploaded on: {formatDateOnlyDisplay(duplicateCheck.matched_upload.created_at)}
+                        </Text>
+                      ) : null}
+                      {duplicateCheck.matched_upload.work_date ? (
+                        <Text className="text-[12px]" style={{ color: theme.textMuted }}>
+                          Linked work date: {formatDateOnlyDisplay(duplicateCheck.matched_upload.work_date)}
                         </Text>
                       ) : null}
                     </View>

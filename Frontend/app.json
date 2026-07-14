@@ -55,7 +55,10 @@
       "reactCompiler": true
     },
     "extra": {
-      "router": {}
+      "router": {},
+      "eas": {
+        "projectId": "edb7e810-244b-4df8-827f-396722c2e9bb"
+      }
     },
     "owner": "micrep"
   }
