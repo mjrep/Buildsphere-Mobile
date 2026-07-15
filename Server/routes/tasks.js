@@ -173,6 +173,7 @@ function formatTask(row) {
     milestone_target_quantity: row.milestone_target_quantity ?? row.target_quantity ?? null,
     milestone_current_quantity: row.milestone_current_quantity ?? row.current_quantity ?? null,
     milestone_unit_of_measure: row.milestone_unit_of_measure ?? row.unit_of_measure ?? null,
+    current_quantity: row.task_calculated_quantity ?? row.current_quantity ?? null,
     start_date: normalizeDateForInput(row.start_date),
     due_date: normalizeDateForInput(row.due_date),
   };
@@ -599,7 +600,12 @@ router.get('/project/:projectId', async (req, res) => {
          pm.target_quantity as milestone_target_quantity,
          pm.current_quantity as milestone_current_quantity,
          pm.unit_of_measure as milestone_unit_of_measure,
-         u.first_name || ' ' || u.last_name as assigned_to_name
+         u.first_name || ' ' || u.last_name as assigned_to_name,
+         (
+           SELECT COALESCE(SUM(COALESCE(verified_panel_count, quantity_accomplished, 0)), 0)
+           FROM task_progress_logs
+           WHERE task_id = t.id
+         ) as task_calculated_quantity
        FROM tasks t
        LEFT JOIN projects p ON t.project_id = p.id
        LEFT JOIN project_milestones pm ON t.milestone_id = pm.id

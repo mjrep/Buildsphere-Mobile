@@ -134,7 +134,7 @@ export default function TaskDetailScreen({
   if (!task) return null;
   const perms = getPermissions(userRole);
   const hasQuantityTracking = truthyFlag(task.milestone_has_quantity ?? task.has_quantity);
-  const quantityCurrent = finiteNumber(task.milestone_current_quantity ?? task.current_quantity);
+  const quantityCurrent = finiteNumber(task.current_quantity ?? task.milestone_current_quantity);
   const quantityTarget = finiteNumber(task.milestone_target_quantity ?? task.target_quantity);
   const quantityUnit = task.milestone_unit_of_measure || task.unit_of_measure || 'units';
   const quantityPercent =
