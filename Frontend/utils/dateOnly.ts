@@ -7,7 +7,15 @@
 export function parseDateOnly(value?: string | null) {
   if (!value) return null;
 
-  const dateString = String(value).split('T')[0];
+  const strValue = String(value);
+  if (strValue.includes('T')) {
+    const dateObj = new Date(strValue);
+    if (!isNaN(dateObj.getTime())) {
+      return new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+    }
+  }
+
+  const dateString = strValue.split('T')[0];
   const [year, month, day] = dateString.split('-').map(Number);
   if (!year || !month || !day) return null;
 
@@ -27,7 +35,18 @@ export function toDateOnlyString(date: Date | null) {
 export function normalizeDateOnlyString(value?: string | null) {
   if (!value) return '';
 
-  const dateString = String(value).split('T')[0];
+  const strValue = String(value);
+  if (strValue.includes('T')) {
+    const dateObj = new Date(strValue);
+    if (!isNaN(dateObj.getTime())) {
+      const year = dateObj.getFullYear();
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  const dateString = strValue.split('T')[0];
   const [year, month, day] = dateString.split('-');
   if (!year || !month || !day) return dateString;
 
