@@ -353,7 +353,7 @@ async function fetchAssignedTasks(userId) {
          (
            SELECT COALESCE(SUM(COALESCE(verified_panel_count, quantity_accomplished, 0)), 0)
            FROM task_progress_logs
-           WHERE task_id = t.id
+           WHERE task_id = t.id AND ai_verification_status = 'approved'
          ) as task_calculated_quantity
        FROM "public"."tasks" t
        LEFT JOIN "public"."projects" p ON t.project_id = p.id
@@ -609,7 +609,7 @@ router.get('/project/:projectId', async (req, res) => {
          (
            SELECT COALESCE(SUM(COALESCE(verified_panel_count, quantity_accomplished, 0)), 0)
            FROM task_progress_logs
-           WHERE task_id = t.id
+           WHERE task_id = t.id AND ai_verification_status = 'approved'
          ) as task_calculated_quantity
        FROM tasks t
        LEFT JOIN projects p ON t.project_id = p.id
@@ -805,7 +805,7 @@ router.post(
          (
            SELECT COALESCE(SUM(COALESCE(verified_panel_count, quantity_accomplished, 0)), 0)
            FROM task_progress_logs
-           WHERE task_id = t.id
+           WHERE task_id = t.id AND ai_verification_status = 'approved'
          ) as task_calculated_quantity
        FROM tasks t
        LEFT JOIN projects p ON t.project_id = p.id
@@ -994,7 +994,7 @@ router.patch('/:id', async (req, res) => {
          (
            SELECT COALESCE(SUM(COALESCE(verified_panel_count, quantity_accomplished, 0)), 0)
            FROM task_progress_logs
-           WHERE task_id = t.id
+           WHERE task_id = t.id AND ai_verification_status = 'approved'
          ) as task_calculated_quantity
        FROM tasks t
        LEFT JOIN projects p ON t.project_id = p.id

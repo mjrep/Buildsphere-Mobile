@@ -47,7 +47,7 @@ async function syncQuantityTaskStatus(pool, milestoneId) {
   const quantityResult = await pool.query(
     `SELECT COALESCE(SUM(COALESCE(verified_panel_count, quantity_accomplished, 0)), 0) as current_quantity
      FROM task_progress_logs
-     WHERE milestone_id = $1`,
+     WHERE milestone_id = $1 AND ai_verification_status = 'approved'`,
     [milestoneId]
   );
 
