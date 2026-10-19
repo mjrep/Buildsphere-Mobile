@@ -6,7 +6,7 @@
     "start": "expo start -c --go",
     "start:android-localhost": "node ./scripts/start-android-localhost.js",
     "start:clear": "expo start -c --go",
-    "start:tunnel": "expo start -c --tunnel",
+    "start:tunnel": "expo start -c --tunnel --go",
     "start:go": "expo start -c --go",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
