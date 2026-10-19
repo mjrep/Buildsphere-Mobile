@@ -260,13 +260,24 @@ export default function InventoryScreen({
     setError(null);
     if (showSkeleton) setLoading(true);
     try {
-      const [itemsData, logsData] = await Promise.all([fetchItems(), fetchLogs()]);
-      setItems(Array.isArray(itemsData) ? itemsData : []);
-      setLogs(Array.isArray(logsData) ? logsData : []);
+      const [itemsResult, logsResult] = await Promise.allSettled([fetchItems(), fetchLogs()]);
+
+      if (itemsResult.status === 'fulfilled') {
+        setItems(Array.isArray(itemsResult.value) ? itemsResult.value : []);
+      } else {
+        setError(itemsResult.reason?.message || 'Could not load inventory items.');
+      }
+
+      if (logsResult.status === 'fulfilled') {
+        setLogs(Array.isArray(logsResult.value) ? logsResult.value : []);
+      } else {
+        qaDebug('Inventory logs load error', { error: logsResult.reason?.message });
+      }
+
       qaDebug('Inventory loaded', {
         projectId,
-        itemCount: Array.isArray(itemsData) ? itemsData.length : 0,
-        logCount: Array.isArray(logsData) ? logsData.length : 0,
+        itemCount: itemsResult.status === 'fulfilled' && Array.isArray(itemsResult.value) ? itemsResult.value.length : 0,
+        logCount: logsResult.status === 'fulfilled' && Array.isArray(logsResult.value) ? logsResult.value.length : 0,
       });
     } catch (err: any) {
       setError(err?.message || 'Could not load inventory data.');

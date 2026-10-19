@@ -386,8 +386,8 @@ router.get('/logs', async (req, res) => {
         i.category,
         i.unit,
         p.id AS project_id,
-        COALESCE(p.project_name, p.name) AS project_name,
-        COALESCE(p.address, p.location) AS location,
+        p.project_name AS project_name,
+        p.address AS location,
         u.id AS actor_user_id,
         COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.email) AS actor_name,
         t.title AS task_title
